@@ -28,6 +28,7 @@ import {
   formatDateTime,
   formatVehicle,
   parseDollarsToCents,
+  quoteValueCents,
 } from '../../lib/format'
 import type { QuoteBundle, TemplateType } from '../../types'
 
@@ -126,9 +127,7 @@ export default function QuoteDetailPage() {
         </div>
         <div className="text-right">
           <p className="text-sm font-semibold tracking-wide text-zinc-500 uppercase">Quote value</p>
-          <p className="text-3xl font-black text-ink">
-            {formatCurrency(options.length ? Math.max(...options.map((o) => o.priceCents)) : 0)}
-          </p>
+          <p className="text-3xl font-black text-ink">{formatCurrency(quoteValueCents(options))}</p>
           {quote.wonAmountCents !== null ? (
             <p className="text-base font-bold text-green-700">Won at {formatCurrency(quote.wonAmountCents)}</p>
           ) : null}
@@ -349,7 +348,7 @@ export default function QuoteDetailPage() {
       <MarkWonModal
         open={wonOpen}
         onClose={() => setWonOpen(false)}
-        defaultCents={options.length ? Math.max(...options.map((o) => o.priceCents)) : 0}
+        defaultCents={quoteValueCents(options)}
         onConfirm={async (cents) => {
           await repo.setQuoteStatus(quote.id, 'won', cents)
           setWonOpen(false)
