@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type {
+  CatalogItem,
   Customer,
   EmailMessage,
   Employee,
@@ -15,7 +16,7 @@ import type {
   Shop,
   TemplateType,
 } from '../types'
-import type { DataRepository, NewQuoteInput, SendEmailResult, ShopSettingsPatch } from './repository'
+import type { DataRepository, NewCatalogItemInput, NewQuoteInput, SendEmailResult, ShopSettingsPatch } from './repository'
 
 // Production repository. Row-level security scopes every query to shops the
 // signed-in user belongs to; the anonymous public page goes through
@@ -153,6 +154,18 @@ function mapEmail(r: Row): EmailMessage {
   }
 }
 
+function mapCatalogItem(r: Row): CatalogItem {
+  return {
+    id: r.id,
+    shopId: r.shop_id,
+    brand: r.brand,
+    model: r.model,
+    name: r.name,
+    defaultPriceCents: r.default_price_cents,
+    position: r.position,
+  }
+}
+
 const QUOTE_SELECT = `*, customers(*), quote_options(*, quote_items(*)), quote_events(*), quote_responses(*), email_messages(*)`
 
 function mapBundle(r: Row): QuoteBundle {
@@ -218,6 +231,58 @@ export class SupabaseRepository implements DataRepository {
       fullName: r.profiles?.full_name ?? 'Team member',
       role: r.role,
     }))
+  }
+
+  async listCatalogItems(): Promise<CatalogItem[]> {
+    const { data, error } = await this.supabase
+      .from('catalog_items')
+      .select('*')
+      .eq('shop_id', this.shopId)
+      .order('position', { ascending: true })
+    if (error) throw error
+    return (data as Row[]).map(mapCatalogItem)
+  }
+
+  async createCatalogItem(input: NewCatalogItemInput): Promise<CatalogItem> {
+    const { count } = await this.supabase
+      .from('catalog_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('shop_id', this.shopId)
+    const { data, error } = await this.supabase
+      .from('catalog_items')
+      .insert({
+        shop_id: this.shopId,
+        brand: input.brand,
+        model: input.model,
+        name: input.name,
+        default_price_cents: input.defaultPriceCents,
+        position: count ?? 0,
+      })
+      .select('*')
+      .single()
+    if (error) throw error
+    return mapCatalogItem(data)
+  }
+
+  async updateCatalogItem(itemId: string, input: NewCatalogItemInput): Promise<CatalogItem> {
+    const { data, error } = await this.supabase
+      .from('catalog_items')
+      .update({
+        brand: input.brand,
+        model: input.model,
+        name: input.name,
+        default_price_cents: input.defaultPriceCents,
+      })
+      .eq('id', itemId)
+      .select('*')
+      .single()
+    if (error) throw error
+    return mapCatalogItem(data)
+  }
+
+  async deleteCatalogItem(itemId: string): Promise<void> {
+    const { error } = await this.supabase.from('catalog_items').delete().eq('id', itemId)
+    if (error) throw error
   }
 
   async listQuoteBundles(): Promise<QuoteBundle[]> {

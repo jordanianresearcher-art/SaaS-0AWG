@@ -1,15 +1,17 @@
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useFieldArray, useForm, type Control, type FieldErrors, type UseFormRegister } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { addDays, format } from 'date-fns'
-import { Plus, Trash2 } from 'lucide-react'
+import { Package, Plus, Trash2 } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
-import { Button, Card, Field, Input, Select, Textarea } from '../../components/ui'
+import { Button, Card, Field, Input, Modal, Select, Textarea } from '../../components/ui'
 import { parseDollarsToCents } from '../../lib/format'
+import { COMMON_MAKES, OTHER_MAKE, VEHICLE_YEARS, fetchModelsForMakeYear } from '../../lib/vehicleData'
 import type { NewQuoteInput } from '../../data/repository'
-import type { Tier } from '../../types'
+import type { CatalogItem, QuoteBundle, Tier } from '../../types'
 
 const itemSchema = z.object({
   brand: z.string(),
@@ -76,11 +78,52 @@ function emptyOption(index: number): FormValues['options'][number] {
   }
 }
 
+function optionsFromBundle(bundle: QuoteBundle): FormValues['options'] {
+  return bundle.options.map((o) => ({
+    tier: o.tier,
+    name: o.name,
+    description: o.description,
+    price: (o.priceCents / 100).toString(),
+    laborIncluded: o.laborIncluded,
+    depositLink: o.depositLink ?? '',
+    items: o.items.map((i) => ({ brand: i.brand ?? '', model: i.model ?? '', name: i.name, quantity: i.quantity })),
+  }))
+}
+
 export default function NewQuotePage() {
   const repo = useRepo()
-  const { shop, refresh } = useAppData()
+  const { shop, bundles, refresh } = useAppData()
   const toast = useToast()
   const navigate = useNavigate()
+  const location = useLocation()
+  const duplicateFrom = (location.state as { duplicateFrom?: QuoteBundle } | null)?.duplicateFrom
+
+  const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([])
+  useEffect(() => {
+    void repo.listCatalogItems().then(setCatalogItems)
+  }, [repo])
+
+  // Suggestions for brand/model/item-name, drawn from this shop's own quote
+  // history (already loaded for the dashboard — no extra query needed).
+  const itemHistory = useMemo(() => {
+    const brands = new Set<string>()
+    const models = new Set<string>()
+    const names = new Set<string>()
+    for (const b of bundles) {
+      for (const o of b.options) {
+        for (const i of o.items) {
+          if (i.brand) brands.add(i.brand)
+          if (i.model) models.add(i.model)
+          if (i.name) names.add(i.name)
+        }
+      }
+    }
+    return {
+      brands: Array.from(brands).sort(),
+      models: Array.from(models).sort(),
+      names: Array.from(names).sort(),
+    }
+  }, [bundles])
 
   const defaultExpiration = format(addDays(new Date(), shop?.quoteExpirationDays ?? 30), 'yyyy-MM-dd')
 
@@ -88,25 +131,47 @@ export default function NewQuotePage() {
     register,
     control,
     handleSubmit,
+    setValue,
+    watch,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: {
-      firstName: '',
-      lastName: '',
-      email: '',
-      phone: '',
-      vehicleTrim: '',
-      source: '',
-      expirationDate: defaultExpiration,
-      internalNotes: '',
-      nextFollowUpAt: '',
-      options: [emptyOption(0), emptyOption(1)],
-      recommendedIndex: 1,
-    },
+    defaultValues: duplicateFrom
+      ? {
+          firstName: '',
+          lastName: '',
+          email: '',
+          phone: '',
+          vehicleYear: duplicateFrom.customer.vehicleYear,
+          vehicleMake: duplicateFrom.customer.vehicleMake,
+          vehicleModel: duplicateFrom.customer.vehicleModel,
+          vehicleTrim: duplicateFrom.customer.vehicleTrim ?? '',
+          source: duplicateFrom.customer.source ?? '',
+          expirationDate: defaultExpiration,
+          internalNotes: '',
+          nextFollowUpAt: '',
+          options: optionsFromBundle(duplicateFrom),
+          recommendedIndex: Math.max(0, duplicateFrom.options.findIndex((o) => o.recommended)),
+        }
+      : {
+          firstName: '',
+          lastName: '',
+          email: '',
+          phone: '',
+          vehicleTrim: '',
+          source: '',
+          expirationDate: defaultExpiration,
+          internalNotes: '',
+          nextFollowUpAt: '',
+          options: [emptyOption(0), emptyOption(1)],
+          recommendedIndex: 1,
+        },
   })
 
   const { fields: optionFields, append, remove } = useFieldArray({ control, name: 'options' })
+
+  const watchedMake = watch('vehicleMake')
+  const [customMake, setCustomMake] = useState(() => Boolean(duplicateFrom && !COMMON_MAKES.includes(duplicateFrom.customer.vehicleMake)))
 
   const onSubmit = async (values: FormValues) => {
     const input: NewQuoteInput = {
@@ -147,8 +212,8 @@ export default function NewQuotePage() {
     try {
       const quote = await repo.createQuote(input)
       await refresh()
-      toast('success', 'Quote created. Now preview and send the email.')
-      navigate(`/app/quotes/${quote.id}`)
+      toast('success', 'Quote created. Review the email and send it.')
+      navigate(`/app/quotes/${quote.id}`, { state: { openEmailPreview: true } })
     } catch {
       toast('error', 'Could not save the quote. Please try again.')
     }
@@ -162,6 +227,12 @@ export default function NewQuotePage() {
           Fill this out while the customer is in the shop or right after the call. Then email it before they change their mind.
         </p>
       </div>
+
+      {duplicateFrom ? (
+        <div className="rounded-xl bg-blue-50 p-4 text-base font-medium text-ink">
+          Duplicated from {duplicateFrom.customer.firstName}&apos;s quote — update the customer info below.
+        </div>
+      ) : null}
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-6" noValidate>
         <Card className="space-y-4">
@@ -182,14 +253,62 @@ export default function NewQuotePage() {
           </Field>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <Field label="Year" htmlFor="q-year" error={errors.vehicleYear?.message} required>
-              <Input id="q-year" type="number" inputMode="numeric" placeholder="2022" {...register('vehicleYear')} />
+              <Select id="q-year" defaultValue="" {...register('vehicleYear')}>
+                <option value="" disabled>
+                  Year
+                </option>
+                {VEHICLE_YEARS.map((y) => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                ))}
+              </Select>
             </Field>
             <Field label="Make" htmlFor="q-make" error={errors.vehicleMake?.message} required>
-              <Input id="q-make" placeholder="Ford" {...register('vehicleMake')} />
+              {customMake ? (
+                <div className="flex gap-1.5">
+                  <Input id="q-make" placeholder="Make" {...register('vehicleMake')} />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomMake(false)
+                      setValue('vehicleMake', '')
+                    }}
+                    className="shrink-0 whitespace-nowrap px-2 text-sm font-semibold text-brand"
+                  >
+                    List
+                  </button>
+                </div>
+              ) : (
+                <Select
+                  id="q-make"
+                  defaultValue=""
+                  {...register('vehicleMake', {
+                    onChange: (e) => {
+                      if (e.target.value === OTHER_MAKE) {
+                        setCustomMake(true)
+                        setValue('vehicleMake', '')
+                      }
+                    },
+                  })}
+                >
+                  <option value="" disabled>
+                    Make
+                  </option>
+                  {COMMON_MAKES.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </Select>
+              )}
             </Field>
-            <Field label="Model" htmlFor="q-model" error={errors.vehicleModel?.message} required>
-              <Input id="q-model" placeholder="F-150" {...register('vehicleModel')} />
-            </Field>
+            <ModelField
+              register={register}
+              error={errors.vehicleModel?.message}
+              year={watch('vehicleYear')}
+              make={watchedMake}
+            />
             <Field label="Trim" htmlFor="q-trim">
               <Input id="q-trim" placeholder="Lariat" {...register('vehicleTrim')} />
             </Field>
@@ -244,6 +363,8 @@ export default function NewQuotePage() {
               errors={errors}
               canRemove={optionFields.length > 1}
               onRemove={() => remove(index)}
+              catalogItems={catalogItems}
+              itemHistory={itemHistory}
             />
           ))}
           {typeof errors.options?.message === 'string' ? (
@@ -273,11 +394,56 @@ export default function NewQuotePage() {
             Cancel
           </Button>
           <Button type="submit" disabled={isSubmitting} className="sm:min-w-52">
-            {isSubmitting ? 'Saving…' : 'Save quote'}
+            {isSubmitting ? 'Saving…' : 'Save & review email'}
           </Button>
         </div>
       </form>
     </div>
+  )
+}
+
+function ModelField({
+  register,
+  error,
+  year,
+  make,
+}: {
+  register: UseFormRegister<FormValues>
+  error?: string
+  year: number
+  make: string
+}) {
+  const [suggestions, setSuggestions] = useState<string[]>([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!year || !make) {
+      setSuggestions([])
+      return
+    }
+    let cancelled = false
+    setLoading(true)
+    fetchModelsForMakeYear(make, year)
+      .then((models) => {
+        if (!cancelled) setSuggestions(models)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [year, make])
+
+  return (
+    <Field label="Model" htmlFor="q-model" error={error} hint={loading ? 'Looking up models…' : undefined} required>
+      <Input id="q-model" list="q-model-suggestions" placeholder="F-150" {...register('vehicleModel')} />
+      <datalist id="q-model-suggestions">
+        {suggestions.map((m) => (
+          <option key={m} value={m} />
+        ))}
+      </datalist>
+    </Field>
   )
 }
 
@@ -288,6 +454,8 @@ function OptionEditor({
   errors,
   canRemove,
   onRemove,
+  catalogItems,
+  itemHistory,
 }: {
   index: number
   control: Control<FormValues>
@@ -295,9 +463,16 @@ function OptionEditor({
   errors: FieldErrors<FormValues>
   canRemove: boolean
   onRemove: () => void
+  catalogItems: CatalogItem[]
+  itemHistory: { brands: string[]; models: string[]; names: string[] }
 }) {
   const { fields: itemFields, append, remove } = useFieldArray({ control, name: `options.${index}.items` })
   const optionErrors = errors.options?.[index]
+  const [catalogOpen, setCatalogOpen] = useState(false)
+
+  const brandListId = `brand-suggestions-${index}`
+  const modelListId = `model-suggestions-${index}`
+  const nameListId = `name-suggestions-${index}`
 
   return (
     <fieldset className="rounded-xl border border-zinc-200 p-4">
@@ -322,14 +497,40 @@ function OptionEditor({
 
         <div>
           <p className="mb-1.5 text-base font-semibold text-ink">Products</p>
+          <datalist id={brandListId}>
+            {itemHistory.brands.map((b) => (
+              <option key={b} value={b} />
+            ))}
+          </datalist>
+          <datalist id={modelListId}>
+            {itemHistory.models.map((m) => (
+              <option key={m} value={m} />
+            ))}
+          </datalist>
+          <datalist id={nameListId}>
+            {itemHistory.names.map((n) => (
+              <option key={n} value={n} />
+            ))}
+          </datalist>
           <div className="space-y-2">
             {itemFields.map((item, j) => (
               <div key={item.id} className="grid grid-cols-[1fr_1fr_auto] gap-2 sm:grid-cols-[1fr_1fr_2fr_4.5rem_auto]">
-                <Input aria-label="Brand" placeholder="Brand" {...register(`options.${index}.items.${j}.brand`)} />
-                <Input aria-label="Model" placeholder="Model #" {...register(`options.${index}.items.${j}.model`)} />
+                <Input
+                  aria-label="Brand"
+                  placeholder="Brand"
+                  list={brandListId}
+                  {...register(`options.${index}.items.${j}.brand`)}
+                />
+                <Input
+                  aria-label="Model"
+                  placeholder="Model #"
+                  list={modelListId}
+                  {...register(`options.${index}.items.${j}.model`)}
+                />
                 <Input
                   aria-label="Item name"
                   placeholder="What is it? (e.g. 12-inch subwoofer)"
+                  list={nameListId}
                   className="col-span-2 sm:col-span-1"
                   {...register(`options.${index}.items.${j}.name`)}
                 />
@@ -357,9 +558,16 @@ function OptionEditor({
               {optionErrors.items[0].name.message}
             </p>
           ) : null}
-          <Button variant="ghost" className="mt-2" onClick={() => append({ brand: '', model: '', name: '', quantity: 1 })}>
-            <Plus className="h-5 w-5" aria-hidden="true" /> Add product
-          </Button>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button variant="ghost" onClick={() => append({ brand: '', model: '', name: '', quantity: 1 })}>
+              <Plus className="h-5 w-5" aria-hidden="true" /> Add product
+            </Button>
+            {catalogItems.length > 0 ? (
+              <Button variant="ghost" onClick={() => setCatalogOpen(true)}>
+                <Package className="h-5 w-5" aria-hidden="true" /> From catalog
+              </Button>
+            ) : null}
+          </div>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
@@ -386,6 +594,37 @@ function OptionEditor({
           ) : null}
         </div>
       </div>
+
+      <Modal open={catalogOpen} onClose={() => setCatalogOpen(false)} title="Insert from catalog">
+        <ul className="divide-y divide-zinc-100">
+          {catalogItems.map((catalogItem) => (
+            <li key={catalogItem.id}>
+              <button
+                type="button"
+                onClick={() => {
+                  append({
+                    brand: catalogItem.brand ?? '',
+                    model: catalogItem.model ?? '',
+                    name: catalogItem.name,
+                    quantity: 1,
+                  })
+                  setCatalogOpen(false)
+                }}
+                className="flex min-h-14 w-full items-center gap-3 py-2.5 text-left hover:bg-zinc-50"
+              >
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-brand">
+                  <Package className="h-5 w-5" aria-hidden="true" />
+                </span>
+                <span className="text-base font-semibold text-ink">
+                  {[catalogItem.brand, catalogItem.model].filter(Boolean).join(' ')}
+                  {catalogItem.brand || catalogItem.model ? ' — ' : ''}
+                  {catalogItem.name}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </Modal>
     </fieldset>
   )
 }

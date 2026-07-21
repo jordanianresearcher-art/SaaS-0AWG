@@ -232,3 +232,64 @@ a domain identity mix-up got sorted out.
 
 No code changes this round beyond the Edge Function import fix — everything
 else was live infrastructure configuration (Resend, Supabase Auth, secrets).
+
+---
+
+## Round 5 — Faster quote creation without losing detail
+
+After sending their first real quote, the user asked to brainstorm making
+quote creation and sending faster/easier — with a hard constraint: never at
+the cost of losing itemized detail. The fix had to be *reuse of what's
+already typed*, not *removal of fields*. Five features came out of that
+brainstorm and are now built:
+
+### Done
+- **Shop-managed item catalog.** New `catalog_items` table (migration
+  `0003_catalog_items.sql`, RLS mirrors `customers_all` — any shop member
+  can manage it) plus full `DataRepository` CRUD (demo + Supabase). A new
+  "Product catalog" section in Settings lets a shop save common products
+  once (brand/model/name/usual price) and a "From catalog" button in the
+  quote option editor inserts one as a pre-filled item row instead of
+  retyping brand/model every time.
+- **Duplicate Quote.** A "Duplicate" button on the quote detail page
+  carries vehicle info and every option/item over into a fresh New Quote
+  form, but leaves the customer's name/email and permission checkbox blank
+  so a new customer's consent is always re-confirmed.
+- **Autocomplete from history.** Brand/model/item-name fields on the quote
+  form now suggest from every item ever entered for the shop (derived from
+  already-loaded quote data, no new query), via plain `<datalist>` — never
+  blocks free typing.
+- **Save & Send in one step, preview still mandatory.** Saving a quote now
+  auto-opens the email preview immediately instead of requiring a separate
+  navigate-and-click. The preview modal still requires an explicit tap on
+  **Send email** — this only removes a redundant step, it never sends
+  automatically.
+- **Metra-style vehicle picker.** Year and Make are now `<select>` dropdowns
+  (curated list of ~30 real passenger makes, not NHTSA's raw ~12,300-entry
+  list, which is mostly trailers/custom shops); Model is a free-text field
+  with `<datalist>` suggestions pulled live from NHTSA's public vPIC API
+  (`getmodelsformakeyear`). NHTSA does fuzzy substring matching on make name
+  (a "Ford" query surfaces "ASHFORD MFG", "BRADFORD BUILT", etc. ahead of
+  real Ford models) — fixed with an exact-match filter on `Make_Name`
+  before showing suggestions. Trim stays free text (no reliable free data
+  source for trim levels). Never blocks quote creation: a network hiccup
+  or NHTSA outage just degrades to a plain text field, no error shown.
+
+### Verification (this round)
+- `npm run lint`, `npx tsc -b --noEmit`, `npm run test -- --run` (90/90
+  across 9 files, including new `vehicleData.test.ts` covering the fuzzy-
+  match filter with a real captured NHTSA response, dedup/sort, case
+  insensitivity, and graceful `[]` fallback on fetch failure), and
+  `npm run build` all clean.
+- Playwright smoke test against a `vite preview` build covering the full
+  new flow end to end: enter demo mode → Settings shows the seeded catalog
+  → add a catalog item → New Quote's Year/Make selects + NHTSA-backed Model
+  suggestions → "From catalog" inserts a pre-filled item → Save & Send
+  auto-opens the email preview (subject line confirms the vehicle data
+  flowed through: "Your 2021 Ford F-150 audio quote from Big Tex Audio") →
+  Duplicate carries options over while leaving the customer name blank.
+  All 8 checks passed.
+- Migration `0003_catalog_items.sql` applied to the live Supabase project
+  via the Management API (same direct route used for `0001`/`0002`, since
+  the CLI still can't reach this sandbox's proxy) — confirmed the table,
+  its columns, and its RLS policy all exist as expected.

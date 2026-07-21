@@ -98,6 +98,17 @@ export interface QuoteItem {
   position: number
 }
 
+/** A shop-saved product staff can reuse across quotes instead of retyping it. */
+export interface CatalogItem {
+  id: string
+  shopId: string
+  brand: string | null
+  model: string | null
+  name: string
+  defaultPriceCents: number | null
+  position: number
+}
+
 export interface QuoteOption {
   id: string
   quoteId: string

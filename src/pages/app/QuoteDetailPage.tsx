@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { format } from 'date-fns'
 import {
   ArrowLeft,
@@ -9,6 +9,7 @@ import {
   Copy,
   DollarSign,
   ExternalLink,
+  Files,
   Mail,
   Phone,
   Printer,
@@ -37,6 +38,8 @@ export default function QuoteDetailPage() {
   const repo = useRepo()
   const { refresh } = useAppData()
   const toast = useToast()
+  const navigate = useNavigate()
+  const location = useLocation()
   const [bundle, setBundle] = useState<QuoteBundle | null>(null)
   const [notFound, setNotFound] = useState(false)
   const [emailOpen, setEmailOpen] = useState(false)
@@ -55,6 +58,16 @@ export default function QuoteDetailPage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  // "Save & review email" from the create-quote form lands here with a flag
+  // to open the preview immediately — still requires an explicit Send tap.
+  useEffect(() => {
+    if ((location.state as { openEmailPreview?: boolean } | null)?.openEmailPreview) {
+      setEmailOpen(true)
+      navigate(location.pathname, { replace: true, state: {} })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only run once per navigation, consuming location.state
+  }, [])
 
   const reloadAll = useCallback(async () => {
     await load()
@@ -191,6 +204,9 @@ export default function QuoteDetailPage() {
           </Button>
           <Button variant="ghost" onClick={() => window.print()}>
             <Printer className="h-5 w-5" aria-hidden="true" /> Print quote
+          </Button>
+          <Button variant="ghost" onClick={() => navigate('/app/quotes/new', { state: { duplicateFrom: bundle } })}>
+            <Files className="h-5 w-5" aria-hidden="true" /> Duplicate
           </Button>
           {customer.phone ? (
             <a

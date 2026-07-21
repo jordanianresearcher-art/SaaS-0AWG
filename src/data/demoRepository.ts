@@ -1,4 +1,5 @@
 import type {
+  CatalogItem,
   Customer,
   Employee,
   PublicQuote,
@@ -11,7 +12,7 @@ import type {
   Shop,
   TemplateType,
 } from '../types'
-import type { DataRepository, NewQuoteInput, SendEmailResult, ShopSettingsPatch } from './repository'
+import type { DataRepository, NewCatalogItemInput, NewQuoteInput, SendEmailResult, ShopSettingsPatch } from './repository'
 import { buildDemoData, DEMO_SEED_VERSION, type DemoDB } from './demoData'
 import { advanceStatus, applyStaffStatus, VALID_RESPONSE_TYPES } from '../lib/status'
 import { checkSendEligibility } from '../lib/eligibility'
@@ -118,6 +119,35 @@ export class DemoRepository implements DataRepository {
 
   async listEmployees(): Promise<Employee[]> {
     return this.db.employees
+  }
+
+  async listCatalogItems(): Promise<CatalogItem[]> {
+    return this.db.catalogItems.slice().sort((a, b) => a.position - b.position)
+  }
+
+  async createCatalogItem(input: NewCatalogItemInput): Promise<CatalogItem> {
+    const item: CatalogItem = {
+      id: newId(),
+      shopId: this.db.shop.id,
+      ...input,
+      position: this.db.catalogItems.length,
+    }
+    this.db.catalogItems.push(item)
+    this.persist()
+    return item
+  }
+
+  async updateCatalogItem(itemId: string, input: NewCatalogItemInput): Promise<CatalogItem> {
+    const item = this.db.catalogItems.find((i) => i.id === itemId)
+    if (!item) throw new Error('Catalog item not found')
+    Object.assign(item, input)
+    this.persist()
+    return item
+  }
+
+  async deleteCatalogItem(itemId: string): Promise<void> {
+    this.db.catalogItems = this.db.catalogItems.filter((i) => i.id !== itemId)
+    this.persist()
   }
 
   async listQuoteBundles(): Promise<QuoteBundle[]> {

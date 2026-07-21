@@ -1,4 +1,5 @@
 import type {
+  CatalogItem,
   Customer,
   EmailMessage,
   Employee,
@@ -75,12 +76,24 @@ export interface ShopSettingsPatch {
   quoteDisclaimer?: string
 }
 
+export interface NewCatalogItemInput {
+  brand: string | null
+  model: string | null
+  name: string
+  defaultPriceCents: number | null
+}
+
 export interface DataRepository {
   readonly mode: 'demo' | 'production'
 
   getShop(): Promise<Shop>
   updateShop(patch: ShopSettingsPatch): Promise<Shop>
   listEmployees(): Promise<Employee[]>
+
+  listCatalogItems(): Promise<CatalogItem[]>
+  createCatalogItem(input: NewCatalogItemInput): Promise<CatalogItem>
+  updateCatalogItem(itemId: string, input: NewCatalogItemInput): Promise<CatalogItem>
+  deleteCatalogItem(itemId: string): Promise<void>
 
   listQuoteBundles(): Promise<QuoteBundle[]>
   getQuoteBundle(quoteId: string): Promise<QuoteBundle | null>
@@ -108,4 +121,4 @@ export interface DataRepository {
   optOutPublicQuote(publicToken: string): Promise<void>
 }
 
-export type { Shop, Quote, QuoteBundle, Customer, QuoteOption, QuoteEvent, QuoteResponse, EmailMessage }
+export type { Shop, Quote, QuoteBundle, Customer, QuoteOption, QuoteEvent, QuoteResponse, EmailMessage, CatalogItem }

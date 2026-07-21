@@ -1,11 +1,14 @@
-import { useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { RotateCcw } from 'lucide-react'
+import { Package, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
-import { Button, Card, Field, Input, LoadingBlock, Textarea } from '../../components/ui'
+import { Button, Card, EmptyState, Field, Input, LoadingBlock, Modal, Textarea } from '../../components/ui'
+import { formatCurrency, parseDollarsToCents } from '../../lib/format'
+import type { CatalogItem } from '../../types'
+import type { NewCatalogItemInput } from '../../data/repository'
 
 const schema = z.object({
   name: z.string().min(2, 'Enter your shop name'),
@@ -148,6 +151,8 @@ export default function SettingsPage() {
         </Card>
       </form>
 
+      <CatalogSection />
+
       {mode === 'demo' ? (
         <Card className="space-y-3">
           <h2 className="text-xl font-bold text-ink">Demo data</h2>
@@ -166,5 +171,176 @@ export default function SettingsPage() {
         </Card>
       ) : null}
     </div>
+  )
+}
+
+const catalogSchema = z.object({
+  brand: z.string(),
+  model: z.string(),
+  name: z.string().min(1, 'Give this product a name'),
+  price: z.string().refine((v) => v === '' || parseDollarsToCents(v) !== null, 'Enter a valid dollar amount'),
+})
+type CatalogFormValues = z.infer<typeof catalogSchema>
+
+function toCatalogInput(values: CatalogFormValues): NewCatalogItemInput {
+  return {
+    brand: values.brand.trim() || null,
+    model: values.model.trim() || null,
+    name: values.name.trim(),
+    defaultPriceCents: values.price.trim() ? parseDollarsToCents(values.price) : null,
+  }
+}
+
+function CatalogSection() {
+  const repo = useRepo()
+  const toast = useToast()
+  const [items, setItems] = useState<CatalogItem[] | null>(null)
+  const [editing, setEditing] = useState<CatalogItem | 'new' | null>(null)
+
+  const load = useCallback(async () => {
+    setItems(await repo.listCatalogItems())
+  }, [repo])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors, isSubmitting },
+  } = useForm<CatalogFormValues>({ resolver: zodResolver(catalogSchema) })
+
+  const openEdit = (item: CatalogItem | 'new') => {
+    setEditing(item)
+    reset(
+      item === 'new'
+        ? { brand: '', model: '', name: '', price: '' }
+        : {
+            brand: item.brand ?? '',
+            model: item.model ?? '',
+            name: item.name,
+            price: item.defaultPriceCents !== null ? (item.defaultPriceCents / 100).toString() : '',
+          },
+    )
+  }
+
+  const onSubmit = async (values: CatalogFormValues) => {
+    try {
+      if (editing === 'new') {
+        await repo.createCatalogItem(toCatalogInput(values))
+        toast('success', 'Product added to your catalog.')
+      } else if (editing) {
+        await repo.updateCatalogItem(editing.id, toCatalogInput(values))
+        toast('success', 'Product updated.')
+      }
+      setEditing(null)
+      await load()
+    } catch {
+      toast('error', 'Could not save that product. Please try again.')
+    }
+  }
+
+  const onDelete = async (item: CatalogItem) => {
+    try {
+      await repo.deleteCatalogItem(item.id)
+      await load()
+      toast('success', 'Removed from your catalog.')
+    } catch {
+      toast('error', 'Could not remove that product. Please try again.')
+    }
+  }
+
+  return (
+    <Card className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-bold text-ink">Product catalog</h2>
+          <p className="text-base text-zinc-600">
+            Save products you sell often so you can add them to a quote with one tap instead of retyping them.
+          </p>
+        </div>
+        <Button onClick={() => openEdit('new')}>
+          <Plus className="h-5 w-5" aria-hidden="true" /> Add
+        </Button>
+      </div>
+
+      {items === null ? (
+        <LoadingBlock label="Loading catalog…" />
+      ) : items.length === 0 ? (
+        <EmptyState
+          title="No saved products yet"
+          message="Add the brands and models you install most — they'll show up as quick picks when building a quote."
+        />
+      ) : (
+        <ul className="divide-y divide-zinc-100">
+          {items.map((item) => (
+            <li key={item.id} className="flex items-center justify-between gap-3 py-3">
+              <div className="flex items-center gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-brand">
+                  <Package className="h-5 w-5" aria-hidden="true" />
+                </span>
+                <div>
+                  <p className="text-base font-bold text-ink">
+                    {[item.brand, item.model].filter(Boolean).join(' ')}
+                    {item.brand || item.model ? ' — ' : ''}
+                    {item.name}
+                  </p>
+                  {item.defaultPriceCents !== null ? (
+                    <p className="text-sm text-zinc-500">{formatCurrency(item.defaultPriceCents)}</p>
+                  ) : null}
+                </div>
+              </div>
+              <div className="flex shrink-0 gap-1">
+                <button
+                  type="button"
+                  aria-label={`Edit ${item.name}`}
+                  onClick={() => openEdit(item)}
+                  className="flex h-11 w-11 items-center justify-center rounded-xl text-zinc-500 hover:bg-zinc-100"
+                >
+                  <Pencil className="h-5 w-5" aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Remove ${item.name}`}
+                  onClick={() => void onDelete(item)}
+                  className="flex h-11 w-11 items-center justify-center rounded-xl text-zinc-400 hover:bg-red-50 hover:text-red-600"
+                >
+                  <Trash2 className="h-5 w-5" aria-hidden="true" />
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <Modal open={editing !== null} onClose={() => setEditing(null)} title={editing === 'new' ? 'Add product' : 'Edit product'}>
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Brand" htmlFor="cat-brand">
+              <Input id="cat-brand" {...register('brand')} placeholder="Kicker" />
+            </Field>
+            <Field label="Model" htmlFor="cat-model">
+              <Input id="cat-model" {...register('model')} placeholder="KEY200.4" />
+            </Field>
+          </div>
+          <Field label="What is it?" htmlFor="cat-name" error={errors.name?.message} required>
+            <Input id="cat-name" {...register('name')} placeholder="4-channel smart amp" />
+          </Field>
+          <Field
+            label="Usual price"
+            htmlFor="cat-price"
+            error={errors.price?.message}
+            hint="Optional. Just for your own reference when quoting."
+          >
+            <Input id="cat-price" inputMode="decimal" {...register('price')} placeholder="$249" />
+          </Field>
+          <Button type="submit" disabled={isSubmitting} className="w-full">
+            {isSubmitting ? 'Saving…' : 'Save product'}
+          </Button>
+        </form>
+      </Modal>
+    </Card>
   )
 }

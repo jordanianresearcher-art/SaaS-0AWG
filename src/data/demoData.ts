@@ -1,4 +1,5 @@
 import type {
+  CatalogItem,
   Customer,
   EmailMessage,
   Employee,
@@ -21,11 +22,12 @@ export interface DemoDB {
   events: QuoteEvent[]
   responses: QuoteResponse[]
   emails: EmailMessage[]
+  catalogItems: CatalogItem[]
   /** Bumped when the seed shape changes so stale localStorage is discarded. */
   seedVersion: number
 }
 
-export const DEMO_SEED_VERSION = 3
+export const DEMO_SEED_VERSION = 4
 
 const SHOP_ID = 'demo-shop'
 
@@ -514,5 +516,16 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
     })
   }
 
-  return { shop, employees, customers, quotes, options, events, responses, emails, seedVersion: DEMO_SEED_VERSION }
+  const catalogItems: CatalogItem[] = [
+    { id: 'demo-cat-1', shopId: SHOP_ID, brand: 'Kicker', model: 'KEY200.4', name: '4-channel smart amp', defaultPriceCents: 24900, position: 0 },
+    { id: 'demo-cat-2', shopId: SHOP_ID, brand: 'JL Audio', model: 'Stealthbox', name: 'Under-seat 10" subwoofer', defaultPriceCents: 54900, position: 1 },
+    { id: 'demo-cat-3', shopId: SHOP_ID, brand: 'Rockford Fosgate', model: 'T400X4ad', name: '4-channel amplifier', defaultPriceCents: 32900, position: 2 },
+    { id: 'demo-cat-4', shopId: SHOP_ID, brand: 'Alpine', model: 'iLX-W670', name: 'CarPlay receiver', defaultPriceCents: 44900, position: 3 },
+    { id: 'demo-cat-5', shopId: SHOP_ID, brand: 'Focal', model: 'PS 165', name: 'Front component speakers', defaultPriceCents: 29900, position: 4 },
+    { id: 'demo-cat-6', shopId: SHOP_ID, brand: 'Pioneer', model: 'TS-A652F', name: 'Front + rear speakers', defaultPriceCents: 12900, position: 5 },
+    { id: 'demo-cat-7', shopId: SHOP_ID, brand: 'MTX', model: 'TNP212D2', name: 'Dual 12" package with amp', defaultPriceCents: 39900, position: 6 },
+    { id: 'demo-cat-8', shopId: SHOP_ID, brand: 'JL Audio', model: '12TW3', name: 'Custom sub enclosure build', defaultPriceCents: 64900, position: 7 },
+  ]
+
+  return { shop, employees, customers, quotes, options, events, responses, emails, catalogItems, seedVersion: DEMO_SEED_VERSION }
 }
