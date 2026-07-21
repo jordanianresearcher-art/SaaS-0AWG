@@ -173,3 +173,62 @@ access token) and a real Resend API key, and asked to take the project live.
 - `supercaraudiodallas.com` still needs its Resend DNS records added at the
   domain's actual DNS provider (not Resend) before `EMAIL_FROM` can switch
   off the test sender.
+
+---
+
+## Round 4 — First real quote, domain mix-up, and full go-live
+
+The user actually used the live product for the first time: signed in as
+`supercaraudiodallas@gmail.com`, created their real shop ("Super Car Audio"),
+and tried to email a real quote. Two real bugs surfaced and got fixed, plus
+a domain identity mix-up got sorted out.
+
+### Done
+- **Fixed a genuine Edge Function crash.** Both functions had been deployed
+  via the Management API's raw multipart upload (the `supabase` CLI can't
+  reach this sandbox's proxy at all), which doesn't resolve `jsr:` import
+  specifiers the way the CLI's own bundler does — first invocation crashed
+  immediately (502, zero application logs, confirmed via `function_logs`
+  query showing only Boot/Shutdown/EarlyDrop with nothing from the code
+  itself). Switched both functions' `supabase-js` import from `jsr:...` to
+  `https://esm.sh/...`, redeployed, and confirmed via a direct authenticated
+  test call (using a real access token minted through the Admin API's
+  `generate_link` + manually following the verify redirect) that the
+  function now runs its full logic.
+- **Diagnosed a Resend account restriction, not a bug**: the test sender
+  `onboarding@resend.dev` can only send to the Resend account's own email —
+  confirmed verbatim via Resend's own rejection message when sending to the
+  quote's actual customer address.
+- **Caught a domain identity mix-up.** The Resend domain being verified
+  (`supercaraudiodallas.com`) did not match the user's actual connected
+  Shopify store domain (`supercaraudio.com`) — confirmed via
+  `mcp__Shopify__get-shop-info`. Checked whether Shopify's Admin API could
+  manage DNS at all (it can't — zero domain/DNS mutations exist in the
+  schema) and whether the domain even lived there — nameserver lookup showed
+  `supercaraudio.com`'s DNS is actually hosted at WordPress.com, unrelated to
+  both Shopify and Cloudflare.
+- User added the correct Resend domain (`supercaraudio.com`) and its three
+  DNS records at WordPress.com themselves (no API access available there);
+  confirmed propagation via DNS-over-HTTPS, then confirmed Resend's own
+  verification via a direct test send.
+- Flipped `EMAIL_FROM` to the verified `Super Car Audio <quotes@supercaraudio.com>`
+  and re-ran the exact same live quote send — success end to end.
+- Additionally pointed Supabase Auth's outgoing mail (magic links) through
+  Resend's SMTP relay (`smtp.resend.com`, user `resend`, password = the API
+  key), replacing Supabase's shared/rate-limited test mailer now that the
+  domain is verified. Confirmed with a live OTP trigger (200 response).
+
+### Verification (this round)
+- Direct authenticated Edge Function calls (real access tokens, real quote
+  IDs, via the Management API + Auth Admin API — no UI needed): crash fixed,
+  membership check passes, Resend rejection reproduced then resolved,
+  final send returns `{"ok":true}`.
+- Live DNS checks (DNS-over-HTTPS) for all three Resend records on the
+  correct domain, confirmed propagated before re-testing verification.
+- Live nameserver + Shopify schema checks before touching anything, avoiding
+  a wasted DNS change on the wrong domain/platform.
+- Real customer email confirmed delivered to `syajsebawe@gmail.com` from
+  the shop's own verified domain.
+
+No code changes this round beyond the Edge Function import fix — everything
+else was live infrastructure configuration (Resend, Supabase Auth, secrets).
