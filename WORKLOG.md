@@ -117,3 +117,59 @@ gamified reports page ("Recovery Score").
 - Not yet tested (needs real credentials, documented above): actual
   invite-email delivery, actual suspend/reactivate against live RLS, real
   magic-link sign-in as an invited owner.
+
+---
+
+## Round 3 — Live backend cutover
+
+The user provided a real Supabase project (db password, then a personal
+access token) and a real Resend API key, and asked to take the project live.
+
+### Done
+- Applied `0001_init.sql` and `0002_platform_admin.sql` directly to the real
+  Supabase project via the Management API's `/database/query` endpoint
+  (the `supabase` CLI's own HTTP client doesn't respect this sandbox's
+  outbound proxy — confirmed `curl` does, so drove the Management API
+  directly instead). Verified all 11 tables present afterward.
+- Deployed both Edge Functions (`send-quote-email`, `admin-create-shop`) via
+  the Management API's multipart `/functions/deploy` endpoint — both ACTIVE,
+  confirmed returning 401 (not 404/500) for unauthenticated requests.
+- Enabled magic-link auth config (`site_url`, `uri_allow_list`) for both
+  local dev and the eventual production domain.
+- Set `RESEND_API_KEY` / `EMAIL_FROM` / `APP_URL` as Edge Function secrets.
+  Sender domain (`supercaraudiodallas.com`) isn't verified in Resend yet
+  (DKIM TXT record confirmed absent via DNS-over-HTTPS lookup) — using
+  Resend's `onboarding@resend.dev` test sender until the user's DNS
+  propagates, at which point `EMAIL_FROM` flips to the branded address.
+- Bootstrapped the user's account as the first platform admin via a direct
+  SQL insert (`platform_admins` has no in-app grant path by design).
+- Live security spot-check against the real project: anonymous `shops`
+  select returns empty, `get_public_quote` handles a bad token as `null`
+  (not an error), `create_shop_with_owner` correctly rejects unauthenticated
+  callers — RLS behaves exactly as designed against the real database.
+- Fixed a Cloudflare deploy failure: the classic `_redirects` SPA-fallback
+  rule (`/* /index.html 200`) is rejected as an infinite loop by Cloudflare's
+  newer unified Workers/Pages deploy pipeline. Replaced with `wrangler.jsonc`
+  (`assets.not_found_handling: "single-page-application"`), the modern
+  equivalent for that pipeline.
+- Deployed to Cloudflare (Workers & Pages, Git-connected) at
+  `https://saas-0awg.jordanianresearcher.workers.dev` — confirmed reachable
+  and serving the correct HTML from this sandbox (unlike `*.pages.dev`,
+  `*.workers.dev` isn't blocked by the sandbox's egress proxy, so this one
+  can be checked directly rather than only through user screenshots).
+
+### Blockers / notes
+- The Supabase MCP server (`.mcp.json`, added per the user's request) never
+  reached "approved" status from this session's perspective — likely
+  because the user's approval/OAuth happened in a separate local
+  environment that doesn't share config with this cloud sandbox. Not
+  needed in practice: the Management API + a personal access token covered
+  every task the MCP server would have (migrations, functions, auth config,
+  secrets).
+- Two magic-link attempts were burned on user error unrelated to the app
+  itself: first link expired before the local dev server was confirmed
+  running; local `.env` wasn't picked up because the dev server wasn't
+  fully restarted after the file was created. Neither is a code issue.
+- `supercaraudiodallas.com` still needs its Resend DNS records added at the
+  domain's actual DNS provider (not Resend) before `EMAIL_FROM` can switch
+  off the test sender.
