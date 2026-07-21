@@ -68,10 +68,11 @@ provider.
 ## Supabase setup
 
 1. Create a project at https://supabase.com.
-2. Apply migrations: `supabase db push` (or paste
-   `supabase/migrations/0001_init.sql` into the SQL editor). This creates all
-   tables, enums, indexes, `updated_at` triggers, RLS policies, the
-   `create_shop_with_owner` onboarding RPC, and the four public
+2. Apply migrations in order: `supabase db push` (or paste
+   `supabase/migrations/0001_init.sql` then `0002_platform_admin.sql` into the
+   SQL editor). This creates all tables, enums, indexes, `updated_at`
+   triggers, RLS policies, the `create_shop_with_owner` onboarding RPC, the
+   platform-admin capability (see below), and the four public
    SECURITY DEFINER RPCs (`get_public_quote`, `record_public_quote_view`,
    `submit_public_quote_response`, `opt_out_public_quote_email`).
 3. Optional local dev seed: `supabase db reset` picks up `supabase/seed.sql`.
@@ -81,6 +82,25 @@ provider.
 
 First sign-in walks the owner through `/onboarding`, which calls
 `create_shop_with_owner` to create the shop and owner membership atomically.
+
+### Platform admin (multi-shop management)
+
+To manage multiple shop tenants from `/admin` (create new shops, invite their
+owners, suspend/reactivate access), grant yourself platform-admin status —
+there is deliberately no in-app way to do this. In the Supabase SQL editor:
+
+```sql
+insert into platform_admins (user_id) select id from auth.users where email = 'you@yourdomain.com';
+```
+
+Sign in with that email, then visit `/admin`. Creating a shop tries to email
+the new owner a sign-in link via Resend (reusing the same secrets as
+`send-quote-email`); if that fails, the dashboard shows a copyable link
+instead. Also deploy the new function:
+
+```bash
+supabase functions deploy admin-create-shop
+```
 
 ## Resend + Edge Function setup
 
@@ -149,7 +169,12 @@ normal shop records and click-to-call only. SMS is a postponed future decision
   SQL and code but no hosted backend
 - Quote-view tracking is link-based (no email open tracking — that's a feature:
   we don't claim provider acceptance means "read")
-- One shop per user in the UI (the schema supports more)
+- One shop per staff/owner user in the UI (a platform admin can now manage
+  many shops from `/admin`, but a shop owner still belongs to just one)
+- New shop owners invited via `/admin` skip onboarding and land with blank
+  phone/address/logo — they fill it in from Settings
 - No pagination yet (fine for pilot-scale data)
 - Bundle is a single chunk (~180 KB gzipped); code-splitting is future polish
 - `expired` status exists but nothing auto-expires quotes yet
+- Recovery Score/milestones are presentation-layer gamification over the same
+  numbers already in the pilot report — they never alter the underlying figures

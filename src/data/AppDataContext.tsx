@@ -10,8 +10,10 @@ import {
 import type { Session } from '@supabase/supabase-js'
 import type { QuoteBundle, Shop } from '../types'
 import type { DataRepository } from './repository'
+import type { AdminRepository } from './adminRepository'
 import { DemoRepository } from './demoRepository'
 import { SupabaseRepository } from './supabaseRepository'
+import { SupabaseAdminRepository } from './adminRepository'
 import { getSupabase } from './supabaseClient'
 import { env, supabaseConfigured } from '../lib/env'
 
@@ -30,6 +32,8 @@ interface AppDataValue {
   session: Session | null
   authReady: boolean
   needsOnboarding: boolean
+  isPlatformAdmin: boolean
+  adminRepo: AdminRepository | null
   enterDemo: () => void
   exitDemo: () => void
   resetDemo: () => void
@@ -48,6 +52,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const [authReady, setAuthReady] = useState(!supabaseConfigured)
   const [shopId, setShopId] = useState<string | null>(null)
   const [needsOnboarding, setNeedsOnboarding] = useState(false)
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false)
   const [shop, setShop] = useState<Shop | null>(null)
   const [bundles, setBundles] = useState<QuoteBundle[]>([])
   const [loading, setLoading] = useState(false)
@@ -96,6 +101,31 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       cancelled = true
     }
   }, [session])
+
+  // Platform-admin status is orthogonal to shop membership — a platform
+  // admin may or may not also belong to a shop.
+  useEffect(() => {
+    if (!supabaseConfigured || !session) {
+      setIsPlatformAdmin(false)
+      return
+    }
+    let cancelled = false
+    getSupabase()
+      .from('platform_admins')
+      .select('user_id')
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled) setIsPlatformAdmin(Boolean(data))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [session])
+
+  const adminRepo: AdminRepository | null = useMemo(() => {
+    if (!isPlatformAdmin || !supabaseConfigured) return null
+    return new SupabaseAdminRepository(getSupabase())
+  }, [isPlatformAdmin])
 
   const repo: DataRepository | null = useMemo(() => {
     if (mode === 'demo') return demoRepo
@@ -169,6 +199,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     session,
     authReady,
     needsOnboarding,
+    isPlatformAdmin,
+    adminRepo,
     enterDemo,
     exitDemo,
     resetDemo,
@@ -191,4 +223,11 @@ export function useRepo(): DataRepository {
   const { repo } = useAppData()
   if (!repo) throw new Error('No active data repository')
   return repo
+}
+
+/** For screens rendered only behind RequirePlatformAdmin. */
+export function useAdminRepo(): AdminRepository {
+  const { adminRepo } = useAppData()
+  if (!adminRepo) throw new Error('No active admin repository')
+  return adminRepo
 }

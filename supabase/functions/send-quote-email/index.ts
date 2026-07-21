@@ -241,6 +241,10 @@ Deno.serve(async (req) => {
   const customer = quote.customers
   const shop = quote.shops
 
+  if (shop && shop.active === false) {
+    return fail(403, "This shop's access has been suspended.")
+  }
+
   // Eligibility — mirrors src/lib/eligibility.ts.
   if (!customer?.email) {
     return fail(400, 'This customer has no email address on file.')

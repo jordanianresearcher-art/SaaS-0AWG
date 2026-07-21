@@ -14,6 +14,7 @@ import QuoteDetailPage from './pages/app/QuoteDetailPage'
 import FollowUpsPage from './pages/app/FollowUpsPage'
 import ReportsPage from './pages/app/ReportsPage'
 import SettingsPage from './pages/app/SettingsPage'
+import AdminPage from './pages/AdminPage'
 
 function RequireShop({ children }: { children: React.ReactNode }) {
   const { mode, repo, authReady, session, needsOnboarding } = useAppData()
@@ -23,6 +24,14 @@ function RequireShop({ children }: { children: React.ReactNode }) {
   if (mode === 'production' && repo) return <>{children}</>
   if (session) return <LoadingBlock label="Loading your shop…" />
   return <Navigate to="/login" replace />
+}
+
+function RequirePlatformAdmin({ children }: { children: React.ReactNode }) {
+  const { authReady, session, isPlatformAdmin } = useAppData()
+  if (!authReady) return <LoadingBlock label="Checking your session…" />
+  if (!session) return <Navigate to="/login" replace />
+  if (!isPlatformAdmin) return <Navigate to="/" replace />
+  return <>{children}</>
 }
 
 export default function App() {
@@ -49,6 +58,14 @@ export default function App() {
         <Route path="reports" element={<ReportsPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
+      <Route
+        path="/admin"
+        element={
+          <RequirePlatformAdmin>
+            <AdminPage />
+          </RequirePlatformAdmin>
+        }
+      />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )

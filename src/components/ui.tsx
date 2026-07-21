@@ -51,9 +51,18 @@ export function Card({ children, className = '' }: { children: ReactNode; classN
   )
 }
 
-export function Badge({ children, className = '' }: { children: ReactNode; className?: string }) {
+export function Badge({
+  children,
+  className = '',
+  title,
+}: {
+  children: ReactNode
+  className?: string
+  title?: string
+}) {
   return (
     <span
+      title={title}
       className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-sm font-semibold whitespace-nowrap ${className}`}
     >
       {children}

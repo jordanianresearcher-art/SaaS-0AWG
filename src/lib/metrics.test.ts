@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { subDays } from 'date-fns'
 import { buildDemoData } from '../data/demoData'
 import { DemoRepository } from '../data/demoRepository'
-import { computeMetrics, activeQuoteValueCents, statusFunnel } from './metrics'
+import { computeMetrics, activeQuoteValueCents, statusFunnel, computeRecoveryScore, computeMilestones } from './metrics'
 
 function memoryStorage() {
   const map = new Map<string, string>()
@@ -55,6 +55,67 @@ describe('activeQuoteValueCents', () => {
     // The won quote's recommended price should not be in the active pipeline.
     const naiveTotal = total + wonValue
     expect(naiveTotal).toBeGreaterThan(total)
+  })
+})
+
+describe('computeRecoveryScore', () => {
+  it('returns a score in [0, 100] with a tier for the seeded 14-day window', async () => {
+    const repo = new DemoRepository(memoryStorage())
+    const bundles = await repo.listQuoteBundles()
+    const now = new Date()
+    const m = computeMetrics(bundles, subDays(now, 14), now)
+    const result = computeRecoveryScore(m)
+    expect(result.score).not.toBeNull()
+    expect(result.score as number).toBeGreaterThanOrEqual(0)
+    expect(result.score as number).toBeLessThanOrEqual(100)
+    expect(['bronze', 'silver', 'gold', 'platinum']).toContain(result.tier)
+  })
+
+  it('returns null/none for an empty window instead of a misleading zero', async () => {
+    const repo = new DemoRepository(memoryStorage())
+    const bundles = await repo.listQuoteBundles()
+    const m = computeMetrics(bundles, new Date('2000-01-01'), new Date('2000-01-02'))
+    const result = computeRecoveryScore(m)
+    expect(result.score).toBeNull()
+    expect(result.tier).toBe('none')
+  })
+
+  it('clamps rates to 1 even when revenue exceeds quoted value in-window', () => {
+    const result = computeRecoveryScore({
+      eligibleQuotes: 0,
+      totalQuotedCents: 0,
+      emailsSent: 1,
+      quoteViews: 1,
+      responses: 1,
+      cheaperRequests: 0,
+      financingRequests: 0,
+      appointments: 0,
+      deposits: 0,
+      wonJobs: 1,
+      recoveredRevenueCents: 500000,
+    })
+    expect(result.components.revenueRate).toBe(1)
+    expect(result.components.winRate).toBe(1)
+    expect(result.score).toBe(100)
+  })
+})
+
+describe('computeMilestones', () => {
+  it('marks first-recovered-sale and thousand-recovered achieved against seeded demo data', async () => {
+    const repo = new DemoRepository(memoryStorage())
+    const bundles = await repo.listQuoteBundles()
+    const milestones = computeMilestones(bundles)
+    const byId = Object.fromEntries(milestones.map((m) => [m.id, m]))
+    expect(byId.first_recovered_sale.achieved).toBe(true)
+    expect(byId.thousand_recovered.achieved).toBe(true)
+    expect(byId.five_quotes_emailed.achieved).toBe(true)
+  })
+
+  it('gates the view-rate badge on a minimum sample size', () => {
+    const milestones = computeMilestones([])
+    const byId = Object.fromEntries(milestones.map((m) => [m.id, m]))
+    expect(byId.half_view_rate.achieved).toBe(false)
+    expect(byId.first_recovered_sale.achieved).toBe(false)
   })
 })
 

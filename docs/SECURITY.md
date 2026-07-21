@@ -14,6 +14,38 @@ Roles:
   membership management (enforced by `shops_update` / membership policies)
 - **staff** — create and manage customers, quotes, options, items, events;
   read email history
+- **platform admin** — a role above any shop, held by the person running the
+  0Gauge business (see "Platform admin" below). Not a `shop_memberships` role.
+
+## Platform admin
+
+`platform_admins (user_id)` (added in `0002_platform_admin.sql`) identifies
+platform admins — the people who onboard new shop tenants. This role has
+**no in-app grant path**: the table has a SELECT policy only
+(`using (is_platform_admin())`), no insert/update/delete policy for any
+role. Granting admin status is a manual, one-time SQL statement run by
+whoever administers the Supabase project:
+
+```sql
+insert into platform_admins (user_id) select id from auth.users where email = 'you@yourdomain.com';
+```
+
+`is_platform_admin()` widens exactly two RLS policies (`shops_select`,
+`memberships_select`) to a **read-only** OR condition — platform admins can
+see every shop and membership, nothing more. All writes across shops
+(creating a shop, inviting its owner, suspending it) go through the
+service-role `admin-create-shop` Edge Function and the `admin_list_shops()` /
+`admin_set_shop_active()` RPCs, each of which re-checks `is_platform_admin()`
+inside the function body. This keeps the cross-shop exception narrow and
+auditable instead of a broad service-role hole reachable from the browser.
+
+Shop suspension (`shops.active`) is enforced in the `with check` clause only
+of `quotes_all`/`customers_all` — a suspended shop's existing data stays
+fully readable (so the owner sees a "suspended" state, not a blank app) while
+new/changed quotes and customers are blocked at the database layer. The
+`send-quote-email` function independently checks `shop.active` before
+sending, so email sending stops immediately on suspension even if a client
+never re-fetches shop state.
 
 ## Public tokens
 

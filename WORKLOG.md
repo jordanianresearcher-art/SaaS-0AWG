@@ -43,7 +43,7 @@
   mailto: fallback + honest "not configured" notice; no false "sent" states.
 - npm registry access worked; no other environment blockers.
 
-## Verification results (final)
+## Verification results (Phase 1 MVP)
 - `npm run lint` → PASS (0 errors, 0 warnings)
 - `npm run typecheck` → PASS
 - `npm run test -- --run` → PASS (79 tests, 8 files)
@@ -55,3 +55,65 @@
   → customer response submitted → quote detail updated → follow-up demo email →
   public opt-out → further sends blocked → follow-up queue groups → pilot report
   with demo label → demo reset from settings.
+
+---
+
+## Round 2 — Platform admin, real-backend prep, landing redesign, gamified reports
+
+Requested: (1) working login/signup + customer email (blocked on the user
+creating real Supabase/Resend accounts and handing over credentials — they
+chose to do this themselves), (2) a platform-owner dashboard to onboard new
+shop tenants, (3) a more icon-forward/low-text landing page, (4) a bold,
+gamified reports page ("Recovery Score").
+
+### Backlog (this round)
+1. [x] Migration `0002_platform_admin.sql`: `platform_admins` table (no
+   in-app grant path), `is_platform_admin()`, `shops.active` suspend flag,
+   widened read-only RLS for admins, suspend-aware write checks on
+   `quotes`/`customers`, `admin_list_shops()` / `admin_set_shop_active()` RPCs
+2. [x] `admin-create-shop` Edge Function: platform-admin-only, creates a shop,
+   generates an invite link (`auth.admin.generateLink`, never Supabase's own
+   mailer), inserts the owner membership immediately, tries to deliver via
+   Resend with a copy-link fallback on failure
+3. [x] `send-quote-email` now blocks sends for suspended shops
+4. [x] `src/data/adminRepository.ts` — dedicated `AdminRepository`, kept
+   separate from the per-shop `DataRepository`
+5. [x] `AppDataContext`: `isPlatformAdmin` + `adminRepo`, derived the same
+   way `needsOnboarding` already was
+6. [x] `/admin` route + `RequirePlatformAdmin` guard in `App.tsx`
+7. [x] `src/pages/AdminPage.tsx`: shop list (member/quote counts,
+   suspend/reactivate) + create-shop modal
+8. [x] Landing page redesign: icon-first hero CTAs, 3-step visual row,
+   6 icon tiles replacing paragraph copy, icon trust row
+9. [x] `computeRecoveryScore()` (weighted revenue/win/response/view rate,
+   Bronze→Platinum tiers, honest `null` state for no data) and
+   `computeMilestones()` (4 lifetime badges) in `metrics.ts`, with tests
+10. [x] `RecoveryScoreGauge` (hand-rolled SVG ring + count-up) and `Confetti`
+    (CSS-only burst, skips under `prefers-reduced-motion`) — no new deps
+11. [x] Wired into `ReportsPage`: score/tier/badges above the existing,
+    unmodified metrics table; confetti fires only on genuine new-best-tier
+    or newly-achieved milestones (tracked in localStorage)
+12. [x] Full verification + browser smoke test + docs updated + commit/push
+
+### Blockers
+- Real Supabase/Resend credentials still not available in this environment —
+  the user is creating both themselves. `/admin`, real auth, and real email
+  sends are implemented and typecheck/build clean but **not live-tested**
+  against an actual project. Fallback: everything demo-mode-relevant was
+  smoke-tested in the browser; the new SQL/Edge Function follow the exact
+  patterns already proven in `0001_init.sql` / `send-quote-email`.
+- Platform-admin bootstrap has no in-app UI by design (security requirement
+  from the plan) — it's a documented one-time manual SQL insert.
+
+### Verification results (this round)
+- `npm run lint` → PASS
+- `npm run typecheck` → PASS
+- `npm run test -- --run` → PASS (84 tests, 8 files — +5 new metrics tests)
+- `npm run build` → PASS
+- Browser smoke test: new landing page (hero/steps/icon grid) renders;
+  Reports page shows the Recovery Score gauge + milestone badge shelf above
+  the untouched metrics table; `/admin` correctly blocks access without a
+  platform-admin session. Screenshots reviewed for visual quality.
+- Not yet tested (needs real credentials, documented above): actual
+  invite-email delivery, actual suspend/reactivate against live RLS, real
+  magic-link sign-in as an invited owner.

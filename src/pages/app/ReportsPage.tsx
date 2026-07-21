@@ -1,12 +1,18 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { format, subDays } from 'date-fns'
-import { Download, Printer } from 'lucide-react'
+import { Award, Download, Printer } from 'lucide-react'
 import { useAppData } from '../../data/AppDataContext'
-import { Button, Card, LoadingBlock } from '../../components/ui'
-import { computeMetrics } from '../../lib/metrics'
+import { Badge, Button, Card, LoadingBlock } from '../../components/ui'
+import { RecoveryScoreGauge } from '../../components/RecoveryScoreGauge'
+import { Confetti } from '../../components/Confetti'
+import { computeMetrics, computeMilestones, computeRecoveryScore, type RecoveryTier } from '../../lib/metrics'
 import { formatCurrency, formatDate } from '../../lib/format'
 
 type RangeChoice = '7' | '14' | 'custom'
+
+const TIER_RANK: Record<RecoveryTier, number> = { none: 0, bronze: 1, silver: 2, gold: 3, platinum: 4 }
+const BEST_TIER_KEY = '0gauge-best-tier'
+const SEEN_MILESTONES_KEY = '0gauge-seen-milestones'
 
 export default function ReportsPage() {
   const { bundles, shop, mode, loading } = useAppData()
@@ -26,6 +32,34 @@ export default function ReportsPage() {
   }, [range, customFrom, customTo])
 
   const metrics = useMemo(() => computeMetrics(bundles, from, to), [bundles, from, to])
+  const recoveryScore = useMemo(() => computeRecoveryScore(metrics), [metrics])
+  const milestones = useMemo(() => computeMilestones(bundles), [bundles])
+
+  const [confettiTrigger, setConfettiTrigger] = useState(0)
+  const celebratedRef = useRef(false)
+
+  // Fire a confetti burst the first time this page sees a new best tier or a
+  // newly-achieved milestone — never on every render, just on real progress.
+  useEffect(() => {
+    if (celebratedRef.current) return
+    celebratedRef.current = true
+    let celebrate = false
+
+    const bestTierSoFar = (localStorage.getItem(BEST_TIER_KEY) as RecoveryTier | null) ?? 'none'
+    if (recoveryScore.tier !== 'none' && TIER_RANK[recoveryScore.tier] > TIER_RANK[bestTierSoFar]) {
+      localStorage.setItem(BEST_TIER_KEY, recoveryScore.tier)
+      celebrate = true
+    }
+
+    const seen: string[] = JSON.parse(localStorage.getItem(SEEN_MILESTONES_KEY) ?? '[]')
+    const newlyAchieved = milestones.filter((m) => m.achieved && !seen.includes(m.id))
+    if (newlyAchieved.length > 0) {
+      localStorage.setItem(SEEN_MILESTONES_KEY, JSON.stringify([...seen, ...newlyAchieved.map((m) => m.id)]))
+      celebrate = true
+    }
+
+    if (celebrate) setConfettiTrigger((n) => n + 1)
+  }, [recoveryScore.tier, milestones])
 
   if (loading && bundles.length === 0) return <LoadingBlock label="Building your report…" />
 
@@ -108,6 +142,39 @@ export default function ReportsPage() {
           </span>
         ) : null}
       </div>
+
+      <Card className="relative mx-auto max-w-2xl overflow-hidden p-6 text-center sm:p-8">
+        <Confetti trigger={confettiTrigger} />
+        <p className="text-sm font-bold tracking-widest text-brand uppercase">Recovery Score</p>
+        <div className="mt-4 flex justify-center">
+          <RecoveryScoreGauge score={recoveryScore.score} tier={recoveryScore.tier} />
+        </div>
+        {recoveryScore.score === null ? (
+          <p className="mt-4 text-base text-zinc-500">
+            Email a few quotes and this score will come to life.
+          </p>
+        ) : (
+          <p className="mt-4 text-base text-zinc-500">
+            Built from recovered revenue, win rate, responses, and views for this period.
+          </p>
+        )}
+        <div className="mt-6 flex flex-wrap justify-center gap-2 border-t border-zinc-100 pt-5">
+          {milestones.map((m) => (
+            <Badge
+              key={m.id}
+              title={m.description}
+              className={
+                m.achieved
+                  ? 'gap-1.5 border border-amber-300 bg-amber-50 text-amber-900'
+                  : 'gap-1.5 border border-zinc-200 bg-zinc-50 text-zinc-400'
+              }
+            >
+              <Award className="h-4 w-4" aria-hidden="true" />
+              {m.label}
+            </Badge>
+          ))}
+        </div>
+      </Card>
 
       <Card className="mx-auto max-w-2xl p-6 sm:p-8">
         <div className="border-b border-zinc-200 pb-5 text-center">

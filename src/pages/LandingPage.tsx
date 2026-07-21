@@ -1,39 +1,38 @@
 import { Link } from 'react-router-dom'
-import { Mail, Eye, BellRing, DollarSign, Phone, Printer } from 'lucide-react'
+import {
+  Mail,
+  Eye,
+  BellRing,
+  DollarSign,
+  Phone,
+  Printer,
+  FileText,
+  ArrowRight,
+  ShieldCheck,
+  MousePointerClick,
+} from 'lucide-react'
 import { Logo } from '../components/ui'
 import { env } from '../lib/env'
 
+const STEPS = [
+  { icon: FileText, label: 'Make a quote' },
+  { icon: Mail, label: 'Email it' },
+  { icon: DollarSign, label: 'Get paid' },
+]
+
 const FEATURES = [
-  {
-    icon: Mail,
-    title: 'Professional quote emails',
-    body: 'Send a clean Good / Better / Insane quote to the customer’s inbox in about two minutes.',
-  },
-  {
-    icon: Eye,
-    title: 'Know when they look',
-    body: 'The moment a customer opens their quote link, it shows up in your app. No more guessing.',
-  },
-  {
-    icon: BellRing,
-    title: 'Simple follow-ups',
-    body: 'A short list every morning of who to email or call today. You press send — nothing goes out on its own.',
-  },
-  {
-    icon: DollarSign,
-    title: 'See the money come back',
-    body: 'Track appointments, deposits, and won jobs. Print a report that shows recovered revenue in plain numbers.',
-  },
-  {
-    icon: Phone,
-    title: 'Keep your process',
-    body: 'Works next to your POS and your phone. No new register, no new payment system, nothing to rip out.',
-  },
-  {
-    icon: Printer,
-    title: 'A report you can hold',
-    body: 'Run a 7 or 14-day pilot and print the results. If it didn’t make you money, you’ll see that too.',
-  },
+  { icon: Mail, label: 'Email quotes' },
+  { icon: Eye, label: "See who's looking" },
+  { icon: BellRing, label: 'Simple follow-ups' },
+  { icon: DollarSign, label: 'Watch revenue return' },
+  { icon: Phone, label: 'Keep your process' },
+  { icon: Printer, label: 'Printable proof' },
+]
+
+const TRUST = [
+  { icon: Mail, label: 'Email only' },
+  { icon: MousePointerClick, label: 'One-click stop' },
+  { icon: ShieldCheck, label: 'Your data stays yours' },
 ]
 
 export default function LandingPage() {
@@ -48,60 +47,93 @@ export default function LandingPage() {
         </div>
       </header>
 
-      <section className="mx-auto max-w-5xl px-4 pt-14 pb-10 text-center sm:pt-20">
-        <h1 className="mx-auto max-w-3xl text-4xl font-black tracking-tight text-ink sm:text-5xl">
-          Win back the customers who got a quote and never came back.
+      <section className="mx-auto max-w-4xl px-4 pt-16 pb-8 text-center sm:pt-24">
+        <h1 className="mx-auto max-w-2xl text-4xl font-black tracking-tight text-ink sm:text-6xl">
+          Get paid for the quotes you already wrote.
         </h1>
-        <p className="mx-auto mt-5 max-w-2xl text-lg text-zinc-600 sm:text-xl">
-          0Gauge Recovery is built for independent car-audio shops. Email professional quotes, see when
-          customers open them, follow up at the right time, and watch quoted money turn into won jobs.
+        <p className="mx-auto mt-4 max-w-lg text-xl text-zinc-600">
+          Email the quote. See who opens it. Bring them back.
         </p>
-        <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
+        <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
           {env.demoModeEnabled ? (
             <Link
               to="/demo"
-              className="inline-flex min-h-14 w-full items-center justify-center rounded-xl bg-brand px-8 text-lg font-bold text-white hover:bg-brand-dark sm:w-auto"
+              className="inline-flex min-h-16 w-full items-center justify-center gap-2 rounded-xl bg-brand px-9 text-xl font-bold text-white shadow-sm transition-transform hover:scale-[1.02] hover:bg-brand-dark sm:w-auto"
             >
+              <MousePointerClick className="h-6 w-6" aria-hidden="true" />
               Try the Demo
             </Link>
           ) : null}
           <Link
             to="/login"
-            className="inline-flex min-h-14 w-full items-center justify-center rounded-xl border border-zinc-300 px-8 text-lg font-bold text-ink hover:bg-zinc-50 sm:w-auto"
+            className="inline-flex min-h-16 w-full items-center justify-center gap-2 rounded-xl border-2 border-zinc-300 px-9 text-xl font-bold text-ink transition-colors hover:border-zinc-400 hover:bg-zinc-50 sm:w-auto"
           >
             Shop Login
           </Link>
         </div>
-        <p className="mt-4 text-sm text-zinc-500">The demo runs entirely on this device with sample data. No sign-up needed.</p>
+        <p className="mt-3 text-sm text-zinc-500">No sign-up. No credit card. Just tap and try it.</p>
       </section>
 
-      <section className="mx-auto max-w-5xl px-4 py-10">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {FEATURES.map((f) => (
-            <div key={f.title} className="rounded-2xl border border-zinc-200 p-5">
-              <f.icon className="h-7 w-7 text-brand" aria-hidden="true" />
-              <h2 className="mt-3 text-lg font-bold text-ink">{f.title}</h2>
-              <p className="mt-1.5 text-base leading-relaxed text-zinc-600">{f.body}</p>
+      {/* How it works — 3 icons, almost no words */}
+      <section aria-label="How it works" className="mx-auto max-w-3xl px-4 py-8">
+        <div className="flex items-center justify-center gap-2 sm:gap-4">
+          {STEPS.map((step, i) => (
+            <div key={step.label} className="flex items-center gap-2 sm:gap-4">
+              <div className="flex flex-col items-center gap-2">
+                <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-brand sm:h-20 sm:w-20">
+                  <step.icon className="h-8 w-8 sm:h-9 sm:w-9" aria-hidden="true" />
+                </span>
+                <span className="text-center text-base font-bold text-ink sm:text-lg">{step.label}</span>
+              </div>
+              {i < STEPS.length - 1 ? (
+                <ArrowRight className="h-6 w-6 shrink-0 text-zinc-300" aria-hidden="true" />
+              ) : null}
             </div>
           ))}
         </div>
       </section>
 
-      <section className="bg-zinc-950 py-14">
-        <div className="mx-auto max-w-3xl px-4 text-center">
-          <h2 className="text-2xl font-black text-white sm:text-3xl">
-            You already quoted the work. This gets you paid for more of it.
+      {/* Feature icon grid — icon + short label, no paragraphs */}
+      <section className="mx-auto max-w-5xl px-4 py-10">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
+          {FEATURES.map((f) => (
+            <div
+              key={f.label}
+              className="flex flex-col items-center gap-3 rounded-2xl border border-zinc-200 px-4 py-7 text-center transition-shadow hover:shadow-md"
+            >
+              <span className="flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 text-brand">
+                <f.icon className="h-7 w-7" aria-hidden="true" />
+              </span>
+              <span className="text-lg font-bold text-ink">{f.label}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Trust row — icons instead of a paragraph */}
+      <section className="mx-auto max-w-3xl px-4 pb-10">
+        <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-3">
+          {TRUST.map((t) => (
+            <div key={t.label} className="flex items-center gap-2 text-base font-semibold text-zinc-600">
+              <t.icon className="h-5 w-5 text-brand" aria-hidden="true" />
+              {t.label}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="bg-zinc-950 py-16">
+        <div className="mx-auto max-w-2xl px-4 text-center">
+          <h2 className="text-3xl font-black text-white sm:text-4xl">
+            That quote didn&apos;t say no. It just went quiet.
           </h2>
-          <p className="mt-4 text-lg text-zinc-300">
-            Most shops never hear back from half the people they quote. A polite email, sent at the right
-            time, brings a surprising number of them through the door.
-          </p>
           {env.demoModeEnabled ? (
             <Link
               to="/demo"
-              className="mt-7 inline-flex min-h-14 items-center justify-center rounded-xl bg-white px-8 text-lg font-bold text-ink hover:bg-zinc-200"
+              className="mt-8 inline-flex min-h-16 items-center justify-center gap-2 rounded-xl bg-white px-9 text-xl font-bold text-ink transition-transform hover:scale-[1.02] hover:bg-zinc-100"
             >
-              See it with sample data
+              <MousePointerClick className="h-6 w-6" aria-hidden="true" />
+              Try it free
             </Link>
           ) : null}
         </div>
@@ -109,7 +141,7 @@ export default function LandingPage() {
 
       <footer className="mx-auto flex max-w-5xl flex-col items-center gap-2 px-4 py-8 text-center text-sm text-zinc-500">
         <Logo className="text-lg" />
-        <p>Email follow-ups only, always sent by a person at your shop. Customers can stop emails with one click.</p>
+        <p>Email only. Every message needs a person to press Send.</p>
       </footer>
     </div>
   )
