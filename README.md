@@ -143,7 +143,7 @@ opt-out).
 ## Deploying the frontend (Cloudflare Pages)
 
 - Build command: `npm run build`, output directory: `dist`
-- `public/_redirects` already routes all paths to `index.html` (SPA)
+- `wrangler.jsonc` at the repo root configures SPA routing (`assets.not_found_handling: "single-page-application"`) — Cloudflare's newer unified Workers/Pages deploy pipeline rejects the classic `_redirects` catch-all (`/* /index.html 200`) as an infinite-loop rule, so this is the modern equivalent
 - Set the `VITE_*` environment variables in the Pages project
 - Deploy the Edge Function separately via the Supabase CLI (see above)
 
