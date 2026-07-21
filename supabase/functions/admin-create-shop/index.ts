@@ -8,7 +8,7 @@
 // Secrets: same as send-quote-email (RESEND_API_KEY, EMAIL_FROM, APP_URL) —
 //          no new secrets required.
 
-import { createClient } from 'jsr:@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',

@@ -9,7 +9,7 @@
 // The email copy here mirrors src/lib/emailTemplates.ts (used for previews).
 // Update both together.
 
-import { createClient } from 'jsr:@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 type TemplateType = 'initial' | 'check_in' | 'financing_option' | 'payday_reminder' | 'final_check_in'
 
