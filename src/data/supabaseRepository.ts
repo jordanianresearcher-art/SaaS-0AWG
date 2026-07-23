@@ -37,7 +37,8 @@ function mapShop(r: Row): Shop {
     website: r.website,
     logoUrl: r.logo_url,
     primaryColor: r.primary_color ?? '#1d4ed8',
-    defaultPaymentLink: r.default_payment_link,
+    defaultPaymentMethod: r.default_payment_method,
+    defaultPaymentHandle: r.default_payment_handle,
     quoteExpirationDays: r.quote_expiration_days ?? 30,
     followUpScheduleDays: r.follow_up_schedule_days ?? [2, 3, 5],
     quoteDisclaimer: r.quote_disclaimer ?? '',
@@ -108,7 +109,9 @@ function mapOption(r: Row): QuoteOption {
     description: r.description ?? '',
     priceCents: r.price_cents,
     laborIncluded: r.labor_included,
-    depositLink: r.deposit_link,
+    depositPaymentMethod: r.deposit_payment_method,
+    depositPaymentHandle: r.deposit_payment_handle,
+    depositAmountCents: r.deposit_amount_cents,
     recommended: r.recommended,
     position: r.position,
     items: ((r.quote_items as Row[]) ?? []).map(mapItem).sort((a, b) => a.position - b.position),
@@ -205,7 +208,8 @@ export class SupabaseRepository implements DataRepository {
     if (patch.website !== undefined) row.website = patch.website
     if (patch.logoUrl !== undefined) row.logo_url = patch.logoUrl
     if (patch.primaryColor !== undefined) row.primary_color = patch.primaryColor
-    if (patch.defaultPaymentLink !== undefined) row.default_payment_link = patch.defaultPaymentLink
+    if (patch.defaultPaymentMethod !== undefined) row.default_payment_method = patch.defaultPaymentMethod
+    if (patch.defaultPaymentHandle !== undefined) row.default_payment_handle = patch.defaultPaymentHandle
     if (patch.quoteExpirationDays !== undefined) row.quote_expiration_days = patch.quoteExpirationDays
     if (patch.followUpScheduleDays !== undefined) row.follow_up_schedule_days = patch.followUpScheduleDays
     if (patch.quoteDisclaimer !== undefined) row.quote_disclaimer = patch.quoteDisclaimer
@@ -353,7 +357,9 @@ export class SupabaseRepository implements DataRepository {
           description: opt.description,
           price_cents: opt.priceCents,
           labor_included: opt.laborIncluded,
-          deposit_link: opt.depositLink,
+          deposit_payment_method: opt.depositPaymentMethod,
+          deposit_payment_handle: opt.depositPaymentHandle,
+          deposit_amount_cents: opt.depositAmountCents,
           recommended: opt.recommended,
           position: i,
         })

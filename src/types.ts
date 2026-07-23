@@ -49,6 +49,8 @@ export type QuoteEventType =
 
 export type MembershipRole = 'owner' | 'manager' | 'staff'
 
+export type PaymentMethod = 'link' | 'zelle' | 'cashapp' | 'venmo' | 'paypal'
+
 export interface Shop {
   id: string
   name: string
@@ -60,7 +62,8 @@ export interface Shop {
   website: string | null
   logoUrl: string | null
   primaryColor: string
-  defaultPaymentLink: string | null
+  defaultPaymentMethod: PaymentMethod | null
+  defaultPaymentHandle: string | null
   quoteExpirationDays: number
   followUpScheduleDays: number[]
   quoteDisclaimer: string
@@ -117,7 +120,9 @@ export interface QuoteOption {
   description: string
   priceCents: number
   laborIncluded: boolean
-  depositLink: string | null
+  depositPaymentMethod: PaymentMethod | null
+  depositPaymentHandle: string | null
+  depositAmountCents: number | null
   recommended: boolean
   position: number
   items: QuoteItem[]
@@ -211,7 +216,9 @@ export interface PublicQuote {
     description: string
     priceCents: number
     laborIncluded: boolean
-    depositLink: string | null
+    depositPaymentMethod: PaymentMethod | null
+    depositPaymentHandle: string | null
+    depositAmountCents: number | null
     recommended: boolean
     items: Array<{ brand: string | null; model: string | null; name: string; quantity: number; description: string | null }>
   }>

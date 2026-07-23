@@ -293,3 +293,94 @@ brainstorm and are now built:
   via the Management API (same direct route used for `0001`/`0002`, since
   the CLI still can't reach this sandbox's proxy) — confirmed the table,
   its columns, and its RLS policy all exist as expected.
+
+---
+
+## Round 6 — Deposit payment methods for shops without Shopify/Stripe
+
+The user pointed out that not every shop has Shopify or Stripe to generate
+a deposit payment link, and asked for the deposit amount to default to 15%
+of the job automatically, with a way to send customers to the shop's
+Zelle/Cash App/Venmo/PayPal.me instead of a raw checkout URL.
+
+### Done
+- **Five deposit payment methods, shop-level default + per-option override.**
+  Replaced the single free-text `default_payment_link` (shop) /
+  `deposit_link` (quote option) URL fields with a method + handle pair —
+  `link` (the original raw-URL case, kept for shops that do have Stripe/
+  Shopify), `zelle`, `cashapp`, `venmo`, `paypal`. New migration
+  `0004_deposit_payment_methods.sql` adds a `payment_method` enum, migrates
+  existing non-empty links to `method='link'` on both tables, and adds a
+  pairing check constraint (`(method is null) = (handle is null)`) on each.
+  Settings and Onboarding both get a method dropdown plus a conditional
+  handle field (label/placeholder/hint driven by a single
+  `PAYMENT_METHOD_INFO` lookup in the new `src/lib/paymentMethods.ts`); New
+  Quote's per-option "Deposit link" field is replaced with a "Use a
+  different payment method for this deposit" checkbox that reveals the same
+  picker, defaulting to the shop's setting when left unchecked.
+- **Deposit amount auto-calculated at 15%, editable.** Each option now has a
+  "Deposit amount" field that live-recomputes to 15% of that option's price
+  as it's typed (via a `useWatch`-driven effect comparing against the last
+  value the effect itself wrote, so a manual override is never clobbered by
+  a later price edit) — staff can freely type any flat dollar amount
+  instead.
+- **`create_shop_with_owner` dropped and recreated**, not just
+  `create or replace` — changing `p_default_payment_link` to two new
+  parameters changes the function's identifying signature, which would have
+  left a stale duplicate overload behind. Re-applied the
+  revoke-from-anon/grant-to-authenticated pair immediately after, since
+  Postgres grants EXECUTE to `PUBLIC` (which `anon` inherits) by default on
+  a freshly created function — confirmed live afterward that `anon` is not
+  in the grant list.
+- **Real-world link formats confirmed and implemented** in
+  `buildPaymentUrl()`: Cash App and PayPal.me both support an exact dollar
+  amount appended to the URL path (`cash.app/$tag/145.00`,
+  `paypal.me/name/145.00`); Venmo's profile link
+  (`venmo.com/u/name`) has no reliable amount-in-path format outside its
+  native app, so the public quote page's copy says "tap Pay, then enter the
+  amount" for Venmo instead of promising it's prefilled. Zelle has no
+  clickable link format at all — shown as plain instructional text instead
+  of a button. (Caught and fixed a bug before shipping: the first draft ran
+  `encodeURIComponent` on Cash App handles, which escapes the required
+  literal `$` to `%24` and breaks the link — fixed to only strip
+  whitespace/pasted URL prefixes, never encode the `$`.)
+- Duplicate Quote reproduces today's exact carryover behavior for the new
+  fields: a resolved deposit method on the original always wins over the
+  shop's *current* default when duplicating (verbatim carryover, override
+  checkbox pre-checked); an option that had none falls back to the shop's
+  live current default (checkbox left unchecked) — matching the existing
+  `depositLink` semantics precisely rather than a new behavior.
+- No changes to email templates or the send-quote-email Edge Function —
+  confirmed neither ever referenced deposit fields (emails intentionally
+  stay short and only link to the public quote page); that design choice is
+  unchanged.
+
+### Verification (this round)
+- A dedicated Plan-agent review before writing any code caught several real
+  gaps in the first draft of this design: `supabase/seed.sql` still
+  inserting into the old columns (would have broken `supabase db reset`),
+  the `anon`-grant regression risk above, a `demoRepository.test.ts` literal
+  that would fail to typecheck, and the exact duplicate-carryover semantics
+  needed to match current behavior. All fixed before implementation began.
+- `npm run lint`, `npx tsc -b --noEmit`, `npm run test -- --run` (104/104
+  across 10 files, including a new 14-test `paymentMethods.test.ts` covering
+  every method's URL format, the Cash App `$`-encoding bug, and the 15%
+  rounding), and `npm run build` all clean.
+- Playwright smoke test against a `vite preview` build: Settings shows the
+  seeded Cash App default and swaps handle fields correctly per method;
+  New Quote's deposit amount auto-fills at 15% and recomputes live as price
+  changes, a manual override survives a further price edit, and the
+  per-option method override reveals its fields; Save & Send still
+  auto-opens the email preview; Duplicate carries the manual deposit amount
+  and override flag over verbatim. A second pass against the public quote
+  page confirmed the Cash App CTA renders with the correct link
+  (`cash.app/$BigTexAudio/284.85`) and a `$284.85 deposit` amount line.
+- Migration `0004` applied to the live Supabase project via the Management
+  API (same direct route used for `0001`-`0003`). Verified against the real
+  shop's data (a live Shopify product-page URL used as its payment link):
+  the backfill correctly produced `method='link'` rows on both `shops` and
+  `quote_options` with no data loss, both pairing check constraints exist,
+  and — the one regression risk worth double-checking — `anon` is
+  confirmed absent from `create_shop_with_owner`'s grants after the
+  drop/recreate. A live anonymous `get_public_quote` RPC call against a
+  real quote confirmed the new field names come back correctly.

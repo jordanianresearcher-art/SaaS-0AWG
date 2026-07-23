@@ -201,7 +201,9 @@ export class DemoRepository implements DataRepository {
         description: opt.description,
         priceCents: opt.priceCents,
         laborIncluded: opt.laborIncluded,
-        depositLink: opt.depositLink,
+        depositPaymentMethod: opt.depositPaymentMethod,
+        depositPaymentHandle: opt.depositPaymentHandle,
+        depositAmountCents: opt.depositAmountCents,
         recommended: opt.recommended,
         position: i,
         items: opt.items.map((item, j) => ({
@@ -356,7 +358,9 @@ export class DemoRepository implements DataRepository {
           description: o.description,
           priceCents: o.priceCents,
           laborIncluded: o.laborIncluded,
-          depositLink: o.depositLink,
+          depositPaymentMethod: o.depositPaymentMethod,
+          depositPaymentHandle: o.depositPaymentHandle,
+          depositAmountCents: o.depositAmountCents,
           recommended: o.recommended,
           items: o.items.map((i) => ({
             brand: i.brand,

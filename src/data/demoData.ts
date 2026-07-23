@@ -9,6 +9,7 @@ import type {
   QuoteResponse,
   Shop,
 } from '../types'
+import { computeDefaultDepositCents } from '../lib/paymentMethods'
 
 // Seeded fictional Dallas shop used by demo mode. Everything is generated
 // relative to "now" so the follow-up queue and reports always look alive.
@@ -27,7 +28,7 @@ export interface DemoDB {
   seedVersion: number
 }
 
-export const DEMO_SEED_VERSION = 4
+export const DEMO_SEED_VERSION = 5
 
 const SHOP_ID = 'demo-shop'
 
@@ -391,7 +392,8 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
     website: 'https://bigtexaudio.example.com',
     logoUrl: null,
     primaryColor: '#1d4ed8',
-    defaultPaymentLink: 'https://pay.example.com/big-tex-audio/deposit',
+    defaultPaymentMethod: 'cashapp',
+    defaultPaymentHandle: '$BigTexAudio',
     quoteExpirationDays: 30,
     followUpScheduleDays: [2, 3, 5],
     quoteDisclaimer:
@@ -460,7 +462,9 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
         description: opt.description,
         priceCents: opt.priceCents,
         laborIncluded: true,
-        depositLink: shop.defaultPaymentLink,
+        depositPaymentMethod: shop.defaultPaymentMethod,
+        depositPaymentHandle: shop.defaultPaymentHandle,
+        depositAmountCents: computeDefaultDepositCents(opt.priceCents),
         recommended: opt.recommended,
         position: i,
         items: opt.items.map((item, j) => ({

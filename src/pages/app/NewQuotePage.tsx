@@ -1,6 +1,14 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { useFieldArray, useForm, type Control, type FieldErrors, type UseFormRegister } from 'react-hook-form'
+import {
+  useFieldArray,
+  useForm,
+  useWatch,
+  type Control,
+  type FieldErrors,
+  type UseFormRegister,
+  type UseFormSetValue,
+} from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { addDays, format } from 'date-fns'
@@ -10,8 +18,11 @@ import { useToast } from '../../components/Toast'
 import { Button, Card, Field, Input, Modal, Select, Textarea } from '../../components/ui'
 import { parseDollarsToCents } from '../../lib/format'
 import { COMMON_MAKES, OTHER_MAKE, VEHICLE_YEARS, fetchModelsForMakeYear } from '../../lib/vehicleData'
+import { DEFAULT_DEPOSIT_PERCENT, PAYMENT_METHOD_INFO, computeDefaultDepositCents } from '../../lib/paymentMethods'
 import type { NewQuoteInput } from '../../data/repository'
-import type { CatalogItem, QuoteBundle, Tier } from '../../types'
+import type { CatalogItem, PaymentMethod, QuoteBundle, Tier } from '../../types'
+
+const PAYMENT_METHODS = Object.keys(PAYMENT_METHOD_INFO) as PaymentMethod[]
 
 const itemSchema = z.object({
   brand: z.string(),
@@ -20,18 +31,42 @@ const itemSchema = z.object({
   quantity: z.coerce.number().int().min(1, 'At least 1'),
 })
 
-const optionSchema = z.object({
-  tier: z.enum(['good', 'better', 'insane', 'custom']),
-  name: z.string().min(1, 'Give this option a name'),
-  description: z.string(),
-  price: z
-    .string()
-    .min(1, 'Enter a price')
-    .refine((v) => parseDollarsToCents(v) !== null, 'Enter a valid dollar amount'),
-  laborIncluded: z.boolean(),
-  depositLink: z.string().url('Enter a full URL (https://…)').or(z.literal('')),
-  items: z.array(itemSchema).min(1, 'Add at least one product'),
-})
+const optionSchema = z
+  .object({
+    tier: z.enum(['good', 'better', 'insane', 'custom']),
+    name: z.string().min(1, 'Give this option a name'),
+    description: z.string(),
+    price: z
+      .string()
+      .min(1, 'Enter a price')
+      .refine((v) => parseDollarsToCents(v) !== null, 'Enter a valid dollar amount'),
+    laborIncluded: z.boolean(),
+    depositAmount: z
+      .string()
+      .refine((v) => v.trim() === '' || parseDollarsToCents(v) !== null, 'Enter a valid dollar amount'),
+    depositOverride: z.boolean(),
+    depositMethod: z.enum(['none', 'link', 'zelle', 'cashapp', 'venmo', 'paypal']),
+    depositHandle: z.string(),
+    items: z.array(itemSchema).min(1, 'Add at least one product'),
+  })
+  .superRefine((values, ctx) => {
+    if (!values.depositOverride || values.depositMethod === 'none') return
+    if (!values.depositHandle.trim()) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['depositHandle'], message: 'Enter your payment info' })
+      return
+    }
+    if (values.depositMethod === 'link') {
+      try {
+        new URL(values.depositHandle.trim())
+      } catch {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['depositHandle'],
+          message: 'Enter a full URL (https://…)',
+        })
+      }
+    }
+  })
 
 const schema = z.object({
   firstName: z.string().min(1, "Customer's first name is required"),
@@ -73,7 +108,10 @@ function emptyOption(index: number): FormValues['options'][number] {
     description: '',
     price: '',
     laborIncluded: true,
-    depositLink: '',
+    depositAmount: '',
+    depositOverride: false,
+    depositMethod: 'none',
+    depositHandle: '',
     items: [{ brand: '', model: '', name: '', quantity: 1 }],
   }
 }
@@ -85,7 +123,14 @@ function optionsFromBundle(bundle: QuoteBundle): FormValues['options'] {
     description: o.description,
     price: (o.priceCents / 100).toString(),
     laborIncluded: o.laborIncluded,
-    depositLink: o.depositLink ?? '',
+    depositAmount: o.depositAmountCents != null ? (o.depositAmountCents / 100).toString() : '',
+    // Verbatim carryover, matching today's behavior: a resolved deposit method
+    // always wins over the shop's *current* default when duplicating; if the
+    // original had none, leave it unchecked so submit-time resolution falls
+    // back to the shop's live current default (not a frozen historical one).
+    depositOverride: o.depositPaymentMethod !== null,
+    depositMethod: o.depositPaymentMethod ?? 'none',
+    depositHandle: o.depositPaymentHandle ?? '',
     items: o.items.map((i) => ({ brand: i.brand ?? '', model: i.model ?? '', name: i.name, quantity: i.quantity })),
   }))
 }
@@ -192,22 +237,43 @@ export default function NewQuotePage() {
         expirationDate: values.expirationDate ? new Date(`${values.expirationDate}T12:00:00`).toISOString() : null,
         nextFollowUpAt: values.nextFollowUpAt ? new Date(`${values.nextFollowUpAt}T09:00:00`).toISOString() : null,
       },
-      options: values.options.map((opt, i) => ({
-        tier: opt.tier,
-        name: opt.name.trim(),
-        description: opt.description.trim(),
-        priceCents: parseDollarsToCents(opt.price) ?? 0,
-        laborIncluded: opt.laborIncluded,
-        depositLink: opt.depositLink.trim() || shop?.defaultPaymentLink || null,
-        recommended: i === Number(values.recommendedIndex),
-        items: opt.items.map((item) => ({
-          brand: item.brand.trim() || null,
-          model: item.model.trim() || null,
-          name: item.name.trim(),
-          quantity: item.quantity,
-          description: null,
-        })),
-      })),
+      options: values.options.map((opt, i) => {
+        const priceCents = parseDollarsToCents(opt.price) ?? 0
+        const resolvedMethod: PaymentMethod | null = opt.depositOverride
+          ? opt.depositMethod === 'none'
+            ? null
+            : opt.depositMethod
+          : (shop?.defaultPaymentMethod ?? null)
+        const resolvedHandle: string | null = opt.depositOverride
+          ? opt.depositMethod === 'none'
+            ? null
+            : opt.depositHandle.trim()
+          : (shop?.defaultPaymentHandle ?? null)
+        const resolvedAmount =
+          resolvedMethod === null
+            ? null
+            : opt.depositAmount.trim()
+              ? parseDollarsToCents(opt.depositAmount)
+              : computeDefaultDepositCents(priceCents)
+        return {
+          tier: opt.tier,
+          name: opt.name.trim(),
+          description: opt.description.trim(),
+          priceCents,
+          laborIncluded: opt.laborIncluded,
+          depositPaymentMethod: resolvedMethod,
+          depositPaymentHandle: resolvedHandle,
+          depositAmountCents: resolvedAmount,
+          recommended: i === Number(values.recommendedIndex),
+          items: opt.items.map((item) => ({
+            brand: item.brand.trim() || null,
+            model: item.model.trim() || null,
+            name: item.name.trim(),
+            quantity: item.quantity,
+            description: null,
+          })),
+        }
+      }),
     }
     try {
       const quote = await repo.createQuote(input)
@@ -360,6 +426,7 @@ export default function NewQuotePage() {
               index={index}
               control={control}
               register={register}
+              setValue={setValue}
               errors={errors}
               canRemove={optionFields.length > 1}
               onRemove={() => remove(index)}
@@ -451,6 +518,7 @@ function OptionEditor({
   index,
   control,
   register,
+  setValue,
   errors,
   canRemove,
   onRemove,
@@ -460,6 +528,7 @@ function OptionEditor({
   index: number
   control: Control<FormValues>
   register: UseFormRegister<FormValues>
+  setValue: UseFormSetValue<FormValues>
   errors: FieldErrors<FormValues>
   canRemove: boolean
   onRemove: () => void
@@ -473,6 +542,28 @@ function OptionEditor({
   const brandListId = `brand-suggestions-${index}`
   const modelListId = `model-suggestions-${index}`
   const nameListId = `name-suggestions-${index}`
+
+  // Deposit amount auto-fills at 15% of the price above, live, unless the
+  // staff has manually edited it — tracked by comparing against the last
+  // value this effect itself wrote, so a later price tweak never clobbers a
+  // manual override.
+  const priceValue = useWatch({ control, name: `options.${index}.price` })
+  const depositAmountValue = useWatch({ control, name: `options.${index}.depositAmount` })
+  const lastAutoDepositRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    const cents = parseDollarsToCents(priceValue)
+    if (cents === null) return
+    const suggested = (computeDefaultDepositCents(cents) / 100).toFixed(2)
+    if (depositAmountValue === '' || depositAmountValue === lastAutoDepositRef.current) {
+      setValue(`options.${index}.depositAmount`, suggested)
+      lastAutoDepositRef.current = suggested
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only recompute when price changes, not on every depositAmount keystroke
+  }, [priceValue])
+
+  const depositOverride = useWatch({ control, name: `options.${index}.depositOverride` })
+  const depositMethod = useWatch({ control, name: `options.${index}.depositMethod` })
 
   return (
     <fieldset className="rounded-xl border border-zinc-200 p-4">
@@ -574,10 +665,56 @@ function OptionEditor({
           <Field label="Price (installed)" htmlFor={`opt-${index}-price`} error={optionErrors?.price?.message} required>
             <Input id={`opt-${index}-price`} inputMode="decimal" placeholder="$2,899" {...register(`options.${index}.price`)} />
           </Field>
-          <Field label="Deposit link" htmlFor={`opt-${index}-deposit`} error={optionErrors?.depositLink?.message} hint="Blank = your shop's default payment link.">
-            <Input id={`opt-${index}-deposit`} type="url" {...register(`options.${index}.depositLink`)} />
+          <Field
+            label="Deposit amount"
+            htmlFor={`opt-${index}-deposit-amount`}
+            error={optionErrors?.depositAmount?.message}
+            hint={`Auto-filled at ${DEFAULT_DEPOSIT_PERCENT}% of the price above — change it if you want a different amount.`}
+          >
+            <Input
+              id={`opt-${index}-deposit-amount`}
+              inputMode="decimal"
+              placeholder="$435"
+              {...register(`options.${index}.depositAmount`)}
+            />
           </Field>
         </div>
+        <label className="flex items-center gap-2.5 text-base font-medium text-ink">
+          <input
+            type="checkbox"
+            className="h-5 w-5 accent-[#1d4ed8]"
+            {...register(`options.${index}.depositOverride`)}
+          />
+          Use a different payment method for this deposit
+        </label>
+        {depositOverride ? (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Payment method" htmlFor={`opt-${index}-deposit-method`}>
+              <Select id={`opt-${index}-deposit-method`} {...register(`options.${index}.depositMethod`)}>
+                <option value="none">No deposit for this option</option>
+                {PAYMENT_METHODS.map((m) => (
+                  <option key={m} value={m}>
+                    {PAYMENT_METHOD_INFO[m].label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            {depositMethod && depositMethod !== 'none' ? (
+              <Field
+                label={PAYMENT_METHOD_INFO[depositMethod].handleLabel}
+                htmlFor={`opt-${index}-deposit-handle`}
+                error={optionErrors?.depositHandle?.message}
+                hint={PAYMENT_METHOD_INFO[depositMethod].hint}
+              >
+                <Input
+                  id={`opt-${index}-deposit-handle`}
+                  placeholder={PAYMENT_METHOD_INFO[depositMethod].placeholder}
+                  {...register(`options.${index}.depositHandle`)}
+                />
+              </Field>
+            ) : null}
+          </div>
+        ) : null}
         <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
           <label className="flex items-center gap-2.5 text-base font-medium text-ink">
             <input type="checkbox" className="h-5 w-5 accent-[#1d4ed8]" {...register(`options.${index}.laborIncluded`)} />

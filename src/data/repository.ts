@@ -3,6 +3,7 @@ import type {
   Customer,
   EmailMessage,
   Employee,
+  PaymentMethod,
   PublicQuote,
   Quote,
   QuoteBundle,
@@ -43,7 +44,9 @@ export interface NewQuoteInput {
     description: string
     priceCents: number
     laborIncluded: boolean
-    depositLink: string | null
+    depositPaymentMethod: PaymentMethod | null
+    depositPaymentHandle: string | null
+    depositAmountCents: number | null
     recommended: boolean
     items: Array<{
       brand: string | null
@@ -70,7 +73,8 @@ export interface ShopSettingsPatch {
   website?: string | null
   logoUrl?: string | null
   primaryColor?: string
-  defaultPaymentLink?: string | null
+  defaultPaymentMethod?: PaymentMethod | null
+  defaultPaymentHandle?: string | null
   quoteExpirationDays?: number
   followUpScheduleDays?: number[]
   quoteDisclaimer?: string

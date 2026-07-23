@@ -5,6 +5,7 @@ import type { PublicQuote, ResponseType } from '../types'
 import { resolvePublicQuoteApi, type PublicQuoteApi } from '../data/publicQuote'
 import { RESPONSE_CONFIG } from '../lib/status'
 import { formatCurrency, formatDate } from '../lib/format'
+import { buildPaymentUrl, paymentInstructions } from '../lib/paymentMethods'
 import { Button, LoadingBlock } from '../components/ui'
 
 // What the customer sees. No login, no jargon, big buttons.
@@ -148,55 +149,85 @@ export default function PublicQuotePage() {
 
         {/* Options */}
         <section aria-label="Quote options" className="space-y-4">
-          {quote.options.map((option) => (
-            <div
-              key={option.id}
-              className="rounded-2xl border bg-white p-5 shadow-sm"
-              style={option.recommended ? { borderColor: color, borderWidth: 2 } : { borderColor: '#e4e4e7' }}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-xl font-black text-ink">{option.name}</h2>
-                    {option.recommended ? (
-                      <span
-                        className="flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold text-white"
-                        style={{ backgroundColor: color }}
-                      >
-                        <BadgeCheck className="h-3.5 w-3.5" aria-hidden="true" /> Shop pick
-                      </span>
-                    ) : null}
+          {quote.options.map((option) => {
+            const depositUrl =
+              option.depositPaymentMethod && option.depositPaymentHandle
+                ? buildPaymentUrl(option.depositPaymentMethod, option.depositPaymentHandle, option.depositAmountCents)
+                : null
+            const depositInstructions =
+              option.depositPaymentMethod && option.depositPaymentHandle
+                ? paymentInstructions(option.depositPaymentMethod, option.depositPaymentHandle)
+                : null
+            const depositAmountLabel = option.depositAmountCents != null ? formatCurrency(option.depositAmountCents) : null
+
+            return (
+              <div
+                key={option.id}
+                className="rounded-2xl border bg-white p-5 shadow-sm"
+                style={option.recommended ? { borderColor: color, borderWidth: 2 } : { borderColor: '#e4e4e7' }}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-xl font-black text-ink">{option.name}</h2>
+                      {option.recommended ? (
+                        <span
+                          className="flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold text-white"
+                          style={{ backgroundColor: color }}
+                        >
+                          <BadgeCheck className="h-3.5 w-3.5" aria-hidden="true" /> Shop pick
+                        </span>
+                      ) : null}
+                    </div>
+                    {option.description ? <p className="mt-1 text-base text-zinc-600">{option.description}</p> : null}
                   </div>
-                  {option.description ? <p className="mt-1 text-base text-zinc-600">{option.description}</p> : null}
+                  <p className="shrink-0 text-2xl font-black text-ink">{formatCurrency(option.priceCents)}</p>
                 </div>
-                <p className="shrink-0 text-2xl font-black text-ink">{formatCurrency(option.priceCents)}</p>
+                <ul className="mt-3 space-y-1.5 border-t border-zinc-100 pt-3">
+                  {option.items.map((item, i) => (
+                    <li key={i} className="text-base text-zinc-700">
+                      {item.quantity > 1 ? `${item.quantity}× ` : ''}
+                      {[item.brand, item.model].filter(Boolean).join(' ')}
+                      {item.brand || item.model ? ' — ' : ''}
+                      {item.name}
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-2 text-sm font-medium text-zinc-500">
+                  {option.laborIncluded ? '✓ Professional installation included' : 'Installation billed separately'}
+                </p>
+                {depositUrl ? (
+                  <div className="mt-3 space-y-1.5">
+                    {depositAmountLabel ? (
+                      <p className="text-sm font-semibold text-zinc-600">
+                        {depositAmountLabel} deposit
+                        {option.depositPaymentMethod === 'venmo'
+                          ? " — tap Pay, then enter the amount if it isn't already filled in"
+                          : ''}
+                      </p>
+                    ) : null}
+                    <a
+                      href={depositUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex min-h-12 w-full items-center justify-center rounded-xl text-base font-bold text-white"
+                      style={{ backgroundColor: color }}
+                    >
+                      Hold my spot with a deposit
+                    </a>
+                  </div>
+                ) : depositInstructions ? (
+                  <div
+                    className="mt-3 rounded-xl border-2 p-3 text-center text-base font-semibold"
+                    style={{ borderColor: color, color }}
+                  >
+                    {depositAmountLabel ? `${depositAmountLabel} deposit — ` : ''}
+                    {depositInstructions}
+                  </div>
+                ) : null}
               </div>
-              <ul className="mt-3 space-y-1.5 border-t border-zinc-100 pt-3">
-                {option.items.map((item, i) => (
-                  <li key={i} className="text-base text-zinc-700">
-                    {item.quantity > 1 ? `${item.quantity}× ` : ''}
-                    {[item.brand, item.model].filter(Boolean).join(' ')}
-                    {item.brand || item.model ? ' — ' : ''}
-                    {item.name}
-                  </li>
-                ))}
-              </ul>
-              <p className="mt-2 text-sm font-medium text-zinc-500">
-                {option.laborIncluded ? '✓ Professional installation included' : 'Installation billed separately'}
-              </p>
-              {option.depositLink ? (
-                <a
-                  href={option.depositLink}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-3 inline-flex min-h-12 w-full items-center justify-center rounded-xl text-base font-bold text-white"
-                  style={{ backgroundColor: color }}
-                >
-                  Hold my spot with a deposit
-                </a>
-              ) : null}
-            </div>
-          ))}
+            )
+          })}
         </section>
 
         {/* Contact buttons */}

@@ -6,13 +6,13 @@
 -- or run create_shop_with_owner from the app's onboarding instead.
 
 insert into shops (id, name, slug, phone, email, reply_to_email, address, website,
-  primary_color, default_payment_link, quote_expiration_days, follow_up_schedule_days, quote_disclaimer)
+  primary_color, default_payment_method, default_payment_handle, quote_expiration_days, follow_up_schedule_days, quote_disclaimer)
 values (
   '11111111-1111-1111-1111-111111111111',
   'Big Tex Audio', 'big-tex-audio-seed', '214-555-0100',
   'shop@bigtexaudio.example.com', 'quotes@bigtexaudio.example.com',
   '4820 Ross Ave, Dallas, TX 75204', 'https://bigtexaudio.example.com',
-  '#1d4ed8', 'https://pay.example.com/big-tex-audio/deposit', 30, '{2,3,5}',
+  '#1d4ed8', 'link', 'https://pay.example.com/big-tex-audio/deposit', 30, '{2,3,5}',
   'Final pricing and compatibility may require vehicle inspection. Products and availability are subject to confirmation by the shop.'
 );
 
@@ -46,20 +46,20 @@ values
    'won', 'Came back after check-in email.', now() + interval '18 days',
    now() - interval '9 days', null, 319900);
 
-insert into quote_options (id, quote_id, tier, name, description, price_cents, recommended, position, deposit_link)
+insert into quote_options (id, quote_id, tier, name, description, price_cents, recommended, position, deposit_payment_method, deposit_payment_handle, deposit_amount_cents)
 values
   ('44444444-4444-4444-4444-444444444401', '33333333-3333-3333-3333-333333333301', 'good',
-   'Good', 'Solid daily-driver upgrade.', 189900, false, 0, 'https://pay.example.com/big-tex-audio/deposit'),
+   'Good', 'Solid daily-driver upgrade.', 189900, false, 0, 'link', 'https://pay.example.com/big-tex-audio/deposit', 28485),
   ('44444444-4444-4444-4444-444444444402', '33333333-3333-3333-3333-333333333301', 'better',
-   'Better', 'Adds a hidden 10-inch sub under the rear seat.', 289900, true, 1, 'https://pay.example.com/big-tex-audio/deposit'),
+   'Better', 'Adds a hidden 10-inch sub under the rear seat.', 289900, true, 1, 'link', 'https://pay.example.com/big-tex-audio/deposit', 43485),
   ('44444444-4444-4444-4444-444444444403', '33333333-3333-3333-3333-333333333301', 'insane',
-   'Insane', 'Full front-stage rebuild with DSP tune.', 549900, false, 2, 'https://pay.example.com/big-tex-audio/deposit'),
+   'Insane', 'Full front-stage rebuild with DSP tune.', 549900, false, 2, 'link', 'https://pay.example.com/big-tex-audio/deposit', 82485),
   ('44444444-4444-4444-4444-444444444404', '33333333-3333-3333-3333-333333333302', 'good',
-   'Good', 'Head unit + speaker refresh.', 149900, false, 0, null),
+   'Good', 'Head unit + speaker refresh.', 149900, false, 0, null, null, null),
   ('44444444-4444-4444-4444-444444444405', '33333333-3333-3333-3333-333333333302', 'better',
-   'Better', 'Adds amp + shallow sub behind the seat.', 259900, true, 1, null),
+   'Better', 'Adds amp + shallow sub behind the seat.', 259900, true, 1, null, null, null),
   ('44444444-4444-4444-4444-444444444406', '33333333-3333-3333-3333-333333333303', 'better',
-   'Better', 'Full four-door speaker swap with amp and sub.', 319900, true, 0, null);
+   'Better', 'Full four-door speaker swap with amp and sub.', 319900, true, 0, null, null, null);
 
 insert into quote_items (quote_option_id, brand, model, name, quantity, position)
 values
