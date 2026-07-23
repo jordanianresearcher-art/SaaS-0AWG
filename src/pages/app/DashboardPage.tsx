@@ -80,7 +80,7 @@ export default function DashboardPage() {
                   <Link to={`/app/quotes/${b.quote.id}`} className="flex min-h-14 items-center justify-between gap-3 py-2.5 hover:bg-zinc-50">
                     <div>
                       <p className="text-base font-bold text-ink">{customerDisplayName(b.customer)}</p>
-                      <p className="text-sm text-zinc-600">{formatVehicle(b.customer)}</p>
+                      <p className="text-sm text-zinc-600">{formatVehicle(b.customer) ?? 'No vehicle on file'}</p>
                     </div>
                     <Badge className={STATUS_CONFIG[b.quote.status].badgeClass}>{STATUS_CONFIG[b.quote.status].label}</Badge>
                   </Link>

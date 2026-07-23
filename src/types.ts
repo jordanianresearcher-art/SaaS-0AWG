@@ -51,6 +51,31 @@ export type MembershipRole = 'owner' | 'manager' | 'staff'
 
 export type PaymentMethod = 'link' | 'zelle' | 'cashapp' | 'venmo' | 'paypal'
 
+export type TintBodyStyle = 'sedan_coupe' | 'suv_wagon_van'
+
+export type TintWindowPosition =
+  | 'front_left'
+  | 'front_right'
+  | 'rear_left'
+  | 'rear_right'
+  | 'rear_quarter_left'
+  | 'rear_quarter_right'
+  | 'back_glass'
+
+export interface WindowTintWindow {
+  position: TintWindowPosition
+  included: boolean
+  /** One of TINT_VLT_PERCENTS when included, else null. */
+  vltPercent: number | null
+}
+
+export interface WindowTintConfig {
+  bodyStyle: TintBodyStyle
+  windows: WindowTintWindow[]
+  windshieldIncluded: boolean
+  windshieldVltPercent: number | null
+}
+
 export interface Shop {
   id: string
   name: string
@@ -78,9 +103,9 @@ export interface Customer {
   lastName: string | null
   phone: string | null
   email: string
-  vehicleYear: number
-  vehicleMake: string
-  vehicleModel: string
+  vehicleYear: number | null
+  vehicleMake: string | null
+  vehicleModel: string | null
   vehicleTrim: string | null
   source: string | null
   emailContactPermissionConfirmed: boolean
@@ -141,6 +166,7 @@ export interface Quote {
   nextFollowUpAt: string | null
   emailFollowUpAllowed: boolean
   wonAmountCents: number | null
+  windowTint: WindowTintConfig | null
   createdAt: string
   updatedAt: string
 }
@@ -205,7 +231,8 @@ export interface PublicQuote {
   shopPrimaryColor: string
   quoteDisclaimer: string
   customerFirstName: string
-  vehicle: { year: number; make: string; model: string; trim: string | null }
+  vehicle: { year: number | null; make: string | null; model: string | null; trim: string | null }
+  windowTint: WindowTintConfig | null
   status: QuoteStatus
   expirationDate: string | null
   optedOut: boolean

@@ -17,7 +17,7 @@ export default function QuotesPage() {
     return bundles.filter((b) => {
       if (statusFilter !== 'all' && b.quote.status !== statusFilter) return false
       if (!term) return true
-      const haystack = `${customerDisplayName(b.customer)} ${formatVehicle(b.customer)} ${b.customer.email}`.toLowerCase()
+      const haystack = `${customerDisplayName(b.customer)} ${formatVehicle(b.customer) ?? ''} ${b.customer.email}`.toLowerCase()
       return haystack.includes(term)
     })
   }, [bundles, search, statusFilter])
@@ -83,7 +83,7 @@ export default function QuotesPage() {
                 <Card className="flex items-center justify-between gap-3 hover:border-brand">
                   <div className="min-w-0">
                     <p className="truncate text-lg font-bold text-ink">{customerDisplayName(b.customer)}</p>
-                    <p className="truncate text-base text-zinc-600">{formatVehicle(b.customer)}</p>
+                    <p className="truncate text-base text-zinc-600">{formatVehicle(b.customer) ?? 'No vehicle on file'}</p>
                     <p className="mt-1 text-sm text-zinc-500">
                       Created {formatDate(b.quote.createdAt)}
                       {b.quote.lastEmailedAt ? ` · Emailed ${formatDate(b.quote.lastEmailedAt)}` : ' · Not emailed yet'}

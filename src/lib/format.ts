@@ -17,18 +17,23 @@ export function parseDollarsToCents(input: string): number | null {
   return Math.round(value * 100)
 }
 
+/** Returns null when no vehicle info is on file, rather than a string with blank/undefined parts. */
 export function formatVehicle(v: {
-  vehicleYear: number
-  vehicleMake: string
-  vehicleModel: string
+  vehicleYear: number | null
+  vehicleMake: string | null
+  vehicleModel: string | null
   vehicleTrim?: string | null
-}): string {
-  const parts = [String(v.vehicleYear), v.vehicleMake, v.vehicleModel]
+}): string | null {
+  const parts = [v.vehicleYear ? String(v.vehicleYear) : null, v.vehicleMake, v.vehicleModel].filter(
+    (p): p is string => Boolean(p),
+  )
+  if (parts.length === 0) return null
   if (v.vehicleTrim) parts.push(v.vehicleTrim)
   return parts.join(' ')
 }
 
 export function customerDisplayName(c: { firstName: string; lastName?: string | null }): string {
+  if (!c.firstName) return 'New lead'
   return c.lastName ? `${c.firstName} ${c.lastName}` : c.firstName
 }
 

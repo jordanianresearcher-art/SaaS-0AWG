@@ -186,6 +186,7 @@ export class DemoRepository implements DataRepository {
       nextFollowUpAt: input.quote.nextFollowUpAt,
       emailFollowUpAllowed: true,
       wonAmountCents: null,
+      windowTint: input.quote.windowTint,
       createdAt: now,
       updatedAt: now,
     }
@@ -345,6 +346,7 @@ export class DemoRepository implements DataRepository {
         model: customer.vehicleModel,
         trim: customer.vehicleTrim,
       },
+      windowTint: quote.windowTint,
       status: quote.status,
       expirationDate: quote.expirationDate,
       optedOut: customer.emailOptOutAt !== null,

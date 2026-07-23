@@ -58,4 +58,28 @@ describe('renderEmail', () => {
     expect(email.html).not.toContain('<script>alert(1)</script>')
     expect(email.html).toContain('&lt;script&gt;')
   })
+
+  it.each(ALL_TEMPLATES)('reads as a complete sentence with no vehicle on file (%s)', (template) => {
+    const ctx = makeContext()
+    ctx.customer = { ...ctx.customer, vehicleYear: null, vehicleMake: null, vehicleModel: null, vehicleTrim: null }
+    const email = renderEmail(template, ctx)
+    expect(email.subject).not.toMatch(/null|undefined/i)
+    expect(email.text).not.toMatch(/null|undefined/i)
+    expect(email.html).not.toMatch(/null|undefined/i)
+  })
+
+  it('shows a window tint teaser only on the initial email, only when a tint config exists', () => {
+    const ctx = makeContext()
+    expect(ctx.quote.windowTint).not.toBeNull() // fixture: the seeded F-150 quote has one
+
+    const initialWithTint = renderEmail('initial', ctx)
+    expect(initialWithTint.text).toContain('Includes window tint')
+
+    const checkInWithTint = renderEmail('check_in', ctx)
+    expect(checkInWithTint.text).not.toContain('Includes window tint')
+
+    const ctxNoTint = { ...ctx, quote: { ...ctx.quote, windowTint: null } }
+    const initialNoTint = renderEmail('initial', ctxNoTint)
+    expect(initialNoTint.text).not.toContain('Includes window tint')
+  })
 })

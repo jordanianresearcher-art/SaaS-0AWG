@@ -15,6 +15,7 @@ import type {
   Shop,
   TemplateType,
   Tier,
+  WindowTintConfig,
 } from '../types'
 
 // Single abstraction both modes implement. Demo mode persists to localStorage;
@@ -26,9 +27,9 @@ export interface NewQuoteInput {
     lastName: string | null
     email: string
     phone: string | null
-    vehicleYear: number
-    vehicleMake: string
-    vehicleModel: string
+    vehicleYear: number | null
+    vehicleMake: string | null
+    vehicleModel: string | null
     vehicleTrim: string | null
     source: string | null
     emailContactPermissionConfirmed: boolean
@@ -37,6 +38,7 @@ export interface NewQuoteInput {
     internalNotes: string | null
     expirationDate: string | null
     nextFollowUpAt: string | null
+    windowTint: WindowTintConfig | null
   }
   options: Array<{
     tier: Tier

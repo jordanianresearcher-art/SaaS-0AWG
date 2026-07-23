@@ -8,8 +8,10 @@ import type {
   QuoteOption,
   QuoteResponse,
   Shop,
+  WindowTintConfig,
 } from '../types'
 import { computeDefaultDepositCents } from '../lib/paymentMethods'
+import { createDefaultWindowTintConfig } from '../lib/windowTint'
 
 // Seeded fictional Dallas shop used by demo mode. Everything is generated
 // relative to "now" so the follow-up queue and reports always look alive.
@@ -28,7 +30,7 @@ export interface DemoDB {
   seedVersion: number
 }
 
-export const DEMO_SEED_VERSION = 5
+export const DEMO_SEED_VERSION = 6
 
 const SHOP_ID = 'demo-shop'
 
@@ -57,6 +59,7 @@ interface QuoteSeed {
     expirationDaysAhead: number | null
     lastEmailedDaysAgo: number | null
     nextFollowUpInDays: number | null
+    windowTint?: WindowTintConfig | null
   }
   options: Array<{
     tier: QuoteOption['tier']
@@ -83,6 +86,12 @@ const SEEDS: QuoteSeed[] = [
       status: 'viewed', internalNotes: 'Wants clean install, keeps rear seat storage. Leaning Better.',
       emailFollowUpAllowed: true, wonAmountCents: null,
       createdDaysAgo: 4, expirationDaysAhead: 26, lastEmailedDaysAgo: 3, nextFollowUpInDays: 0,
+      windowTint: {
+        ...createDefaultWindowTintConfig('suv_wagon_van'),
+        windows: createDefaultWindowTintConfig('suv_wagon_van').windows.map((w) => ({ ...w, vltPercent: 20 })),
+        windshieldIncluded: true,
+        windshieldVltPercent: 70,
+      },
     },
     options: [
       {
@@ -353,6 +362,15 @@ const SEEDS: QuoteSeed[] = [
       status: 'responded', internalNotes: 'Payday is the 1st — she asked us to ping her after.',
       emailFollowUpAllowed: true, wonAmountCents: null,
       createdDaysAgo: 5, expirationDaysAhead: 25, lastEmailedDaysAgo: 4, nextFollowUpInDays: 0,
+      windowTint: {
+        ...createDefaultWindowTintConfig('sedan_coupe'),
+        windows: createDefaultWindowTintConfig('sedan_coupe').windows.map((w) => ({
+          ...w,
+          vltPercent: w.position === 'back_glass' ? 5 : 35,
+        })),
+        windshieldIncluded: false,
+        windshieldVltPercent: null,
+      },
     },
     options: [
       {
@@ -448,6 +466,7 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
           : null,
       emailFollowUpAllowed: seed.quote.emailFollowUpAllowed,
       wonAmountCents: seed.quote.wonAmountCents,
+      windowTint: seed.quote.windowTint ?? null,
       createdAt: created,
       updatedAt: created,
     })

@@ -6,6 +6,7 @@ import { resolvePublicQuoteApi, type PublicQuoteApi } from '../data/publicQuote'
 import { RESPONSE_CONFIG } from '../lib/status'
 import { formatCurrency, formatDate } from '../lib/format'
 import { buildPaymentUrl, paymentInstructions } from '../lib/paymentMethods'
+import { summarizeWindowTint } from '../lib/windowTint'
 import { Button, LoadingBlock } from '../components/ui'
 
 // What the customer sees. No login, no jargon, big buttons.
@@ -136,10 +137,27 @@ export default function PublicQuotePage() {
           <h1 className="text-3xl font-black text-ink">
             {quote.customerFirstName}, here&apos;s your quote
           </h1>
-          <p className="mt-1 text-lg text-zinc-600">
-            {quote.vehicle.year} {quote.vehicle.make} {quote.vehicle.model}
-            {quote.vehicle.trim ? ` ${quote.vehicle.trim}` : ''}
-          </p>
+          {quote.vehicle.year && quote.vehicle.make && quote.vehicle.model ? (
+            <p className="mt-1 text-lg text-zinc-600">
+              {quote.vehicle.year} {quote.vehicle.make} {quote.vehicle.model}
+              {quote.vehicle.trim ? ` ${quote.vehicle.trim}` : ''}
+            </p>
+          ) : null}
+          {quote.windowTint
+            ? (() => {
+                const summary = summarizeWindowTint(quote.windowTint)
+                const percentLabel =
+                  summary.uniformPercent !== null
+                    ? `${summary.uniformPercent}%`
+                    : summary.windowLines.map((w) => `${w.label} ${w.vltPercent}%`).join(', ')
+                return (
+                  <p className="mt-1 text-base text-zinc-600">
+                    Window tint: {summary.bodyStyleLabel} &middot; {percentLabel}
+                    {summary.windshield ? ` · Windshield ${summary.windshield.vltPercent}%` : ''}
+                  </p>
+                )
+              })()
+            : null}
           {quote.expirationDate ? (
             <p className="mt-2 text-base font-semibold text-zinc-700">
               Good through {formatDate(quote.expirationDate)}
@@ -149,6 +167,9 @@ export default function PublicQuotePage() {
 
         {/* Options */}
         <section aria-label="Quote options" className="space-y-4">
+          {quote.options.length === 0 ? (
+            <p className="text-center text-base text-zinc-500">Pricing for this quote is coming soon.</p>
+          ) : null}
           {quote.options.map((option) => {
             const depositUrl =
               option.depositPaymentMethod && option.depositPaymentHandle

@@ -75,7 +75,7 @@ export default function FollowUpsPage() {
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div>
                             <p className="text-lg font-bold text-ink">{customerDisplayName(b.customer)}</p>
-                            <p className="text-base text-zinc-600">{formatVehicle(b.customer)}</p>
+                            <p className="text-base text-zinc-600">{formatVehicle(b.customer) ?? 'No vehicle on file'}</p>
                             <p className="mt-0.5 text-sm text-zinc-500">
                               {lastEmail
                                 ? `Last email: ${TEMPLATE_CONFIG[lastEmail.templateType].shortLabel} · ${formatDateTime(lastEmail.createdAt)}`

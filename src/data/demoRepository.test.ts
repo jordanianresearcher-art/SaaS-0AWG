@@ -69,7 +69,7 @@ describe('DemoRepository', () => {
         source: null,
         emailContactPermissionConfirmed: true,
       },
-      quote: { internalNotes: null, expirationDate: null, nextFollowUpAt: null },
+      quote: { internalNotes: null, expirationDate: null, nextFollowUpAt: null, windowTint: null },
       options: [
         {
           tier: 'good',
@@ -90,6 +90,34 @@ describe('DemoRepository', () => {
     expect(bundle?.options).toHaveLength(1)
     expect(bundle?.options[0].items).toHaveLength(1)
     expect(bundle?.customer.emailContactPermissionConfirmedAt).toBeTruthy()
+  })
+
+  it('creates a bare quote with no vehicle and no pricing options', async () => {
+    const quote = await repo.createQuote({
+      customer: {
+        firstName: '',
+        lastName: null,
+        email: 'lead@example.com',
+        phone: null,
+        vehicleYear: null,
+        vehicleMake: null,
+        vehicleModel: null,
+        vehicleTrim: null,
+        source: null,
+        emailContactPermissionConfirmed: true,
+      },
+      quote: { internalNotes: null, expirationDate: null, nextFollowUpAt: null, windowTint: null },
+      options: [],
+    })
+    const bundle = await repo.getQuoteBundle(quote.id)
+    expect(bundle?.options).toHaveLength(0)
+    expect(bundle?.customer.vehicleYear).toBeNull()
+
+    await repo.setQuoteStatus(quote.id, 'emailed')
+    const pub = await repo.getPublicQuote(quote.publicToken)
+    expect(pub).not.toBeNull()
+    expect(pub!.options).toHaveLength(0)
+    expect(pub!.vehicle.year).toBeNull()
   })
 
   it('serves a sanitized public quote (no last name, phone, email, or notes)', async () => {

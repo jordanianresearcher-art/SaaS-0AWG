@@ -45,6 +45,14 @@ describe('formatVehicle', () => {
       formatVehicle({ vehicleYear: 2018, vehicleMake: 'Chevrolet', vehicleModel: 'Tahoe', vehicleTrim: null }),
     ).toBe('2018 Chevrolet Tahoe')
   })
+  it('returns null when no vehicle info is on file', () => {
+    expect(formatVehicle({ vehicleYear: null, vehicleMake: null, vehicleModel: null, vehicleTrim: null })).toBeNull()
+  })
+  it('handles a defensive partial case (year missing)', () => {
+    expect(formatVehicle({ vehicleYear: null, vehicleMake: 'Ford', vehicleModel: 'F-150', vehicleTrim: null })).toBe(
+      'Ford F-150',
+    )
+  })
 })
 
 describe('customerDisplayName', () => {
@@ -53,6 +61,9 @@ describe('customerDisplayName', () => {
   })
   it('falls back to first name only', () => {
     expect(customerDisplayName({ firstName: 'Renee', lastName: null })).toBe('Renee')
+  })
+  it('falls back to a generic label for a bare lead with no name', () => {
+    expect(customerDisplayName({ firstName: '', lastName: null })).toBe('New lead')
   })
 })
 

@@ -16,9 +16,11 @@ import { Package, Plus, Trash2 } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
 import { Button, Card, Field, Input, Modal, Select, Textarea } from '../../components/ui'
+import WindowTintEditor from '../../components/WindowTintEditor'
 import { parseDollarsToCents } from '../../lib/format'
 import { COMMON_MAKES, OTHER_MAKE, VEHICLE_YEARS, fetchModelsForMakeYear } from '../../lib/vehicleData'
 import { DEFAULT_DEPOSIT_PERCENT, PAYMENT_METHOD_INFO, computeDefaultDepositCents } from '../../lib/paymentMethods'
+import { TINT_VLT_PERCENTS } from '../../lib/windowTint'
 import type { NewQuoteInput } from '../../data/repository'
 import type { CatalogItem, PaymentMethod, QuoteBundle, Tier } from '../../types'
 
@@ -68,29 +70,81 @@ const optionSchema = z
     }
   })
 
-const schema = z.object({
-  firstName: z.string().min(1, "Customer's first name is required"),
-  lastName: z.string(),
-  email: z.string().email('A valid email is required — quotes are sent by email'),
-  phone: z.string(),
-  vehicleYear: z.coerce
-    .number()
-    .int()
-    .min(1950, 'Enter the vehicle year')
-    .max(new Date().getFullYear() + 2, 'That year is in the future'),
-  vehicleMake: z.string().min(1, 'Vehicle make is required'),
-  vehicleModel: z.string().min(1, 'Vehicle model is required'),
-  vehicleTrim: z.string(),
-  source: z.string(),
-  permissionConfirmed: z.literal(true, {
-    errorMap: () => ({ message: 'You must confirm the customer asked for this quote' }),
-  }),
-  expirationDate: z.string(),
-  internalNotes: z.string(),
-  nextFollowUpAt: z.string(),
-  options: z.array(optionSchema).min(1, 'Add at least one option').max(3, 'No more than three options'),
-  recommendedIndex: z.coerce.number().int().min(0),
-})
+const tintPercentSchema = z
+  .number()
+  .refine((v) => (TINT_VLT_PERCENTS as readonly number[]).includes(v), 'Choose a valid tint %')
+  .nullable()
+
+const tintWindowSchema = z
+  .object({
+    position: z.enum([
+      'front_left',
+      'front_right',
+      'rear_left',
+      'rear_right',
+      'rear_quarter_left',
+      'rear_quarter_right',
+      'back_glass',
+    ]),
+    included: z.boolean(),
+    vltPercent: tintPercentSchema,
+  })
+  .superRefine((v, ctx) => {
+    if (v.included && v.vltPercent === null) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['vltPercent'], message: 'Choose a tint %' })
+    }
+  })
+
+const windowTintSchema = z
+  .object({
+    bodyStyle: z.enum(['sedan_coupe', 'suv_wagon_van']),
+    windows: z.array(tintWindowSchema),
+    windshieldIncluded: z.boolean(),
+    windshieldVltPercent: tintPercentSchema,
+  })
+  .superRefine((v, ctx) => {
+    if (v.windshieldIncluded && v.windshieldVltPercent === null) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['windshieldVltPercent'], message: 'Choose a tint %' })
+    }
+  })
+
+const schema = z
+  .object({
+    firstName: z.string(),
+    lastName: z.string(),
+    email: z.string().email('A valid email is required — quotes are sent by email'),
+    phone: z.string(),
+    // Blank ('') means "no vehicle yet" — a real select from VEHICLE_YEARS is
+    // the only other possible value, so no numeric range check is needed here.
+    vehicleYear: z.string(),
+    vehicleMake: z.string(),
+    vehicleModel: z.string(),
+    vehicleTrim: z.string(),
+    source: z.string(),
+    permissionConfirmed: z.literal(true, {
+      errorMap: () => ({ message: 'You must confirm the customer asked for this quote' }),
+    }),
+    expirationDate: z.string(),
+    internalNotes: z.string(),
+    nextFollowUpAt: z.string(),
+    options: z.array(optionSchema).max(3, 'No more than three options'),
+    recommendedIndex: z.coerce.number().int().min(0),
+    windowTint: windowTintSchema.nullable(),
+  })
+  .superRefine((values, ctx) => {
+    // Vehicle is all-or-nothing: blank is fine, a partial entry is not.
+    const hasAny = values.vehicleYear !== '' || values.vehicleMake.trim() !== '' || values.vehicleModel.trim() !== ''
+    if (!hasAny) return
+    if (values.vehicleYear === '') {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['vehicleYear'], message: 'Enter the vehicle year' })
+    }
+    if (!values.vehicleMake.trim()) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['vehicleMake'], message: 'Vehicle make is required' })
+    }
+    if (!values.vehicleModel.trim()) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['vehicleModel'], message: 'Vehicle model is required' })
+    }
+  })
 
 type FormValues = z.infer<typeof schema>
 
@@ -187,9 +241,9 @@ export default function NewQuotePage() {
           lastName: '',
           email: '',
           phone: '',
-          vehicleYear: duplicateFrom.customer.vehicleYear,
-          vehicleMake: duplicateFrom.customer.vehicleMake,
-          vehicleModel: duplicateFrom.customer.vehicleModel,
+          vehicleYear: duplicateFrom.customer.vehicleYear != null ? String(duplicateFrom.customer.vehicleYear) : '',
+          vehicleMake: duplicateFrom.customer.vehicleMake ?? '',
+          vehicleModel: duplicateFrom.customer.vehicleModel ?? '',
           vehicleTrim: duplicateFrom.customer.vehicleTrim ?? '',
           source: duplicateFrom.customer.source ?? '',
           expirationDate: defaultExpiration,
@@ -197,26 +251,37 @@ export default function NewQuotePage() {
           nextFollowUpAt: '',
           options: optionsFromBundle(duplicateFrom),
           recommendedIndex: Math.max(0, duplicateFrom.options.findIndex((o) => o.recommended)),
+          windowTint: duplicateFrom.quote.windowTint,
         }
       : {
           firstName: '',
           lastName: '',
           email: '',
           phone: '',
+          vehicleYear: '',
+          vehicleMake: '',
+          vehicleModel: '',
           vehicleTrim: '',
           source: '',
           expirationDate: defaultExpiration,
           internalNotes: '',
           nextFollowUpAt: '',
-          options: [emptyOption(0), emptyOption(1)],
-          recommendedIndex: 1,
+          options: [],
+          recommendedIndex: 0,
+          windowTint: null,
         },
   })
 
   const { fields: optionFields, append, remove } = useFieldArray({ control, name: 'options' })
 
   const watchedMake = watch('vehicleMake')
-  const [customMake, setCustomMake] = useState(() => Boolean(duplicateFrom && !COMMON_MAKES.includes(duplicateFrom.customer.vehicleMake)))
+  const [customMake, setCustomMake] = useState(() =>
+    Boolean(duplicateFrom && duplicateFrom.customer.vehicleMake && !COMMON_MAKES.includes(duplicateFrom.customer.vehicleMake)),
+  )
+  const [vehicleOpen, setVehicleOpen] = useState(() =>
+    Boolean(duplicateFrom && (duplicateFrom.customer.vehicleYear || duplicateFrom.customer.vehicleMake || duplicateFrom.customer.vehicleModel)),
+  )
+  const [tintOpen, setTintOpen] = useState(() => Boolean(duplicateFrom?.quote.windowTint))
 
   const onSubmit = async (values: FormValues) => {
     const input: NewQuoteInput = {
@@ -225,9 +290,9 @@ export default function NewQuotePage() {
         lastName: values.lastName.trim() || null,
         email: values.email.trim(),
         phone: values.phone.trim() || null,
-        vehicleYear: values.vehicleYear,
-        vehicleMake: values.vehicleMake.trim(),
-        vehicleModel: values.vehicleModel.trim(),
+        vehicleYear: values.vehicleYear ? Number(values.vehicleYear) : null,
+        vehicleMake: values.vehicleMake.trim() || null,
+        vehicleModel: values.vehicleModel.trim() || null,
         vehicleTrim: values.vehicleTrim.trim() || null,
         source: values.source || null,
         emailContactPermissionConfirmed: values.permissionConfirmed,
@@ -236,6 +301,7 @@ export default function NewQuotePage() {
         internalNotes: values.internalNotes.trim() || null,
         expirationDate: values.expirationDate ? new Date(`${values.expirationDate}T12:00:00`).toISOString() : null,
         nextFollowUpAt: values.nextFollowUpAt ? new Date(`${values.nextFollowUpAt}T09:00:00`).toISOString() : null,
+        windowTint: values.windowTint,
       },
       options: values.options.map((opt, i) => {
         const priceCents = parseDollarsToCents(opt.price) ?? 0
@@ -286,7 +352,7 @@ export default function NewQuotePage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
+    <div className="mx-auto max-w-2xl space-y-6 lg:max-w-none">
       <div>
         <h1 className="text-3xl font-black text-ink">Create Quote</h1>
         <p className="mt-1 text-base text-zinc-600">
@@ -300,11 +366,15 @@ export default function NewQuotePage() {
         </div>
       ) : null}
 
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6" noValidate>
+      <form
+        onSubmit={handleSubmit(onSubmit)}
+        className="space-y-6 lg:grid lg:grid-cols-2 lg:items-start lg:gap-6 lg:space-y-0"
+        noValidate
+      >
         <Card className="space-y-4">
           <h2 className="text-xl font-bold text-ink">Customer</h2>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="First name" htmlFor="q-first" error={errors.firstName?.message} required>
+            <Field label="First name" htmlFor="q-first" error={errors.firstName?.message}>
               <Input id="q-first" autoComplete="off" {...register('firstName')} />
             </Field>
             <Field label="Last name" htmlFor="q-last">
@@ -317,68 +387,6 @@ export default function NewQuotePage() {
           <Field label="Phone" htmlFor="q-phone" hint="For click-to-call. We never text customers.">
             <Input id="q-phone" type="tel" inputMode="tel" autoComplete="off" {...register('phone')} />
           </Field>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <Field label="Year" htmlFor="q-year" error={errors.vehicleYear?.message} required>
-              <Select id="q-year" defaultValue="" {...register('vehicleYear')}>
-                <option value="" disabled>
-                  Year
-                </option>
-                {VEHICLE_YEARS.map((y) => (
-                  <option key={y} value={y}>
-                    {y}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="Make" htmlFor="q-make" error={errors.vehicleMake?.message} required>
-              {customMake ? (
-                <div className="flex gap-1.5">
-                  <Input id="q-make" placeholder="Make" {...register('vehicleMake')} />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCustomMake(false)
-                      setValue('vehicleMake', '')
-                    }}
-                    className="shrink-0 whitespace-nowrap px-2 text-sm font-semibold text-brand"
-                  >
-                    List
-                  </button>
-                </div>
-              ) : (
-                <Select
-                  id="q-make"
-                  defaultValue=""
-                  {...register('vehicleMake', {
-                    onChange: (e) => {
-                      if (e.target.value === OTHER_MAKE) {
-                        setCustomMake(true)
-                        setValue('vehicleMake', '')
-                      }
-                    },
-                  })}
-                >
-                  <option value="" disabled>
-                    Make
-                  </option>
-                  {COMMON_MAKES.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </Select>
-              )}
-            </Field>
-            <ModelField
-              register={register}
-              error={errors.vehicleModel?.message}
-              year={watch('vehicleYear')}
-              make={watchedMake}
-            />
-            <Field label="Trim" htmlFor="q-trim">
-              <Input id="q-trim" placeholder="Lariat" {...register('vehicleTrim')} />
-            </Field>
-          </div>
           <Field label="How did they find you?" htmlFor="q-source">
             <Select id="q-source" {...register('source')}>
               <option value="">Not sure</option>
@@ -408,32 +416,132 @@ export default function NewQuotePage() {
           </div>
         </Card>
 
-        <Card className="space-y-5">
+        <Card className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-bold text-ink">Vehicle</h2>
+            {!vehicleOpen ? (
+              <Button variant="secondary" onClick={() => setVehicleOpen(true)}>
+                <Plus className="h-5 w-5" aria-hidden="true" /> Add vehicle
+              </Button>
+            ) : (
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setVehicleOpen(false)
+                  setCustomMake(false)
+                  setValue('vehicleYear', '')
+                  setValue('vehicleMake', '')
+                  setValue('vehicleModel', '')
+                  setValue('vehicleTrim', '')
+                }}
+              >
+                <Trash2 className="h-5 w-5" aria-hidden="true" /> Remove vehicle
+              </Button>
+            )}
+          </div>
+          {vehicleOpen ? (
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <Field label="Year" htmlFor="q-year" error={errors.vehicleYear?.message}>
+                <Select id="q-year" defaultValue="" {...register('vehicleYear')}>
+                  <option value="" disabled>
+                    Year
+                  </option>
+                  {VEHICLE_YEARS.map((y) => (
+                    <option key={y} value={y}>
+                      {y}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Make" htmlFor="q-make" error={errors.vehicleMake?.message}>
+                {customMake ? (
+                  <div className="flex gap-1.5">
+                    <Input id="q-make" placeholder="Make" {...register('vehicleMake')} />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCustomMake(false)
+                        setValue('vehicleMake', '')
+                      }}
+                      className="shrink-0 whitespace-nowrap px-2 text-sm font-semibold text-brand"
+                    >
+                      List
+                    </button>
+                  </div>
+                ) : (
+                  <Select
+                    id="q-make"
+                    defaultValue=""
+                    {...register('vehicleMake', {
+                      onChange: (e) => {
+                        if (e.target.value === OTHER_MAKE) {
+                          setCustomMake(true)
+                          setValue('vehicleMake', '')
+                        }
+                      },
+                    })}
+                  >
+                    <option value="" disabled>
+                      Make
+                    </option>
+                    {COMMON_MAKES.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </Field>
+              <ModelField register={register} error={errors.vehicleModel?.message} year={watch('vehicleYear')} make={watchedMake} />
+              <Field label="Trim" htmlFor="q-trim">
+                <Input id="q-trim" placeholder="Lariat" {...register('vehicleTrim')} />
+              </Field>
+            </div>
+          ) : (
+            <p className="text-sm text-zinc-500">Optional — add if you want the vehicle shown on the quote and email.</p>
+          )}
+        </Card>
+
+        <Card className="space-y-5 lg:col-span-2">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-bold text-ink">Options</h2>
             {optionFields.length < 3 ? (
-              <Button variant="secondary" onClick={() => append(emptyOption(optionFields.length))}>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  const wasEmpty = optionFields.length === 0
+                  append(emptyOption(optionFields.length))
+                  if (wasEmpty) setValue('recommendedIndex', 0)
+                }}
+              >
                 <Plus className="h-5 w-5" aria-hidden="true" /> Add option
               </Button>
             ) : null}
           </div>
           <p className="-mt-3 text-sm text-zinc-500">
-            One option is fine if you don&apos;t do tiers. Three (Good / Better / Insane) sells best.
+            One option is fine if you don&apos;t do tiers. Three (Good / Better / Insane) sells best. Optional — you
+            can save a bare quote and price it later.
           </p>
-          {optionFields.map((field, index) => (
-            <OptionEditor
-              key={field.id}
-              index={index}
-              control={control}
-              register={register}
-              setValue={setValue}
-              errors={errors}
-              canRemove={optionFields.length > 1}
-              onRemove={() => remove(index)}
-              catalogItems={catalogItems}
-              itemHistory={itemHistory}
-            />
-          ))}
+          {optionFields.length === 0 ? (
+            <p className="text-sm text-zinc-500">No pricing options yet — add one when you&apos;re ready.</p>
+          ) : null}
+          <div className="flex flex-col gap-4 lg:flex-row lg:flex-nowrap lg:items-start">
+            {optionFields.map((field, index) => (
+              <div key={field.id} className="lg:min-w-0 lg:flex-1 lg:basis-72">
+                <OptionEditor
+                  index={index}
+                  control={control}
+                  register={register}
+                  setValue={setValue}
+                  errors={errors}
+                  canRemove={true}
+                  onRemove={() => remove(index)}
+                  catalogItems={catalogItems}
+                  itemHistory={itemHistory}
+                />
+              </div>
+            ))}
+          </div>
           {typeof errors.options?.message === 'string' ? (
             <p role="alert" className="text-sm font-medium text-red-700">
               {errors.options.message}
@@ -441,7 +549,43 @@ export default function NewQuotePage() {
           ) : null}
         </Card>
 
-        <Card className="space-y-4">
+        <Card className="space-y-4 lg:col-span-2">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-bold text-ink">Window Tint</h2>
+            {!tintOpen ? (
+              <Button variant="secondary" onClick={() => setTintOpen(true)}>
+                <Plus className="h-5 w-5" aria-hidden="true" /> Add window tint
+              </Button>
+            ) : (
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setTintOpen(false)
+                  setValue('windowTint', null)
+                }}
+              >
+                <Trash2 className="h-5 w-5" aria-hidden="true" /> Remove window tint
+              </Button>
+            )}
+          </div>
+          {tintOpen ? (
+            <>
+              <WindowTintEditor
+                value={watch('windowTint')}
+                onChange={(next) => setValue('windowTint', next, { shouldValidate: true, shouldDirty: true })}
+              />
+              {errors.windowTint ? (
+                <p role="alert" className="text-sm font-medium text-red-700">
+                  Choose a tint % for each window you&apos;re including, or turn it off.
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <p className="text-sm text-zinc-500">Optional — describe any window tint work to include on the quote.</p>
+          )}
+        </Card>
+
+        <Card className="space-y-4 lg:col-span-2">
           <h2 className="text-xl font-bold text-ink">Quote details</h2>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Good through" htmlFor="q-exp" hint="Shown to the customer on the quote.">
@@ -456,7 +600,7 @@ export default function NewQuotePage() {
           </Field>
         </Card>
 
-        <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+        <div className="flex flex-col gap-3 sm:flex-row sm:justify-end lg:col-span-2">
           <Button variant="secondary" onClick={() => navigate(-1)}>
             Cancel
           </Button>
@@ -477,20 +621,21 @@ function ModelField({
 }: {
   register: UseFormRegister<FormValues>
   error?: string
-  year: number
+  year: string
   make: string
 }) {
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
+  const yearNum = year ? Number(year) : 0
 
   useEffect(() => {
-    if (!year || !make) {
+    if (!yearNum || !make) {
       setSuggestions([])
       return
     }
     let cancelled = false
     setLoading(true)
-    fetchModelsForMakeYear(make, year)
+    fetchModelsForMakeYear(make, yearNum)
       .then((models) => {
         if (!cancelled) setSuggestions(models)
       })
@@ -500,10 +645,10 @@ function ModelField({
     return () => {
       cancelled = true
     }
-  }, [year, make])
+  }, [yearNum, make])
 
   return (
-    <Field label="Model" htmlFor="q-model" error={error} hint={loading ? 'Looking up models…' : undefined} required>
+    <Field label="Model" htmlFor="q-model" error={error} hint={loading ? 'Looking up models…' : undefined}>
       <Input id="q-model" list="q-model-suggestions" placeholder="F-150" {...register('vehicleModel')} />
       <datalist id="q-model-suggestions">
         {suggestions.map((m) => (

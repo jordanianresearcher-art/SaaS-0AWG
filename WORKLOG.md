@@ -384,3 +384,119 @@ Zelle/Cash App/Venmo/PayPal.me instead of a raw checkout URL.
   confirmed absent from `create_shop_with_owner`'s grants after the
   drop/recreate. A live anonymous `get_public_quote` RPC call against a
   real quote confirmed the new field names come back correctly.
+
+---
+
+## Round 7 — Create Quote overhaul: responsive layout, optional sections, window tint
+
+The user asked for the Create Quote page to go multi-column on desktop
+(still stacked on phone), for every section except email to become
+optional so a bare lead can be saved without pricing or vehicle info, and
+for a new window-tint configurator — described as "advanced" but wanting
+a "really slick, modern" UI.
+
+### Done
+- **Desktop layout.** The page's own `max-w-2xl` cap now relaxes to fill
+  `AppLayout.tsx`'s existing `max-w-6xl` shell at `lg:`, and the form
+  itself becomes a 2-column grid at that breakpoint (`QuoteDetailPage.tsx`
+  already had `lg:grid-cols-2` — direct precedent, not a novel pattern for
+  this codebase). Customer and Vehicle sit side by side; Options, Window
+  Tint, and Quote details span both columns since they need more room.
+  Inside Options, the pricing-tier cards (Good/Better/Insane) reflow from
+  a vertical stack into a horizontal row via a `flex lg:flex-row` wrapper
+  around the existing `OptionEditor` — `OptionEditor` itself needed zero
+  internal changes. Verified at 1024/1280px via screenshots — no cramping,
+  so the simple wrapper-only approach was enough; no container-query
+  fallback was needed.
+- **Only email is required.** First name dropped its `required` mark.
+  Vehicle and Options both became fully optional, progressive-disclosure
+  sections — Vehicle moved out of the Customer card into its own, starting
+  collapsed behind an "+ Add vehicle" button (matching the "+ Add
+  option"/"+ Add product" language already used elsewhere on this page);
+  Options now starts with zero pre-filled rows instead of two, and a quote
+  can genuinely save and send with no pricing at all — confirmed there's
+  no edit-quote feature (only duplicate-as-new), so this is a deliberate
+  "bare lead" capability the user explicitly wanted, not an oversight.
+  Vehicle validation is all-or-nothing (blank is fine, a partial entry
+  isn't) via a top-level zod `superRefine`.
+- **Nullable vehicle, everywhere it mattered.** `Customer.vehicleYear/Make/Model`
+  widened to nullable end to end: migration `0005` drops the `not null`
+  constraints (existing `vehicle_year` range check already passed on NULL,
+  no change needed there); `formatVehicle()` now returns `null` instead of
+  a string with blank parts; both email renderers (`src/lib/emailTemplates.ts`
+  and the hand-ported `supabase/functions/send-quote-email/index.ts` mirror)
+  got a null-branch for every one of the 5 templates' subject and intro
+  copy — two of them (`check_in`, `final_check_in`) had been bypassing
+  `formatVehicle` with raw field access, fixed as part of this pass. Every
+  list/detail display (`QuoteDetailPage`, `QuotesPage`, `DashboardPage`,
+  `FollowUpsPage`, `PublicQuotePage`) got a visible "No vehicle on file"
+  fallback instead of silently rendering nothing. `customerDisplayName()`
+  also picked up a "New lead" fallback for a blank first name, since that's
+  now possible too.
+- **NEW: Window Tint configurator**, purely descriptive (no price/line-item
+  integration, per explicit choice) — a new `src/lib/windowTint.ts` (typed
+  lookup module, same shape as the existing `paymentMethods.ts`) drives a
+  manual body-style picker (Sedan/Coupe = 5 windows, SUV/Wagon/Van/Ext. cab
+  = 7 windows — matches the user's own "5 windows"/"7 windows" phrasing).
+  Confirmed via direct NHTSA vPIC API testing that year+make+model alone
+  can't reliably determine body class — only a VIN can, via `DecodeVin`'s
+  `BodyClass` field — and this app doesn't collect VINs, so a manual picker
+  was the right, deliberate call rather than an unreliable "lookup."
+  New `src/components/WindowTintEditor.tsx`: a percent-pill picker
+  (5/20/35/50/70%, matching `PublicQuotePage.tsx`'s existing toggle-button
+  pattern) per window plus an "apply to all" shortcut, a windshield toggle
+  kept visually separate (tinting it is treated differently by law in most
+  states), and — on top of the always-present functional list — a small
+  hand-authored SVG car diagram on desktop with one real, focusable,
+  `aria-pressed` button per window whose opacity darkens with the chosen
+  percentage. Stored as a single `window_tint` JSONB column on `quotes`
+  (migration `0006`) rather than a normalized table — a fixed-shape
+  descriptive blob, same precedent as `quote_events.metadata` and
+  `shops.follow_up_schedule_days`. Shown on the internal quote detail page,
+  the public quote page (customers should see exactly what was quoted
+  without a phone call), and as one short teaser line in the *initial*
+  email only ("Includes window tint — see your quote for the full
+  breakdown") — never a full window-by-window breakdown in any email,
+  consistent with `emailTemplates.ts`'s own stated intent that the full
+  quote never rides inside the email.
+
+### Verification (this round)
+- A Plan-agent review before writing code caught several real gaps in the
+  first draft of this design: there was no existing "Vehicle" card at all
+  (Year/Make/Model/Trim lived inside the Customer card, so making it
+  collapsible meant extracting it, not just adding a toggle); the plan's
+  outer-grid idea needed to reuse `AppLayout.tsx`'s existing `max-w-6xl`
+  shell rather than inventing a new width; `QuoteDetailPage.tsx` and
+  `PublicQuotePage.tsx` both render nothing (no crash, but no message
+  either) for a zero-option quote, which needed an explicit empty state;
+  and 2-door coupes/regular-cab trucks physically have fewer windows than
+  the 5-window Sedan/Coupe default, needing a copy caveat rather than a
+  new enum value. All fixed before or during implementation.
+- `npm run lint`, `npx tsc -b --noEmit`, `npm run test -- --run` (121/121
+  across 11 files, including a new 7-test `windowTint.test.ts`, plus
+  additions to `format.test.ts` (`formatVehicle`/`customerDisplayName` null
+  cases), `emailTemplates.test.ts` (no template ever renders a literal
+  "null"/"undefined" with no vehicle on file; the tint teaser appears only
+  on the initial template and only when a tint config exists), and
+  `demoRepository.test.ts` (a fully bare quote — no vehicle, no options —
+  creates, round-trips, and serves publicly without error)), and
+  `npm run build` all clean.
+- Playwright smoke pass against a `vite preview` build, each browser
+  context re-entering demo mode fresh (a real bug caught mid-pass: reusing
+  a bare `browser.newContext()` without re-authenticating via `/demo`
+  silently loaded a shop-less app shell): a bare quote (email only) saves
+  successfully; Customer/Vehicle cards confirmed side-by-side at 1280px;
+  the full flow (vehicle + options + window tint, including the body-style
+  picker, apply-to-all, and windshield toggle) saves and opens the email
+  preview, which showed the correct vehicle-aware subject and the tint
+  teaser line; Duplicate carried both the vehicle and window tint
+  configuration over, matching the existing duplicate-quote philosophy;
+  screenshotted the Options row at the 1024px `lg:` breakpoint floor to
+  confirm no cramping.
+- Migrations `0005` and `0006` applied to the live Supabase project via the
+  Management API (same route as `0001`-`0004`). Verified against the real
+  shop's live data: both vehicle columns confirmed nullable with existing
+  rows untouched, `window_tint` column exists as `jsonb`, and a live
+  anonymous `get_public_quote` RPC call against a real quote returned the
+  new `windowTint` field correctly (`null`, since that quote predates the
+  feature) alongside its unaffected existing vehicle data.

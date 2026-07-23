@@ -31,6 +31,7 @@ import {
   parseDollarsToCents,
   quoteValueCents,
 } from '../../lib/format'
+import { summarizeWindowTint } from '../../lib/windowTint'
 import type { QuoteBundle, TemplateType } from '../../types'
 
 export default function QuoteDetailPage() {
@@ -125,7 +126,7 @@ export default function QuoteDetailPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-3xl font-black text-ink">{customerDisplayName(customer)}</h1>
-          <p className="mt-0.5 text-lg text-zinc-600">{formatVehicle(customer)}</p>
+          <p className="mt-0.5 text-lg text-zinc-600">{formatVehicle(customer) ?? 'No vehicle on file'}</p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <Badge className={statusConfig.badgeClass}>{statusConfig.label}</Badge>
             {quote.expirationDate ? (
@@ -227,6 +228,9 @@ export default function QuoteDetailPage() {
         {/* Options */}
         <div className="space-y-3">
           <h2 className="text-xl font-bold text-ink">Options</h2>
+          {options.length === 0 ? (
+            <p className="text-base text-zinc-500">No pricing options on this quote yet.</p>
+          ) : null}
           {options.map((option) => (
             <Card key={option.id} className={option.recommended ? 'border-brand' : ''}>
               <div className="flex items-center justify-between gap-3">
@@ -251,6 +255,36 @@ export default function QuoteDetailPage() {
               <p className="mt-2 text-sm text-zinc-500">{option.laborIncluded ? 'Labor included' : 'Labor billed separately'}</p>
             </Card>
           ))}
+
+          {quote.windowTint ? (
+            <>
+              <h2 className="pt-2 text-xl font-bold text-ink">Window tint</h2>
+              <Card className="space-y-1.5 text-base">
+                {(() => {
+                  const summary = summarizeWindowTint(quote.windowTint)
+                  return (
+                    <>
+                      <p className="font-bold text-ink">{summary.bodyStyleLabel}</p>
+                      {summary.uniformPercent !== null ? (
+                        <p className="text-zinc-700">All included windows at {summary.uniformPercent}%</p>
+                      ) : (
+                        <ul className="space-y-0.5 text-zinc-700">
+                          {summary.windowLines.map((w) => (
+                            <li key={w.label}>
+                              {w.label}: {w.vltPercent}%
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      {summary.windshield ? (
+                        <p className="text-sm text-zinc-500">Windshield: {summary.windshield.vltPercent}%</p>
+                      ) : null}
+                    </>
+                  )
+                })()}
+              </Card>
+            </>
+          ) : null}
 
           <h2 className="pt-2 text-xl font-bold text-ink">Customer</h2>
           <Card className="space-y-1.5 text-base">
