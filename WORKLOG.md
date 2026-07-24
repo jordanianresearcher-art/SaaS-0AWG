@@ -919,3 +919,56 @@ deploy access and works against demo data today, so that's what got built:
   as every prior round. The Shopify import against Super Car Audio has
   still never been run against real data; the builder was verified
   against demo data only, exactly as flagged to the user up front.
+
+## Round 12 — Shopify import: real deploy + a real UI button
+
+The user deployed the Round 11 backend themselves this round: applied
+migrations `0009`/`0010` via the SQL Editor, deployed
+`shopify-import-catalog` via the Supabase CLI (working around a stale
+local checkout and a not-yet-running Docker Desktop along the way), and
+set `SHOPIFY_STORE_DOMAIN` + `SHOPIFY_ADMIN_ACCESS_TOKEN` as Edge Function
+secrets. That closes the deploy-access gap flagged in every prior round —
+this session still has no Supabase token/CLI of its own, but the user now
+has a live, deployed import function.
+
+What was missing to actually use it: the plan up to that point was
+"open the browser console and call `repo.runShopifyImport()` yourself,"
+which assumed a `window.__repo` debug hook that doesn't actually exist in
+this app. Rather than asking a non-technical user to work around that,
+built the real thing:
+
+- **`src/data/supabaseRepository.ts`**: `runShopifyImport()` now unwraps
+  a `FunctionsHttpError`'s attached `Response` to read the Edge Function's
+  real JSON `message` (e.g. "Only an owner or manager can run a Shopify
+  catalog import.", "Shopify isn't configured yet…") instead of
+  supabase-js's generic "Edge Function returned a non-2xx status code."
+- **Settings → Shopify catalog import** (`src/pages/app/SettingsPage.tsx`):
+  a new section, production-mode only (demo mode's `runShopifyImport`
+  always throws, so it's hidden entirely there — verified with a
+  Playwright smoke check). One "Run import" button loops the paginated
+  call until `hasMore` is false, showing running totals
+  (created/updated/unchanged/skipped/failed) as each page completes, and
+  refreshes the Product Catalog list below on success via a lifted
+  `catalogReloadSignal` passed into `CatalogSection`. Any signed-in staff
+  member can see the button; the Edge Function's own owner/manager check
+  is the real gate, and a non-owner/manager now sees that exact message
+  instead of a generic failure.
+- Docs updated: `docs/CATALOG_AND_PACKAGES.md` and
+  `docs/IMPLEMENTATION_STATUS.md` both replaced the old "no UI, run this
+  script yourself" guidance with the button's actual behavior, and
+  corrected a stale line that said imported products would need separate
+  owner approval — they don't; Shopify imports land `approvalStatus:
+  'approved'` directly, by design (see Phase 2's original reasoning).
+
+### Verification (this round)
+- `npm run lint`, `npx tsc -b --noEmit`, `npm run test -- --run`
+  (193/193 across 15 files — no new test files this round, since the
+  addition is UI wiring over already-tested repository/Edge-Function
+  logic), and `npm run build` all clean.
+- A Playwright smoke pass against `vite preview` confirmed the Shopify
+  import section is correctly absent in demo mode (Settings still renders
+  fine, no dangling button that would just throw if clicked).
+- Whether the user's own "Run import" click against the real Super Car
+  Audio catalog succeeds is not something this session can observe
+  directly — the button, its error-message surfacing, and its
+  hidden-in-demo-mode behavior are what got verified here.

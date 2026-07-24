@@ -195,17 +195,29 @@ inventory *into* Shopify. Owner/manager only.
   `admin-create-shop`'s platform-admin check.
 - **Repository**: `DataRepository.runShopifyImport()` — `SupabaseRepository`
   invokes the Edge Function; `DemoRepository` throws immediately (demo mode
-  must never make a real external call).
-- **No UI yet** — same "complete backend, no dangling button" approach as
-  the rest of Phase 1/2's foundation. See IMPLEMENTATION_STATUS.md for
-  what's needed to actually run this against the live shop.
+  must never make a real external call). On a non-2xx response,
+  `SupabaseRepository` unwraps the function's real JSON `message` (e.g.
+  "Only an owner or manager can run a Shopify catalog import.") off the
+  `FunctionsHttpError`'s attached `Response`, rather than surfacing
+  supabase-js's generic "non-2xx status code" text.
+- **UI**: Settings → **Shopify catalog import** (production mode only —
+  hidden entirely in demo mode, since demo's `runShopifyImport` always
+  throws). One "Run import" button loops the paginated call until
+  `hasMore` is false, shows running totals as it goes, and refreshes the
+  Product Catalog list below on success. Any staff member can see the
+  button; the Edge Function's own owner/manager check is what actually
+  gates it, and a non-owner/manager gets that real error message surfaced
+  inline.
 
 ## What a shop sees where
 
-- **Settings → Product Catalog**: unchanged today — brand/model/name/price
-  only. The richer fields exist in the schema and repository layer for a
-  future import to populate; no manual-entry UI for them yet (deliberately
-  — see IMPLEMENTATION_STATUS).
+- **Settings → Shopify catalog import**: the "Run import" button described
+  above (production mode only).
+- **Settings → Product Catalog**: manual add/edit form is unchanged —
+  brand/model/name/price only. The richer fields (category, MSRP, images,
+  etc.) exist in the schema and repository layer and do get populated by
+  the Shopify import; there's just no *manual*-entry UI for them yet
+  (deliberately — see IMPLEMENTATION_STATUS).
 - **New Quote → each pricing option**: the "Build with drag & drop" toggle
   and "Save as package" button described above.
 - **Nowhere yet**: package templates have no *listing/approval* screen —
@@ -255,19 +267,14 @@ supabase functions deploy shopify-import-catalog
 supabase secrets set SHOPIFY_STORE_DOMAIN=... SHOPIFY_ADMIN_ACCESS_TOKEN=...
 ```
 
-Then, as an owner/manager, call it (no UI yet — see IMPLEMENTATION_STATUS.md):
+Then, as an owner/manager, go to **Settings → Shopify catalog import** in
+the app and click **Run import**. It loops the paginated call until
+`hasMore` is false and shows running totals as it goes.
 
-```ts
-let result = await repo.runShopifyImport()
-while (result.hasMore) {
-  result = await repo.runShopifyImport({ afterCursor: result.nextCursor })
-}
-```
-
-Each call reports `{ created, updated, unchanged, skipped, failed, errors }`
-for the page it just processed. Safe to re-run any time — re-running
-never duplicates rows and never overwrites a price a staff member edited
-locally, unless you explicitly pass `overwriteLocalPrices: true`.
+Each page reports `{ created, updated, unchanged, skipped, failed, errors }`.
+Safe to re-run any time — re-running never duplicates rows and never
+overwrites a price a staff member edited locally (`overwriteLocalPrices`
+isn't exposed in the UI yet — only the repository method supports it).
 
 ## Testing
 

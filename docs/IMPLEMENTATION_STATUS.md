@@ -58,14 +58,18 @@ work in this area so effort isn't duplicated.
   shop's own already-published, already-priced Shopify listings, not an
   uncertain AI guess, so the `pending_review` gate (reserved for Phase 5's
   AI-identified data) doesn't apply to them.
-- **Not yet done**: deploying the function, configuring its two secrets,
-  and actually running it against the live shop (see "Required credentials"
-  below) — and there's still no UI button, by the same "complete backend,
-  no dangling UI" approach as Phase 1.
-- 174/174 tests passing (16 new in `shopifyImport.test.ts`), lint/
-  typecheck/build clean. The Edge Function itself was verified to
-  type-check cleanly in isolation (no Deno runtime available in this
-  session to execute it against a live store — see below).
+- **Settings → Shopify catalog import**: a real "Run import" button
+  (production mode only) that loops the paginated call until done, shows
+  running totals, and refreshes the Product Catalog list on success —
+  no browser console or CLI script needed. `SupabaseRepository.runShopifyImport()`
+  unwraps the Edge Function's real JSON error message (e.g. "Only an
+  owner or manager can run a Shopify catalog import.") off the
+  `FunctionsHttpError`'s attached `Response` instead of surfacing
+  supabase-js's generic non-2xx message.
+- 193/193 tests passing (16 in `shopifyImport.test.ts`), lint/typecheck/
+  build clean. The Edge Function itself was verified to type-check
+  cleanly in isolation (no Deno runtime available in this session to
+  execute it against a live store — see below).
 
 ## Completed (Phase 3 — Fast visual package builder)
 
@@ -140,8 +144,8 @@ work in this area so effort isn't duplicated.
 | For | Status |
 | --- | --- |
 | Shopify Admin API — **used during this session** | This session's Claude-side Shopify MCP connector is live, connected to Super Car Audio (supercaraudio.com), and was used to fetch real product data to design and test the mapping logic above. **This connector is not something the deployed app can use at runtime** — it's a connection for the assistant, not a server-side credential. |
-| Shopify Admin API — **needed for the app itself** | The deployed `shopify-import-catalog` function needs its own `SHOPIFY_STORE_DOMAIN` + `SHOPIFY_ADMIN_ACCESS_TOKEN` (a custom-app Admin API token, `shpat_...`) set as Supabase Edge Function secrets — same mechanism as `RESEND_API_KEY`. **Not yet configured.** The sibling `car-audio-inventory` repo already has its own working token for this exact store (confirmed by its code referencing `ADMIN_STORE_HANDLE = "super-car-audio"`); reusing that token (copy it into 0Gauge's secrets) or minting a fresh one via Shopify admin → Settings → Apps and sales channels → Develop apps both work — your call. |
-| Supabase deploy/migration access | Same gap as every prior round this session — no personal access token available, so migrations `0009`/`0010` aren't applied live and `shopify-import-catalog` isn't deployed. All code is committed and ready. |
+| Shopify Admin API — **needed for the app itself** | The deployed `shopify-import-catalog` function needs its own `SHOPIFY_STORE_DOMAIN` + `SHOPIFY_ADMIN_ACCESS_TOKEN` (a custom-app Admin API token, `shpat_...`) set as Supabase Edge Function secrets — same mechanism as `RESEND_API_KEY`. **Configured directly by the shop owner** via `supabase secrets set` during this round (this session still has no way to hold or verify the real token itself). |
+| Supabase deploy/migration access | This session still has no Supabase personal access token/CLI, so it can't deploy or migrate directly — but the shop owner applied migrations `0009`/`0010` via the SQL Editor and deployed `shopify-import-catalog` via the CLI themselves during this round, following the exact commands in this doc. |
 | `car-audio-inventory` scanner repo | **Cloned** (`/workspace/car-audio-inventory`) and read — its `src/lib/shopify.ts` (auth/pagination/GraphQL patterns), `supabase/migrations/000{2,3}_shopify_*.sql`, and `src/app/api/lookup/vision/route.ts` (structured AI responses, confidence, official-photo search) directly informed this round's design and will inform Phase 5. |
 | AI vision/product-ID provider (bulk photo onboarding, Phase 5) | Not yet selected/configured. The scanner repo's own pattern (Claude + `web_search` tool + Zod structured output) is a strong candidate to adapt. |
 | Web search/MSRP-research provider (Phase 5) | Same as above — the scanner repo already solves this; adapt, don't rebuild. |
@@ -179,31 +183,27 @@ work in this area so effort isn't duplicated.
 - `productType` → `ProductCategory` guessing is a small pattern-matching
   table (`guessCategoryFromProductType`), not exhaustive — an unrecognized
   `productType` simply leaves `category: null` rather than guessing wrong.
-- The two catalog/package migrations (`0009`, `0010`) and the new Edge
-  Function have **not been applied/deployed to any live Supabase project**
-  in this session — no personal access token was available (see prior
-  rounds' same limitation). Everything is committed and ready to run.
+- This session still can't deploy or migrate a live Supabase project
+  directly (no personal access token/CLI available to it) — but the shop
+  owner has now applied migrations `0009`/`0010` and deployed
+  `shopify-import-catalog` themselves this round, using the commands in
+  this doc. The actual Shopify import against Super Car Audio's real
+  catalog still hasn't been confirmed as run from this session's side —
+  that happens via the new Settings → Shopify catalog import button.
 
 ## Recommended next step
 
-1. **Get the Shopify import actually running against Super Car Audio**,
-   then use the real imported catalog in the now-built fast builder.
-   Needs: (a) apply migrations `0009`/`0010`, (b) deploy
-   `shopify-import-catalog` (`supabase functions deploy shopify-import-catalog`),
-   (c) set `SHOPIFY_STORE_DOMAIN` + `SHOPIFY_ADMIN_ACCESS_TOKEN` as Edge
-   Function secrets (reusing `car-audio-inventory`'s existing token for
-   this same store is the fastest path), (d) call
-   `repo.runShopifyImport()` in a loop until `hasMore` is false. All of
-   this needs either a Supabase personal access token handed to this
-   session, or for you to run these steps yourself with the exact
-   commands in `docs/CATALOG_AND_PACKAGES.md`. **This remains the single
-   biggest blocker** — the builder itself is fully built and tested
-   against demo data, but has never been driven against real Shopify-
-   imported products because nothing in this session can deploy/import.
-2. Once real products exist, someone with owner/manager access should
-   review and approve the imported catalog rows (`approvalStatus`
-   defaults to whatever the import sets) — the builder only offers
-   `active` + `approved` products to drag into slots, by design.
+1. **Click "Run import" in Settings → Shopify catalog import**, as an
+   owner or manager, now that migrations/deploy/secrets are done. It
+   loops until `hasMore` is false and shows running totals; check the
+   final numbers and any per-product errors. Imported rows land
+   `approvalStatus: 'approved'` automatically (they're the shop's own
+   already-published Shopify listings, not an uncertain AI guess), so
+   they're immediately usable in the fast builder — no separate approval
+   step needed for this path.
+2. Open **New Quote → an option → Build with drag & drop** and confirm
+   the vehicle-type/configuration slots now offer the real imported
+   products instead of (or alongside) the demo catalog.
 3. **Owner approval screen for pending package templates** — `package_templates`
    already has the `approvalStatus`/`setPackageTemplateApproval` plumbing
    from Phase 1, and both the fast builder's "Save as package" and the

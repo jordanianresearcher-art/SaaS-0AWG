@@ -2,14 +2,14 @@ import { useCallback, useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Package, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
+import { Download, Package, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
 import { Button, Card, EmptyState, Field, Input, LoadingBlock, Modal, Select, Textarea } from '../../components/ui'
 import { formatCurrency, parseDollarsToCents } from '../../lib/format'
 import { PAYMENT_METHOD_INFO } from '../../lib/paymentMethods'
 import type { CatalogItem, PaymentMethod } from '../../types'
-import type { NewCatalogItemInput } from '../../data/repository'
+import type { NewCatalogItemInput, ShopifyImportResult } from '../../data/repository'
 
 const PAYMENT_METHODS = Object.keys(PAYMENT_METHOD_INFO) as PaymentMethod[]
 
@@ -56,6 +56,7 @@ export default function SettingsPage() {
   const { shop, mode, refresh, resetDemo } = useAppData()
   const repo = useRepo()
   const toast = useToast()
+  const [catalogReloadSignal, setCatalogReloadSignal] = useState(0)
 
   const {
     register,
@@ -200,7 +201,9 @@ export default function SettingsPage() {
         </Card>
       </form>
 
-      <CatalogSection />
+      {mode === 'production' ? <ShopifyImportSection onImported={() => setCatalogReloadSignal((n) => n + 1)} /> : null}
+
+      <CatalogSection reloadSignal={catalogReloadSignal} />
 
       {mode === 'demo' ? (
         <Card className="space-y-3">
@@ -223,6 +226,88 @@ export default function SettingsPage() {
   )
 }
 
+type ImportTotals = Pick<ShopifyImportResult, 'created' | 'updated' | 'unchanged' | 'skipped' | 'failed'>
+
+const EMPTY_TOTALS: ImportTotals = { created: 0, updated: 0, unchanged: 0, skipped: 0, failed: 0 }
+
+function ShopifyImportSection({ onImported }: { onImported: () => void }) {
+  const repo = useRepo()
+  const toast = useToast()
+  const [running, setRunning] = useState(false)
+  const [totals, setTotals] = useState<ImportTotals | null>(null)
+  const [errors, setErrors] = useState<ShopifyImportResult['errors']>([])
+  const [failureMessage, setFailureMessage] = useState<string | null>(null)
+
+  const runImport = async () => {
+    setRunning(true)
+    setFailureMessage(null)
+    setErrors([])
+    const acc: ImportTotals = { ...EMPTY_TOTALS }
+    const accErrors: ShopifyImportResult['errors'] = []
+    try {
+      let cursor: string | null = null
+      let hasMore = true
+      while (hasMore) {
+        const result = await repo.runShopifyImport(cursor ? { afterCursor: cursor } : undefined)
+        acc.created += result.created
+        acc.updated += result.updated
+        acc.unchanged += result.unchanged
+        acc.skipped += result.skipped
+        acc.failed += result.failed
+        accErrors.push(...result.errors)
+        setTotals({ ...acc })
+        hasMore = result.hasMore
+        cursor = result.nextCursor
+      }
+      toast('success', `Shopify import complete — ${acc.created} added, ${acc.updated} updated, ${acc.unchanged} unchanged.`)
+      onImported()
+    } catch (e) {
+      setFailureMessage(e instanceof Error ? e.message : 'Import failed. Please try again.')
+      toast('error', 'Shopify import failed. See details below.')
+    } finally {
+      setErrors(accErrors)
+      setRunning(false)
+    }
+  }
+
+  return (
+    <Card className="space-y-3">
+      <div>
+        <h2 className="text-xl font-bold text-ink">Shopify catalog import</h2>
+        <p className="text-base text-zinc-600">
+          Pull your shop's real Shopify catalog into the product catalog below. Safe to run more than once — it never
+          duplicates products and never overwrites a price you've edited here yourself. Owner/manager only.
+        </p>
+      </div>
+      <Button onClick={() => void runImport()} disabled={running}>
+        <Download className="h-5 w-5" aria-hidden="true" /> {running ? 'Importing…' : 'Run import'}
+      </Button>
+      {totals ? (
+        <p className="text-sm text-zinc-600">
+          {totals.created} added · {totals.updated} updated · {totals.unchanged} unchanged
+          {totals.skipped > 0 ? ` · ${totals.skipped} skipped (locally edited price kept)` : ''}
+          {totals.failed > 0 ? ` · ${totals.failed} failed` : ''}
+          {running ? ' — still going…' : ''}
+        </p>
+      ) : null}
+      {failureMessage ? (
+        <p role="alert" className="text-sm font-medium text-red-700">
+          {failureMessage}
+        </p>
+      ) : null}
+      {errors.length > 0 ? (
+        <ul className="max-h-40 space-y-1 overflow-y-auto text-sm text-red-700">
+          {errors.map((e, i) => (
+            <li key={i}>
+              {e.product}: {e.message}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </Card>
+  )
+}
+
 const catalogSchema = z.object({
   brand: z.string(),
   model: z.string(),
@@ -240,7 +325,7 @@ function toCatalogInput(values: CatalogFormValues): NewCatalogItemInput {
   }
 }
 
-function CatalogSection() {
+function CatalogSection({ reloadSignal }: { reloadSignal: number }) {
   const repo = useRepo()
   const toast = useToast()
   const [items, setItems] = useState<CatalogItem[] | null>(null)
@@ -252,7 +337,8 @@ function CatalogSection() {
 
   useEffect(() => {
     void load()
-  }, [load])
+    // reloadSignal: re-fetch after a Shopify import completes elsewhere on this page.
+  }, [load, reloadSignal])
 
   const {
     register,

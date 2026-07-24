@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js'
+import { FunctionsHttpError, type SupabaseClient } from '@supabase/supabase-js'
 import type {
   CatalogItem,
   Customer,
@@ -409,7 +409,17 @@ export class SupabaseRepository implements DataRepository {
         overwriteLocalPrices: options.overwriteLocalPrices ?? false,
       },
     })
-    if (error) throw error
+    if (error) {
+      // The function returns a real, human-readable `message` in its JSON body
+      // (e.g. "Only an owner or manager can run a Shopify catalog import.") —
+      // supabase-js's own error.message is just a generic "non-2xx status code"
+      // unless we read the body off the attached Response ourselves.
+      if (error instanceof FunctionsHttpError) {
+        const body = await error.context.json().catch(() => null)
+        throw new Error(typeof body?.message === 'string' ? body.message : error.message)
+      }
+      throw error
+    }
     return data as ShopifyImportResult
   }
 
