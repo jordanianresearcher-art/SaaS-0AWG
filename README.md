@@ -24,6 +24,15 @@ sent by a person pressing **Send**.
 - Multi-tenant Supabase schema with RLS and sanitized public RPCs
 - Resend-backed Supabase Edge Function for real email delivery
 
+## In progress — selling catalog & packages
+
+0Gauge is evolving from quote recovery into a full visual selling system
+(universal car-audio configurations, an expanded product catalog, reusable
+package templates). Foundation is built and tested; no UI yet. See
+[docs/CATALOG_AND_PACKAGES.md](docs/CATALOG_AND_PACKAGES.md) for the
+concepts and [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md)
+for exactly what's done, in progress, and deferred.
+
 See [docs/ROADMAP.md](docs/ROADMAP.md) for later phases (System Builder, package
 pages, build passport, marketplace — all intentionally not implemented).
 

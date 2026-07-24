@@ -56,7 +56,16 @@ table access. Draft quotes are excluded from all public functions.
 
 ## Row Level Security
 
-RLS is enabled on all ten tables. There are **no anon policies at all** — an
+RLS is enabled on every table, including the catalog/package tables added
+for the selling-catalog work (`catalog_items`, `package_templates`,
+`package_template_items` — see `docs/CATALOG_AND_PACKAGES.md`). Those three
+share one more protection beyond plain shop-membership RLS: a product's or
+package's `approval_status` can only be changed by an owner/manager,
+enforced by a `before update` trigger (`guard_catalog_item_approval` /
+`guard_package_template_approval`) since RLS's `USING`/`WITH CHECK`
+clauses can't compare a row's old value to its new one on their own.
+
+There are **no anon policies at all** — an
 anonymous request that touches a table directly gets zero rows. The only
 anonymous surface is four SECURITY DEFINER functions with explicit
 `grant execute ... to anon`:
@@ -119,7 +128,7 @@ browser talks to the Edge Function; the Edge Function talks to Resend.
 
 ## Production checklist
 
-- [ ] Migrations applied; confirm RLS is enabled on every table (`select * from pg_tables where rowsecurity = false and schemaname = 'public'` returns nothing)
+- [ ] Migrations applied — including `0009_catalog_product_model.sql` and `0010_package_templates.sql`, not yet applied to any live project as of this writing; confirm RLS is enabled on every table (`select * from pg_tables where rowsecurity = false and schemaname = 'public'` returns nothing)
 - [ ] Auth redirect URLs restricted to your real domains
 - [ ] Magic-link email template branded and sender configured in Supabase Auth
 - [ ] `RESEND_API_KEY`, `EMAIL_FROM`, `APP_URL` set as function secrets; sending domain verified in Resend (SPF/DKIM)

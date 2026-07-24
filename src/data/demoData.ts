@@ -3,6 +3,8 @@ import type {
   Customer,
   EmailMessage,
   Employee,
+  PackageTemplate,
+  PackageTemplateItem,
   Quote,
   QuoteEvent,
   QuoteOption,
@@ -26,11 +28,12 @@ export interface DemoDB {
   responses: QuoteResponse[]
   emails: EmailMessage[]
   catalogItems: CatalogItem[]
+  packageTemplates: PackageTemplate[]
   /** Bumped when the seed shape changes so stale localStorage is discarded. */
   seedVersion: number
 }
 
-export const DEMO_SEED_VERSION = 8
+export const DEMO_SEED_VERSION = 9
 
 const SHOP_ID = 'demo-shop'
 
@@ -503,6 +506,7 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
         tier: opt.tier,
         name: opt.name,
         description: opt.description,
+        configId: null,
         priceCents: opt.priceCents,
         laborIncluded: true,
         depositPaymentMethod: shop.defaultPaymentMethod,
@@ -518,6 +522,7 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
           name: item.name,
           quantity: item.quantity,
           description: null,
+          category: null,
           position: j,
         })),
       })
@@ -563,16 +568,224 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
     })
   }
 
+  // MSRP is deliberately higher than the shop's defaultPriceCents on a few
+  // rows below, to demo the msrp-vs-selling-price distinction; every row is
+  // importSource: 'manual' / approvalStatus: 'approved' since none of this
+  // came through an (unimplemented) Shopify/AI import. Bundled, self-
+  // contained products (a loaded enclosure, a sub+amp kit) are left with
+  // category: null on purpose — forcing them into one slot would be exactly
+  // the kind of fake compatibility claim this catalog model is meant to avoid.
+  let catalogPosition = 0
+  function demoCatalogItem(
+    fields: Pick<CatalogItem, 'brand' | 'model' | 'name' | 'category' | 'defaultPriceCents'> &
+      Partial<Pick<CatalogItem, 'msrpCents' | 'specs'>>,
+  ): CatalogItem {
+    return {
+      id: `demo-cat-${catalogPosition + 1}`,
+      shopId: SHOP_ID,
+      brand: fields.brand,
+      model: fields.model,
+      name: fields.name,
+      category: fields.category,
+      description: null,
+      sku: null,
+      upc: null,
+      defaultPriceCents: fields.defaultPriceCents,
+      msrpCents: fields.msrpCents ?? null,
+      promoPriceCents: null,
+      minStaffPriceCents: null,
+      costCents: null,
+      priceSourceUrl: null,
+      priceSourceName: null,
+      priceKind: null,
+      priceCheckedAt: null,
+      imageUrl: null,
+      imageSourceUrl: null,
+      sourceUrl: null,
+      specs: fields.specs ?? null,
+      active: true,
+      availability: 'available',
+      importSource: 'manual',
+      externalSourceProductId: null,
+      identificationConfidence: null,
+      approvalStatus: 'approved',
+      position: catalogPosition++,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    }
+  }
+
   const catalogItems: CatalogItem[] = [
-    { id: 'demo-cat-1', shopId: SHOP_ID, brand: 'Kicker', model: 'KEY200.4', name: '4-channel smart amp', defaultPriceCents: 24900, position: 0 },
-    { id: 'demo-cat-2', shopId: SHOP_ID, brand: 'JL Audio', model: 'Stealthbox', name: 'Under-seat 10" subwoofer', defaultPriceCents: 54900, position: 1 },
-    { id: 'demo-cat-3', shopId: SHOP_ID, brand: 'Rockford Fosgate', model: 'T400X4ad', name: '4-channel amplifier', defaultPriceCents: 32900, position: 2 },
-    { id: 'demo-cat-4', shopId: SHOP_ID, brand: 'Alpine', model: 'iLX-W670', name: 'CarPlay receiver', defaultPriceCents: 44900, position: 3 },
-    { id: 'demo-cat-5', shopId: SHOP_ID, brand: 'Focal', model: 'PS 165', name: 'Front component speakers', defaultPriceCents: 29900, position: 4 },
-    { id: 'demo-cat-6', shopId: SHOP_ID, brand: 'Pioneer', model: 'TS-A652F', name: 'Front + rear speakers', defaultPriceCents: 12900, position: 5 },
-    { id: 'demo-cat-7', shopId: SHOP_ID, brand: 'MTX', model: 'TNP212D2', name: 'Dual 12" package with amp', defaultPriceCents: 39900, position: 6 },
-    { id: 'demo-cat-8', shopId: SHOP_ID, brand: 'JL Audio', model: '12TW3', name: 'Custom sub enclosure build', defaultPriceCents: 64900, position: 7 },
+    demoCatalogItem({
+      brand: 'Kicker', model: 'CompR 12', name: '12" subwoofer', category: 'subwoofer',
+      defaultPriceCents: 14900, msrpCents: 17900, specs: { subwooferSizeInches: 12, impedanceOhms: 2 },
+    }),
+    demoCatalogItem({
+      brand: 'Kicker', model: 'CWRT8', name: '8" shallow subwoofer', category: 'subwoofer',
+      defaultPriceCents: 9900, msrpCents: 12900, specs: { subwooferSizeInches: 8, impedanceOhms: 4 },
+    }),
+    demoCatalogItem({
+      brand: 'Q-Power', model: 'QBOMB12V', name: 'Ported 12" enclosure', category: 'enclosure',
+      defaultPriceCents: 8900,
+    }),
+    demoCatalogItem({
+      brand: 'Rockford Fosgate', model: 'R500X1D', name: 'Mono amplifier', category: 'mono_amp',
+      defaultPriceCents: 19900, msrpCents: 22900, specs: { rmsWatts: 500 },
+    }),
+    demoCatalogItem({
+      brand: 'Rockford Fosgate', model: 'RFK4X', name: '4-gauge amp wiring kit', category: 'wiring_kit',
+      defaultPriceCents: 5900,
+    }),
+    demoCatalogItem({
+      brand: 'Kicker', model: 'KEY200.4', name: '4-channel smart amp', category: 'multi_amp',
+      defaultPriceCents: 24900, msrpCents: 29900,
+    }),
+    demoCatalogItem({
+      brand: 'Focal', model: 'PS 165', name: 'Front component speakers', category: 'door_speaker',
+      defaultPriceCents: 29900,
+    }),
+    demoCatalogItem({
+      brand: 'Pioneer', model: 'TS-A652F', name: 'Front + rear speakers', category: 'door_speaker',
+      defaultPriceCents: 12900,
+    }),
+    demoCatalogItem({
+      brand: 'Alpine', model: 'iLX-W670', name: 'CarPlay receiver', category: 'radio',
+      defaultPriceCents: 44900,
+    }),
+    demoCatalogItem({
+      brand: 'Kicker', model: 'iQ', name: 'In-dash bass knob', category: 'bass_control',
+      defaultPriceCents: 4900,
+    }),
+    demoCatalogItem({
+      brand: 'XS Power', model: 'D3400', name: 'AGM battery upgrade', category: 'battery',
+      defaultPriceCents: 24900,
+    }),
+    demoCatalogItem({
+      brand: null, model: null, name: 'Standard bass install labor', category: 'labor',
+      defaultPriceCents: 15000,
+    }),
+    demoCatalogItem({
+      brand: 'JL Audio', model: 'Stealthbox', name: 'Under-seat 10" loaded subwoofer enclosure', category: null,
+      defaultPriceCents: 54900,
+    }),
+    demoCatalogItem({
+      brand: 'MTX', model: 'TNP212D2', name: 'Dual 12" package with amp', category: null,
+      defaultPriceCents: 39900,
+    }),
   ]
 
-  return { shop, employees, customers, quotes, options, events, responses, emails, catalogItems, seedVersion: DEMO_SEED_VERSION }
+  // Package templates: one built the "fast builder" way (approved, no
+  // originating quote), one saved from a real quote option (approved,
+  // provenance intact), and one still pending_review — showing the owner
+  // review queue with a genuinely incomplete build (no wiring kit yet).
+  let packagePosition = 0
+  function packageItem(
+    fields: Pick<PackageTemplateItem, 'brand' | 'model' | 'name' | 'quantity' | 'category'>,
+  ): PackageTemplateItem {
+    return {
+      id: `demo-pkg-item-${packagePosition}`,
+      packageTemplateId: '', // filled in below once the template id is known
+      brand: fields.brand,
+      model: fields.model,
+      name: fields.name,
+      quantity: fields.quantity,
+      description: null,
+      category: fields.category,
+      imageUrl: null,
+      position: packagePosition++,
+    }
+  }
+
+  function demoPackageTemplate(fields: {
+    id: string
+    name: string
+    description: string
+    configId: string
+    vehicleTypes: PackageTemplate['vehicleTypes']
+    installedPriceCents: number
+    approvalStatus: PackageTemplate['approvalStatus']
+    sourceQuoteId?: string | null
+    sourceQuoteOptionId?: string | null
+    items: PackageTemplateItem[]
+  }): PackageTemplate {
+    packagePosition = 0
+    return {
+      id: fields.id,
+      shopId: SHOP_ID,
+      name: fields.name,
+      description: fields.description,
+      configId: fields.configId,
+      vehicleTypes: fields.vehicleTypes,
+      installedPriceCents: fields.installedPriceCents,
+      laborIncluded: true,
+      source: 'staff_saved',
+      approvalStatus: fields.approvalStatus,
+      sourceQuoteId: fields.sourceQuoteId ?? null,
+      sourceQuoteOptionId: fields.sourceQuoteOptionId ?? null,
+      createdBy: 'demo-user-owner',
+      createdAt: daysAgo(now, 20),
+      updatedAt: daysAgo(now, 20),
+      items: fields.items.map((item, i) => ({ ...item, packageTemplateId: fields.id, position: i })),
+    }
+  }
+
+  const packageTemplates: PackageTemplate[] = [
+    demoPackageTemplate({
+      id: 'demo-pkg-truck-2x8',
+      name: 'Truck 2×8 Starter',
+      description: 'Punchier, deeper bass without giving up the back seat.',
+      configId: 'truck_2x8',
+      vehicleTypes: ['truck'],
+      installedPriceCents: 79900,
+      approvalStatus: 'approved',
+      items: [
+        packageItem({ brand: 'Kicker', model: 'CWRT8', name: '8" shallow subwoofer', quantity: 2, category: 'subwoofer' }),
+        packageItem({ brand: null, model: null, name: 'Sealed dual 8" enclosure', quantity: 1, category: 'enclosure' }),
+        packageItem({ brand: 'Rockford Fosgate', model: 'R500X1D', name: 'Mono amplifier', quantity: 1, category: 'mono_amp' }),
+        packageItem({ brand: 'Rockford Fosgate', model: 'RFK4X', name: '4-gauge amp wiring kit', quantity: 1, category: 'wiring_kit' }),
+        packageItem({ brand: null, model: null, name: 'Standard bass install labor', quantity: 1, category: 'labor' }),
+      ],
+    }),
+    demoPackageTemplate({
+      id: 'demo-pkg-car-1x12',
+      name: 'Daily Bass 1×12',
+      description: 'One clean 12-inch sub for daily-driver bass, nothing flashy.',
+      configId: 'car_1x12',
+      vehicleTypes: ['car', 'sedan', 'hatchback', 'suv'],
+      installedPriceCents: 59900,
+      approvalStatus: 'approved',
+      // Saved from a real quote — provenance kept for reference; editing or
+      // deleting that quote later never changes this package (see migration
+      // 0010_package_templates.sql: these are ON DELETE SET NULL, not a live join).
+      sourceQuoteId: 'demo-quote-f150-marcus',
+      sourceQuoteOptionId: 'demo-opt-f150-marcus-0',
+      items: [
+        packageItem({ brand: 'Kicker', model: 'CompR 12', name: '12" subwoofer', quantity: 1, category: 'subwoofer' }),
+        packageItem({ brand: 'Q-Power', model: 'QBOMB12V', name: 'Ported 12" enclosure', quantity: 1, category: 'enclosure' }),
+        packageItem({ brand: 'Rockford Fosgate', model: 'R500X1D', name: 'Mono amplifier', quantity: 1, category: 'mono_amp' }),
+        packageItem({ brand: 'Rockford Fosgate', model: 'RFK4X', name: '4-gauge amp wiring kit', quantity: 1, category: 'wiring_kit' }),
+        packageItem({ brand: null, model: null, name: 'Standard bass install labor', quantity: 1, category: 'labor' }),
+      ],
+    }),
+    demoPackageTemplate({
+      id: 'demo-pkg-truck-2x10-draft',
+      name: 'Weekend Special 2×10 (draft)',
+      description: 'Bigger sound for the weekend crowd — still missing a wiring kit.',
+      configId: 'truck_2x10',
+      vehicleTypes: ['truck'],
+      installedPriceCents: 94900,
+      approvalStatus: 'pending_review',
+      items: [
+        packageItem({ brand: 'Kicker', model: 'CompR 12', name: '10" subwoofer', quantity: 2, category: 'subwoofer' }),
+        packageItem({ brand: null, model: null, name: 'Ported dual 10" enclosure', quantity: 1, category: 'enclosure' }),
+        packageItem({ brand: 'Rockford Fosgate', model: 'R500X1D', name: 'Mono amplifier', quantity: 1, category: 'mono_amp' }),
+        packageItem({ brand: null, model: null, name: 'Standard bass install labor', quantity: 1, category: 'labor' }),
+      ],
+    }),
+  ]
+
+  return {
+    shop, employees, customers, quotes, options, events, responses, emails, catalogItems, packageTemplates,
+    seedVersion: DEMO_SEED_VERSION,
+  }
 }

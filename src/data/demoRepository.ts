@@ -2,6 +2,8 @@ import type {
   CatalogItem,
   Customer,
   Employee,
+  PackageTemplate,
+  ProductApprovalStatus,
   PublicQuote,
   Quote,
   QuoteBundle,
@@ -12,7 +14,14 @@ import type {
   Shop,
   TemplateType,
 } from '../types'
-import type { DataRepository, NewCatalogItemInput, NewQuoteInput, SendEmailResult, ShopSettingsPatch } from './repository'
+import type {
+  DataRepository,
+  NewCatalogItemInput,
+  NewPackageTemplateInput,
+  NewQuoteInput,
+  SendEmailResult,
+  ShopSettingsPatch,
+} from './repository'
 import { buildDemoData, DEMO_SEED_VERSION, type DemoDB } from './demoData'
 import { advanceStatus, applyStaffStatus, VALID_RESPONSE_TYPES } from '../lib/status'
 import { checkSendEligibility } from '../lib/eligibility'
@@ -126,27 +135,135 @@ export class DemoRepository implements DataRepository {
   }
 
   async createCatalogItem(input: NewCatalogItemInput): Promise<CatalogItem> {
+    const now = new Date().toISOString()
     const item: CatalogItem = {
       id: newId(),
       shopId: this.db.shop.id,
-      ...input,
+      brand: input.brand,
+      model: input.model,
+      name: input.name,
+      category: input.category ?? null,
+      description: input.description ?? null,
+      sku: input.sku ?? null,
+      upc: input.upc ?? null,
+      defaultPriceCents: input.defaultPriceCents,
+      msrpCents: input.msrpCents ?? null,
+      promoPriceCents: input.promoPriceCents ?? null,
+      minStaffPriceCents: input.minStaffPriceCents ?? null,
+      costCents: input.costCents ?? null,
+      priceSourceUrl: input.priceSourceUrl ?? null,
+      priceSourceName: input.priceSourceName ?? null,
+      priceKind: input.priceKind ?? null,
+      priceCheckedAt: input.priceSourceUrl || input.priceSourceName ? now : null,
+      imageUrl: input.imageUrl ?? null,
+      imageSourceUrl: input.imageSourceUrl ?? null,
+      sourceUrl: input.sourceUrl ?? null,
+      specs: input.specs ?? null,
+      active: input.active ?? true,
+      availability: input.availability ?? 'not_tracked',
+      importSource: input.importSource ?? 'manual',
+      externalSourceProductId: input.externalSourceProductId ?? null,
+      identificationConfidence: input.identificationConfidence ?? null,
+      approvalStatus: input.approvalStatus ?? 'approved',
       position: this.db.catalogItems.length,
+      createdAt: now,
+      updatedAt: now,
     }
     this.db.catalogItems.push(item)
     this.persist()
     return item
   }
 
+  // Only sets a field when the caller actually passed it — same reasoning
+  // as supabaseRepository.ts's catalogItemRow: a partial edit (e.g. from the
+  // settings form, which only ever sends brand/model/name/defaultPriceCents)
+  // must never clobber data it wasn't told to touch, like an imported image.
   async updateCatalogItem(itemId: string, input: NewCatalogItemInput): Promise<CatalogItem> {
     const item = this.db.catalogItems.find((i) => i.id === itemId)
     if (!item) throw new Error('Catalog item not found')
-    Object.assign(item, input)
+    item.brand = input.brand
+    item.model = input.model
+    item.name = input.name
+    item.defaultPriceCents = input.defaultPriceCents
+    if (input.category !== undefined) item.category = input.category
+    if (input.description !== undefined) item.description = input.description
+    if (input.sku !== undefined) item.sku = input.sku
+    if (input.upc !== undefined) item.upc = input.upc
+    if (input.msrpCents !== undefined) item.msrpCents = input.msrpCents
+    if (input.promoPriceCents !== undefined) item.promoPriceCents = input.promoPriceCents
+    if (input.minStaffPriceCents !== undefined) item.minStaffPriceCents = input.minStaffPriceCents
+    if (input.costCents !== undefined) item.costCents = input.costCents
+    if (input.priceSourceUrl !== undefined) item.priceSourceUrl = input.priceSourceUrl
+    if (input.priceSourceName !== undefined) item.priceSourceName = input.priceSourceName
+    if (input.priceKind !== undefined) item.priceKind = input.priceKind
+    if (input.imageUrl !== undefined) item.imageUrl = input.imageUrl
+    if (input.imageSourceUrl !== undefined) item.imageSourceUrl = input.imageSourceUrl
+    if (input.sourceUrl !== undefined) item.sourceUrl = input.sourceUrl
+    if (input.specs !== undefined) item.specs = input.specs
+    if (input.active !== undefined) item.active = input.active
+    if (input.availability !== undefined) item.availability = input.availability
+    if (input.importSource !== undefined) item.importSource = input.importSource
+    if (input.externalSourceProductId !== undefined) item.externalSourceProductId = input.externalSourceProductId
+    if (input.identificationConfidence !== undefined) item.identificationConfidence = input.identificationConfidence
+    if (input.approvalStatus !== undefined) item.approvalStatus = input.approvalStatus
+    if (input.priceSourceUrl !== undefined || input.priceSourceName !== undefined) {
+      item.priceCheckedAt = new Date().toISOString()
+    }
+    item.updatedAt = new Date().toISOString()
     this.persist()
     return item
   }
 
   async deleteCatalogItem(itemId: string): Promise<void> {
     this.db.catalogItems = this.db.catalogItems.filter((i) => i.id !== itemId)
+    this.persist()
+  }
+
+  async listPackageTemplates(): Promise<PackageTemplate[]> {
+    return this.db.packageTemplates.slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  }
+
+  async createPackageTemplate(input: NewPackageTemplateInput): Promise<PackageTemplate> {
+    const now = new Date().toISOString()
+    const templateId = newId()
+    const template: PackageTemplate = {
+      id: templateId,
+      shopId: this.db.shop.id,
+      name: input.name,
+      description: input.description,
+      configId: input.configId,
+      vehicleTypes: input.vehicleTypes,
+      installedPriceCents: input.installedPriceCents,
+      laborIncluded: input.laborIncluded,
+      source: input.source,
+      approvalStatus: input.approvalStatus ?? 'pending_review',
+      sourceQuoteId: input.sourceQuoteId ?? null,
+      sourceQuoteOptionId: input.sourceQuoteOptionId ?? null,
+      createdBy: 'demo-user-staff',
+      createdAt: now,
+      updatedAt: now,
+      items: input.items.map((item, i) => ({
+        id: newId(),
+        packageTemplateId: templateId,
+        ...item,
+        position: i,
+      })),
+    }
+    this.db.packageTemplates.push(template)
+    this.persist()
+    return template
+  }
+
+  async setPackageTemplateApproval(templateId: string, status: ProductApprovalStatus): Promise<void> {
+    const template = this.db.packageTemplates.find((p) => p.id === templateId)
+    if (!template) throw new Error('Package template not found')
+    template.approvalStatus = status
+    template.updatedAt = new Date().toISOString()
+    this.persist()
+  }
+
+  async deletePackageTemplate(templateId: string): Promise<void> {
+    this.db.packageTemplates = this.db.packageTemplates.filter((p) => p.id !== templateId)
     this.persist()
   }
 
@@ -200,6 +317,7 @@ export class DemoRepository implements DataRepository {
         tier: opt.tier,
         name: opt.name,
         description: opt.description,
+        configId: opt.configId ?? null,
         priceCents: opt.priceCents,
         laborIncluded: opt.laborIncluded,
         depositPaymentMethod: opt.depositPaymentMethod,
@@ -211,6 +329,7 @@ export class DemoRepository implements DataRepository {
           id: newId(),
           quoteOptionId: optionId,
           ...item,
+          category: item.category ?? null,
           position: j,
         })),
       })

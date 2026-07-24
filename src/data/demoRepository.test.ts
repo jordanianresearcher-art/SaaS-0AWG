@@ -75,13 +75,14 @@ describe('DemoRepository', () => {
           tier: 'good',
           name: 'Good',
           description: '',
+          configId: 'truck_2x8',
           priceCents: 99900,
           laborIncluded: true,
           depositPaymentMethod: null,
           depositPaymentHandle: null,
           depositAmountCents: null,
           recommended: true,
-          items: [{ brand: 'Kicker', model: 'X', name: 'Sub', quantity: 1, description: null }],
+          items: [{ brand: 'Kicker', model: 'X', name: 'Sub', quantity: 2, description: null, category: 'subwoofer' }],
         },
       ],
     })
@@ -89,6 +90,8 @@ describe('DemoRepository', () => {
     expect(bundle?.quote.status).toBe('draft')
     expect(bundle?.options).toHaveLength(1)
     expect(bundle?.options[0].items).toHaveLength(1)
+    expect(bundle?.options[0].configId).toBe('truck_2x8')
+    expect(bundle?.options[0].items[0].category).toBe('subwoofer')
     expect(bundle?.customer.emailContactPermissionConfirmedAt).toBeTruthy()
   })
 
@@ -118,6 +121,115 @@ describe('DemoRepository', () => {
     expect(pub).not.toBeNull()
     expect(pub!.options).toHaveLength(0)
     expect(pub!.vehicle.year).toBeNull()
+  })
+
+  it('seeds a catalog with categorized products usable for slot-filling', async () => {
+    const items = await repo.listCatalogItems()
+    expect(items.length).toBeGreaterThan(0)
+    const categories = new Set(items.map((i) => i.category))
+    for (const cat of ['subwoofer', 'enclosure', 'mono_amp', 'wiring_kit', 'labor']) {
+      expect(categories).toContain(cat)
+    }
+    // Bundled/self-contained products are deliberately left uncategorized.
+    expect(items.some((i) => i.category === null)).toBe(true)
+    expect(items.every((i) => i.approvalStatus === 'approved' && i.importSource === 'manual')).toBe(true)
+  })
+
+  it('creates a catalog item defaulting every new field sensibly', async () => {
+    const item = await repo.createCatalogItem({ brand: 'JL Audio', model: '10W3', name: '10" subwoofer', defaultPriceCents: 19900 })
+    expect(item.category).toBeNull()
+    expect(item.active).toBe(true)
+    expect(item.availability).toBe('not_tracked')
+    expect(item.importSource).toBe('manual')
+    expect(item.approvalStatus).toBe('approved')
+    expect(item.msrpCents).toBeNull()
+  })
+
+  it('updating a catalog item never clobbers fields the caller did not send', async () => {
+    const created = await repo.createCatalogItem({
+      brand: 'JL Audio',
+      model: '10W3',
+      name: '10" subwoofer',
+      defaultPriceCents: 19900,
+      category: 'subwoofer',
+      imageUrl: 'https://example.com/10w3.jpg',
+      msrpCents: 22900,
+    })
+    // Settings form only ever sends brand/model/name/defaultPriceCents —
+    // a plain price edit must not wipe the category/image/MSRP above.
+    const updated = await repo.updateCatalogItem(created.id, {
+      brand: 'JL Audio',
+      model: '10W3',
+      name: '10" subwoofer',
+      defaultPriceCents: 17900,
+    })
+    expect(updated.defaultPriceCents).toBe(17900)
+    expect(updated.category).toBe('subwoofer')
+    expect(updated.imageUrl).toBe('https://example.com/10w3.jpg')
+    expect(updated.msrpCents).toBe(22900)
+  })
+
+  it('seeds package templates covering approved, sourced-from-a-quote, and pending review states', async () => {
+    const templates = await repo.listPackageTemplates()
+    expect(templates.length).toBeGreaterThanOrEqual(3)
+    expect(templates.some((t) => t.approvalStatus === 'approved')).toBe(true)
+    expect(templates.some((t) => t.approvalStatus === 'pending_review')).toBe(true)
+    const sourced = templates.find((t) => t.sourceQuoteId !== null)
+    expect(sourced?.sourceQuoteOptionId).not.toBeNull()
+    expect(templates.every((t) => t.items.length > 0)).toBe(true)
+  })
+
+  it('creates a package template defaulting to pending_review', async () => {
+    const template = await repo.createPackageTemplate({
+      name: 'Test Package',
+      description: '',
+      configId: 'car_1x10',
+      vehicleTypes: ['car'],
+      installedPriceCents: 49900,
+      laborIncluded: true,
+      source: 'staff_saved',
+      items: [{ brand: 'Kicker', model: 'CompR', name: '10" sub', quantity: 1, description: null, category: 'subwoofer', imageUrl: null }],
+    })
+    expect(template.approvalStatus).toBe('pending_review')
+    expect(template.items).toHaveLength(1)
+  })
+
+  it('does not let saving a package hold a live reference back to the source quote', async () => {
+    const bundles = await repo.listQuoteBundles()
+    const target = bundles.find((b) => b.options.length > 0 && b.options[0].items.length > 0)!
+    const option = target.options[0]
+    const template = await repo.createPackageTemplate({
+      name: 'Snapshot check',
+      description: option.description,
+      configId: option.configId,
+      vehicleTypes: [],
+      installedPriceCents: option.priceCents,
+      laborIncluded: option.laborIncluded,
+      source: 'staff_saved',
+      sourceQuoteId: option.quoteId,
+      sourceQuoteOptionId: option.id,
+      items: option.items.map((i) => ({ brand: i.brand, model: i.model, name: i.name, quantity: i.quantity, description: i.description, category: i.category, imageUrl: null })),
+    })
+
+    // Mutating the original quote's status/data afterwards must never
+    // affect the already-saved package snapshot.
+    await repo.setQuoteStatus(target.quote.id, 'lost')
+    const reloaded = await repo.listPackageTemplates()
+    const stillThere = reloaded.find((t) => t.id === template.id)
+    expect(stillThere).toBeTruthy()
+    expect(stillThere?.items[0].name).toBe(option.items[0].name)
+  })
+
+  it('approves and deletes a package template', async () => {
+    const templates = await repo.listPackageTemplates()
+    const pending = templates.find((t) => t.approvalStatus === 'pending_review')!
+    await repo.setPackageTemplateApproval(pending.id, 'approved')
+    let reloaded = await repo.listPackageTemplates()
+    expect(reloaded.find((t) => t.id === pending.id)?.approvalStatus).toBe('approved')
+
+    await repo.deletePackageTemplate(pending.id)
+    reloaded = await repo.listPackageTemplates()
+    expect(reloaded.find((t) => t.id === pending.id)).toBeUndefined()
   })
 
   it('serves a sanitized public quote (no last name, phone, email, or notes)', async () => {

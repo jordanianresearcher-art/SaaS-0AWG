@@ -17,11 +17,18 @@ Near-term Phase 1 polish candidates: QR code for the public quote, quote
 duplication, customer history view, PWA install, quote auto-expiration,
 role-restricted settings UI, pagination.
 
-## Phase 2 — System Builder
+## Phase 2 — System Builder (foundation underway)
 
 Guided package building for common vehicles: pick the truck, pick the goal
 (daily driver / bass / show), and get a starting parts list with labor, priced
 from the shop's own preferred brands. Output feeds directly into a quote.
+
+The universal-configuration engine, expanded catalog model, and package
+template schema are built and tested (`src/lib/audioConfigs.ts`,
+migrations `0009`/`0010`) — see
+[docs/CATALOG_AND_PACKAGES.md](CATALOG_AND_PACKAGES.md) and
+[docs/IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). The visual
+builder UI, Shopify catalog import, and AI bulk-photo onboarding are next.
 
 ## Phase 3 — Package Page Generator
 

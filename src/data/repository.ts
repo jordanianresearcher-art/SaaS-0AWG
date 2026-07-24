@@ -3,7 +3,14 @@ import type {
   Customer,
   EmailMessage,
   Employee,
+  ImportSource,
+  PackageTemplate,
+  PackageTemplateSource,
   PaymentMethod,
+  PriceKind,
+  ProductApprovalStatus,
+  ProductAvailability,
+  ProductCategory,
   PublicQuote,
   Quote,
   QuoteBundle,
@@ -15,6 +22,7 @@ import type {
   Shop,
   TemplateType,
   Tier,
+  VehicleType,
   WindowTintConfig,
 } from '../types'
 
@@ -50,12 +58,16 @@ export interface NewQuoteInput {
     depositPaymentHandle: string | null
     depositAmountCents: number | null
     recommended: boolean
+    /** Which universal configuration (e.g. 'truck_2x8') this was built against, if any. Optional — the fast/visual builder that sets this is a later phase. */
+    configId?: string | null
     items: Array<{
       brand: string | null
       model: string | null
       name: string
       quantity: number
       description: string | null
+      /** Optional — lets this item fill a configuration slot (see src/lib/audioConfigs.ts). */
+      category?: ProductCategory | null
     }>
   }>
 }
@@ -87,6 +99,55 @@ export interface NewCatalogItemInput {
   model: string | null
   name: string
   defaultPriceCents: number | null
+  // Everything below is optional — the manual "Product Catalog" settings
+  // form only ever sets the fields above. These exist so a future importer
+  // (Shopify, AI photo onboarding — both deferred, see
+  // docs/CATALOG_AND_PACKAGES.md) can populate a full product record through
+  // this same interface, rather than a parallel one.
+  category?: ProductCategory | null
+  description?: string | null
+  sku?: string | null
+  upc?: string | null
+  msrpCents?: number | null
+  promoPriceCents?: number | null
+  minStaffPriceCents?: number | null
+  costCents?: number | null
+  priceSourceUrl?: string | null
+  priceSourceName?: string | null
+  priceKind?: PriceKind | null
+  imageUrl?: string | null
+  imageSourceUrl?: string | null
+  sourceUrl?: string | null
+  specs?: Record<string, unknown> | null
+  active?: boolean
+  availability?: ProductAvailability
+  importSource?: ImportSource
+  externalSourceProductId?: string | null
+  identificationConfidence?: number | null
+  approvalStatus?: ProductApprovalStatus
+}
+
+export interface NewPackageTemplateInput {
+  name: string
+  description: string
+  configId: string | null
+  vehicleTypes: VehicleType[]
+  installedPriceCents: number | null
+  laborIncluded: boolean
+  source: PackageTemplateSource
+  /** Omit to default to 'pending_review' — only an owner/manager can save one already-approved. */
+  approvalStatus?: ProductApprovalStatus
+  sourceQuoteId?: string | null
+  sourceQuoteOptionId?: string | null
+  items: Array<{
+    brand: string | null
+    model: string | null
+    name: string
+    quantity: number
+    description: string | null
+    category: ProductCategory | null
+    imageUrl: string | null
+  }>
 }
 
 export interface DataRepository {
@@ -100,6 +161,12 @@ export interface DataRepository {
   createCatalogItem(input: NewCatalogItemInput): Promise<CatalogItem>
   updateCatalogItem(itemId: string, input: NewCatalogItemInput): Promise<CatalogItem>
   deleteCatalogItem(itemId: string): Promise<void>
+
+  listPackageTemplates(): Promise<PackageTemplate[]>
+  createPackageTemplate(input: NewPackageTemplateInput): Promise<PackageTemplate>
+  /** Approve/reject a pending package. Enforced owner/manager-only at the DB layer (RLS trigger) in production. */
+  setPackageTemplateApproval(templateId: string, status: ProductApprovalStatus): Promise<void>
+  deletePackageTemplate(templateId: string): Promise<void>
 
   listQuoteBundles(): Promise<QuoteBundle[]>
   getQuoteBundle(quoteId: string): Promise<QuoteBundle | null>
@@ -127,4 +194,15 @@ export interface DataRepository {
   optOutPublicQuote(publicToken: string): Promise<void>
 }
 
-export type { Shop, Quote, QuoteBundle, Customer, QuoteOption, QuoteEvent, QuoteResponse, EmailMessage, CatalogItem }
+export type {
+  Shop,
+  Quote,
+  QuoteBundle,
+  Customer,
+  QuoteOption,
+  QuoteEvent,
+  QuoteResponse,
+  EmailMessage,
+  CatalogItem,
+  PackageTemplate,
+}

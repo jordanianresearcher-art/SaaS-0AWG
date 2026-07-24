@@ -4,6 +4,9 @@ import type {
   Customer,
   EmailMessage,
   Employee,
+  PackageTemplate,
+  PackageTemplateItem,
+  ProductApprovalStatus,
   PublicQuote,
   Quote,
   QuoteBundle,
@@ -16,7 +19,14 @@ import type {
   Shop,
   TemplateType,
 } from '../types'
-import type { DataRepository, NewCatalogItemInput, NewQuoteInput, SendEmailResult, ShopSettingsPatch } from './repository'
+import type {
+  DataRepository,
+  NewCatalogItemInput,
+  NewPackageTemplateInput,
+  NewQuoteInput,
+  SendEmailResult,
+  ShopSettingsPatch,
+} from './repository'
 
 // Production repository. Row-level security scopes every query to shops the
 // signed-in user belongs to; the anonymous public page goes through
@@ -97,6 +107,7 @@ function mapItem(r: Row): QuoteItem {
     name: r.name,
     quantity: r.quantity,
     description: r.description,
+    category: r.category ?? null,
     position: r.position,
   }
 }
@@ -108,6 +119,7 @@ function mapOption(r: Row): QuoteOption {
     tier: r.tier,
     name: r.name,
     description: r.description ?? '',
+    configId: r.config_id ?? null,
     priceCents: r.price_cents,
     laborIncluded: r.labor_included,
     depositPaymentMethod: r.deposit_payment_method,
@@ -165,10 +177,115 @@ function mapCatalogItem(r: Row): CatalogItem {
     brand: r.brand,
     model: r.model,
     name: r.name,
+    category: r.category ?? null,
+    description: r.description ?? null,
+    sku: r.sku ?? null,
+    upc: r.upc ?? null,
     defaultPriceCents: r.default_price_cents,
+    msrpCents: r.msrp_cents ?? null,
+    promoPriceCents: r.promo_price_cents ?? null,
+    minStaffPriceCents: r.min_staff_price_cents ?? null,
+    costCents: r.cost_cents ?? null,
+    priceSourceUrl: r.price_source_url ?? null,
+    priceSourceName: r.price_source_name ?? null,
+    priceKind: r.price_kind ?? null,
+    priceCheckedAt: r.price_checked_at ?? null,
+    imageUrl: r.image_url ?? null,
+    imageSourceUrl: r.image_source_url ?? null,
+    sourceUrl: r.source_url ?? null,
+    specs: r.specs ?? null,
+    active: r.active ?? true,
+    availability: r.availability ?? 'not_tracked',
+    importSource: r.import_source ?? 'manual',
+    externalSourceProductId: r.external_source_product_id ?? null,
+    identificationConfidence: r.identification_confidence ?? null,
+    approvalStatus: r.approval_status ?? 'approved',
+    position: r.position,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }
+}
+
+/**
+ * Only sets a column when the caller actually passed that field — so
+ * updateCatalogItem (a partial edit from the settings form, or a future
+ * importer refreshing one field) never clobbers data it wasn't told to
+ * touch. createCatalogItem applies the same builder; every column simply
+ * lands at its schema default when the field is omitted on insert.
+ */
+function catalogItemRow(input: NewCatalogItemInput): Row {
+  const row: Row = {
+    brand: input.brand,
+    model: input.model,
+    name: input.name,
+    default_price_cents: input.defaultPriceCents,
+  }
+  if (input.category !== undefined) row.category = input.category
+  if (input.description !== undefined) row.description = input.description
+  if (input.sku !== undefined) row.sku = input.sku
+  if (input.upc !== undefined) row.upc = input.upc
+  if (input.msrpCents !== undefined) row.msrp_cents = input.msrpCents
+  if (input.promoPriceCents !== undefined) row.promo_price_cents = input.promoPriceCents
+  if (input.minStaffPriceCents !== undefined) row.min_staff_price_cents = input.minStaffPriceCents
+  if (input.costCents !== undefined) row.cost_cents = input.costCents
+  if (input.priceSourceUrl !== undefined) row.price_source_url = input.priceSourceUrl
+  if (input.priceSourceName !== undefined) row.price_source_name = input.priceSourceName
+  if (input.priceKind !== undefined) row.price_kind = input.priceKind
+  if (input.imageUrl !== undefined) row.image_url = input.imageUrl
+  if (input.imageSourceUrl !== undefined) row.image_source_url = input.imageSourceUrl
+  if (input.sourceUrl !== undefined) row.source_url = input.sourceUrl
+  if (input.specs !== undefined) row.specs = input.specs
+  if (input.active !== undefined) row.active = input.active
+  if (input.availability !== undefined) row.availability = input.availability
+  if (input.importSource !== undefined) row.import_source = input.importSource
+  if (input.externalSourceProductId !== undefined) row.external_source_product_id = input.externalSourceProductId
+  if (input.identificationConfidence !== undefined) row.identification_confidence = input.identificationConfidence
+  if (input.approvalStatus !== undefined) row.approval_status = input.approvalStatus
+  // A price sourced from the web is only ever "just checked" when the
+  // caller actually supplied a source — never stamped on a plain manual edit.
+  if (input.priceSourceUrl !== undefined || input.priceSourceName !== undefined) {
+    row.price_checked_at = new Date().toISOString()
+  }
+  return row
+}
+
+function mapPackageTemplateItem(r: Row): PackageTemplateItem {
+  return {
+    id: r.id,
+    packageTemplateId: r.package_template_id,
+    brand: r.brand,
+    model: r.model,
+    name: r.name,
+    quantity: r.quantity,
+    description: r.description,
+    category: r.category ?? null,
+    imageUrl: r.image_url ?? null,
     position: r.position,
   }
 }
+
+function mapPackageTemplate(r: Row): PackageTemplate {
+  return {
+    id: r.id,
+    shopId: r.shop_id,
+    name: r.name,
+    description: r.description ?? '',
+    configId: r.config_id ?? null,
+    vehicleTypes: r.vehicle_types ?? [],
+    installedPriceCents: r.installed_price_cents,
+    laborIncluded: r.labor_included,
+    source: r.source,
+    approvalStatus: r.approval_status,
+    sourceQuoteId: r.source_quote_id ?? null,
+    sourceQuoteOptionId: r.source_quote_option_id ?? null,
+    createdBy: r.created_by,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+    items: ((r.package_template_items as Row[]) ?? []).map(mapPackageTemplateItem).sort((a, b) => a.position - b.position),
+  }
+}
+
+const PACKAGE_TEMPLATE_SELECT = '*, package_template_items(*)'
 
 const QUOTE_SELECT = `*, customers(*), quote_options(*, quote_items(*)), quote_events(*), quote_responses(*), email_messages(*)`
 
@@ -257,10 +374,7 @@ export class SupabaseRepository implements DataRepository {
       .from('catalog_items')
       .insert({
         shop_id: this.shopId,
-        brand: input.brand,
-        model: input.model,
-        name: input.name,
-        default_price_cents: input.defaultPriceCents,
+        ...catalogItemRow(input),
         position: count ?? 0,
       })
       .select('*')
@@ -272,12 +386,7 @@ export class SupabaseRepository implements DataRepository {
   async updateCatalogItem(itemId: string, input: NewCatalogItemInput): Promise<CatalogItem> {
     const { data, error } = await this.supabase
       .from('catalog_items')
-      .update({
-        brand: input.brand,
-        model: input.model,
-        name: input.name,
-        default_price_cents: input.defaultPriceCents,
-      })
+      .update(catalogItemRow(input))
       .eq('id', itemId)
       .select('*')
       .single()
@@ -287,6 +396,72 @@ export class SupabaseRepository implements DataRepository {
 
   async deleteCatalogItem(itemId: string): Promise<void> {
     const { error } = await this.supabase.from('catalog_items').delete().eq('id', itemId)
+    if (error) throw error
+  }
+
+  async listPackageTemplates(): Promise<PackageTemplate[]> {
+    const { data, error } = await this.supabase
+      .from('package_templates')
+      .select(PACKAGE_TEMPLATE_SELECT)
+      .eq('shop_id', this.shopId)
+      .order('created_at', { ascending: false })
+    if (error) throw error
+    return (data as Row[]).map(mapPackageTemplate)
+  }
+
+  async createPackageTemplate(input: NewPackageTemplateInput): Promise<PackageTemplate> {
+    const { data: template, error: templateError } = await this.supabase
+      .from('package_templates')
+      .insert({
+        shop_id: this.shopId,
+        name: input.name,
+        description: input.description,
+        config_id: input.configId,
+        vehicle_types: input.vehicleTypes,
+        installed_price_cents: input.installedPriceCents,
+        labor_included: input.laborIncluded,
+        source: input.source,
+        approval_status: input.approvalStatus ?? 'pending_review',
+        source_quote_id: input.sourceQuoteId ?? null,
+        source_quote_option_id: input.sourceQuoteOptionId ?? null,
+      })
+      .select('id')
+      .single()
+    if (templateError) throw templateError
+
+    if (input.items.length > 0) {
+      const { error: itemsError } = await this.supabase.from('package_template_items').insert(
+        input.items.map((item, i) => ({
+          package_template_id: template.id,
+          brand: item.brand,
+          model: item.model,
+          name: item.name,
+          quantity: item.quantity,
+          description: item.description,
+          category: item.category,
+          image_url: item.imageUrl,
+          position: i,
+        })),
+      )
+      if (itemsError) throw itemsError
+    }
+
+    const { data, error } = await this.supabase
+      .from('package_templates')
+      .select(PACKAGE_TEMPLATE_SELECT)
+      .eq('id', template.id)
+      .single()
+    if (error) throw error
+    return mapPackageTemplate(data)
+  }
+
+  async setPackageTemplateApproval(templateId: string, status: ProductApprovalStatus): Promise<void> {
+    const { error } = await this.supabase.from('package_templates').update({ approval_status: status }).eq('id', templateId)
+    if (error) throw error
+  }
+
+  async deletePackageTemplate(templateId: string): Promise<void> {
+    const { error } = await this.supabase.from('package_templates').delete().eq('id', templateId)
     if (error) throw error
   }
 
@@ -363,6 +538,7 @@ export class SupabaseRepository implements DataRepository {
           deposit_payment_handle: opt.depositPaymentHandle,
           deposit_amount_cents: opt.depositAmountCents,
           recommended: opt.recommended,
+          config_id: opt.configId ?? null,
           position: i,
         })
         .select('id')
@@ -377,6 +553,7 @@ export class SupabaseRepository implements DataRepository {
             name: item.name,
             quantity: item.quantity,
             description: item.description,
+            category: item.category ?? null,
             position: j,
           })),
         )

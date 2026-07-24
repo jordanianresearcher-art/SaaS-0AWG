@@ -51,6 +51,53 @@ export type MembershipRole = 'owner' | 'manager' | 'staff'
 
 export type PaymentMethod = 'link' | 'zelle' | 'cashapp' | 'venmo' | 'paypal'
 
+// Shared product taxonomy: what a catalog product IS (for slot-filling —
+// see src/lib/audioConfigs.ts) and what vehicle body it fits (for
+// configuration matching). Bare unions live here per this file's own
+// convention (see TintBodyStyle/TintType below); labels and slot rules are
+// business logic and stay in audioConfigs.ts.
+export type ProductCategory =
+  | 'subwoofer'
+  | 'enclosure'
+  | 'mono_amp'
+  | 'multi_amp'
+  | 'wiring_kit'
+  | 'integration'
+  | 'bass_control'
+  | 'battery'
+  | 'big_three'
+  | 'epicenter'
+  | 'integration_module'
+  | 'sound_treatment'
+  | 'ofc_wiring'
+  | 'door_speaker'
+  | 'tweeter'
+  | 'radio'
+  | 'dsp'
+  | 'camera'
+  | 'fabrication'
+  | 'labor'
+  | 'accessory'
+  | 'other'
+
+export type VehicleType = 'truck' | 'car' | 'sedan' | 'hatchback' | 'suv'
+
+export type ConfigShell = 'bass' | 'door_speakers' | 'full_system' | 'radio' | 'camera' | 'marine' | 'tint'
+
+/** Whether a catalog price is MSRP, regular retail, a temporary sale price, or unconfirmed. */
+export type PriceKind = 'msrp' | 'retail' | 'sale' | 'unknown'
+
+export type ProductAvailability = 'not_tracked' | 'available' | 'low_stock' | 'out_of_stock' | 'special_order'
+
+/** Where a catalog product's data originally came from. */
+export type ImportSource = 'manual' | 'shopify' | 'ai_photo_import'
+
+/** AI/import proposals never go live silently — this gates visibility to staff/customers. */
+export type ProductApprovalStatus = 'approved' | 'pending_review' | 'rejected'
+
+/** How a package template came to exist. 'ai_drafted' is a later phase (deferred) — declared now so the schema/type doesn't need revisiting when it ships. */
+export type PackageTemplateSource = 'staff_saved' | 'ai_drafted'
+
 export type TintBodyStyle = 'sedan_coupe' | 'suv_wagon_van'
 
 export type TintType = 'normal' | 'ceramic'
@@ -132,6 +179,8 @@ export interface QuoteItem {
   name: string
   quantity: number
   description: string | null
+  /** What component slot this fills (see src/lib/audioConfigs.ts). Null for items with no category set — they simply fill no slot. */
+  category: ProductCategory | null
   position: number
 }
 
@@ -142,8 +191,35 @@ export interface CatalogItem {
   brand: string | null
   model: string | null
   name: string
+  category: ProductCategory | null
+  description: string | null
+  sku: string | null
+  upc: string | null
+  /** The shop's actual selling price — distinct from msrpCents/promoPriceCents below. */
   defaultPriceCents: number | null
+  msrpCents: number | null
+  promoPriceCents: number | null
+  minStaffPriceCents: number | null
+  costCents: number | null
+  priceSourceUrl: string | null
+  priceSourceName: string | null
+  priceKind: PriceKind | null
+  priceCheckedAt: string | null
+  imageUrl: string | null
+  imageSourceUrl: string | null
+  sourceUrl: string | null
+  /** Category-varying structured specs (subwoofer size, impedance, RMS, etc.) — schemaless by design. */
+  specs: Record<string, unknown> | null
+  active: boolean
+  availability: ProductAvailability
+  importSource: ImportSource
+  externalSourceProductId: string | null
+  /** 0-1; null for manually-entered products. */
+  identificationConfidence: number | null
+  approvalStatus: ProductApprovalStatus
   position: number
+  createdAt: string
+  updatedAt: string
 }
 
 export interface QuoteOption {
@@ -152,6 +228,8 @@ export interface QuoteOption {
   tier: Tier
   name: string
   description: string
+  /** Which universal configuration (e.g. 'truck_2x8') this option was built against, if any. References AUDIO_CONFIGURATIONS seed data, not a DB table. */
+  configId: string | null
   priceCents: number
   laborIncluded: boolean
   depositPaymentMethod: PaymentMethod | null
@@ -160,6 +238,49 @@ export interface QuoteOption {
   recommended: boolean
   position: number
   items: QuoteItem[]
+}
+
+export interface PackageTemplateItem {
+  id: string
+  packageTemplateId: string
+  brand: string | null
+  model: string | null
+  name: string
+  quantity: number
+  description: string | null
+  category: ProductCategory | null
+  /** Snapshotted at save time — stays put even if the source product's image later changes. */
+  imageUrl: string | null
+  position: number
+}
+
+/**
+ * A shop-specific, reusable package built against a universal configuration
+ * (see src/lib/audioConfigs.ts) from real catalog products. Created either
+ * by a staff member saving a quote option (source: 'staff_saved') or, in a
+ * later phase, an AI onboarding draft (source: 'ai_drafted') — either way it
+ * stays 'pending_review' until an owner/manager approves it. A snapshot:
+ * sourceQuoteId/sourceQuoteOptionId are provenance only, never a live
+ * reference — editing or deleting the original quote never changes an
+ * already-saved package.
+ */
+export interface PackageTemplate {
+  id: string
+  shopId: string
+  name: string
+  description: string
+  configId: string | null
+  vehicleTypes: VehicleType[]
+  installedPriceCents: number | null
+  laborIncluded: boolean
+  source: PackageTemplateSource
+  approvalStatus: ProductApprovalStatus
+  sourceQuoteId: string | null
+  sourceQuoteOptionId: string | null
+  createdBy: string | null
+  createdAt: string
+  updatedAt: string
+  items: PackageTemplateItem[]
 }
 
 export interface Quote {

@@ -659,3 +659,116 @@ for pricing Options.
   rather than provide a new one. The code (including the migration file)
   is committed and pushed; the migration still needs to be run against the
   live project before production quotes can use more than one tint entry.
+
+### Round 9 addendum — tint percentages weren't actually optional
+
+The user hit "Could not save the quote" testing in production (root cause:
+migration `0008` genuinely hadn't been applied to the live DB yet — flagged
+directly, SQL handed over for them to run themselves) and separately asked
+that tint percentages, in particular, not be required. Fixed: a window can
+now be marked "included" without a % chosen yet, the windshield % is no
+longer required when windshield tint is checked, and the tint option name
+is no longer required (falls back to a generic "Tint option" label when
+blank). Display sites now show a friendly "No tint percentages chosen yet"
+message instead of an empty list. Verified with 131/131 tests plus two
+targeted Playwright smoke checks (a blank-named, percent-less tint entry
+saves successfully; the quote detail page shows the graceful fallback).
+Committed as `b5b31b9`.
+
+## Round 10 — Selling catalog & packages: Phase 1 foundation
+
+The product direction expanded significantly: 0Gauge is evolving from
+quote recovery into a visual, easy car-audio selling system — universal
+configuration shells (Truck 2×8, Car 1×12, etc.), a real product catalog
+(MSRP vs. selling price, images, specs, import provenance), reusable
+package templates, a fast visual builder, Shopify import, and AI bulk-
+photo onboarding, per a detailed 5-phase spec. Given the scope, this round
+built **Phase 1 (Foundation) completely** — schema, types, repository
+layer, pure business logic, demo data, and tests — and left Phase 2+
+(Shopify import, the visual builder, AI onboarding) for the next round(s),
+rather than half-connect any of it. Two things the spec flagged as
+potential blockers (a sibling product-scanner repo and the target Shopify
+store) were provided mid-round and are now cloned/confirmed — see
+`docs/IMPLEMENTATION_STATUS.md`.
+
+### Done
+- **`src/lib/audioConfigs.ts`** — the universal configuration engine.
+  All 12 spec'd bass shells (truck 2×8/4×8/2×10/2×12; car/sedan/hatchback/
+  SUV 1×8 through 2×15), each a package *shell* (never a hard-coded brand/
+  model/price) with required/recommended/optional component slots by
+  category. `validatePackageSlots(config, items)` is the one place
+  "is this package complete" logic lives — pure, tested, no UI dependency.
+  Only the `bass` shell is populated; `door_speakers`/`full_system`/
+  `radio`/`camera`/`marine` are declared `active: false` so new shells are
+  a data addition, not a restructure. Window tint keeps its own existing
+  system untouched.
+- **Extended catalog product model** (`supabase/migrations/0009_catalog_product_model.sql`):
+  `catalog_items` gained category, MSRP/selling/promo/min-staff/cost
+  pricing (clearly distinct, never conflated), price provenance
+  (source URL/name/kind/checked-at), image + specs (schemaless JSONB,
+  same precedent as `window_tints`), active/availability, import source,
+  and approval status — all additive/nullable, zero impact on existing
+  catalog flows. A partial unique index on
+  `(shop_id, import_source, external_source_product_id)` sets up
+  idempotent upserting for a future importer. `quote_items.category` and
+  `quote_options.config_id` were added too (both nullable) so real quotes
+  can eventually be validated against `validatePackageSlots`.
+  Owner/manager-only approval-status changes are enforced by a genuine
+  Postgres trigger (`guard_catalog_item_approval`), not just app-layer
+  trust — RLS alone can't compare a row's old value to its new one.
+- **Package template model** (`supabase/migrations/0010_package_templates.sql`):
+  `package_templates` + `package_template_items`, RLS matching this
+  schema's existing tenant-isolation pattern exactly, the same
+  approval-status trigger protection. `src/lib/packageTemplates.ts`'s
+  `quoteOptionToPackageTemplateDraft()` is a pure, tested snapshot
+  conversion — `sourceQuoteId`/`sourceQuoteOptionId` are provenance-only
+  (`on delete set null`), never a live reference, so editing or deleting
+  the original quote later can never change an already-saved package
+  (verified by a test that mutates the source after conversion).
+- **Repository layer**: both `DemoRepository` and `SupabaseRepository`
+  gained `listPackageTemplates`/`createPackageTemplate`/
+  `setPackageTemplateApproval`/`deletePackageTemplate`, and
+  `catalogItemRow`/`updateCatalogItem` (both modes) now only touch columns
+  the caller actually passed — a plain price edit from the Settings form
+  can never silently clobber an imported image or MSRP once an importer
+  exists.
+- **Demo data**: catalog enriched to 14 categorized products (two
+  deliberately left uncategorized — a loaded enclosure and a bundled sub+
+  amp kit — rather than force a fake single-slot classification onto a
+  bundled product), plus 3 seeded package templates (approved, approved-
+  with-real-quote-provenance, pending_review) to exercise the review-queue
+  states in demo mode. `DEMO_SEED_VERSION` bumped 8 → 9.
+- **No UI wired yet, by design** — the fast package builder, "save as
+  package" button, and owner approval screen are Phase 3. Nothing points
+  at the new capability from the app today, so there's no dangling/
+  nonfunctional button — it's a complete, tested backend layer ready for
+  that UI.
+- **Docs**: new `docs/CATALOG_AND_PACKAGES.md` (concepts, security model,
+  how to run the migrations, test coverage) and
+  `docs/IMPLEMENTATION_STATUS.md` (done/partial/deferred/credentials/
+  limitations/next step, per the spec's explicit request). `README.md` and
+  `docs/ROADMAP.md`'s "Phase 2 — System Builder" updated to point at them;
+  `docs/SECURITY.md` documents the two new tables and the approval-trigger
+  pattern.
+- **Repo/Shopify unblocked mid-round**: the requested sibling scanner repo
+  (`jordanianresearcher-art/car-audio-inventory`) was cloned into this
+  session, and the Shopify connector confirmed live and connected to
+  **Super Car Audio (supercaraudio.com)** — both were flagged as
+  blocking Phase 2/5 and are now resolved; recorded in
+  `docs/IMPLEMENTATION_STATUS.md` as the immediate next step.
+
+### Verification (this round)
+- `npm run lint`, `npx tsc -b --noEmit`, `npm run test -- --run` (158/158
+  across 13 files — 15 new `audioConfigs.test.ts` cases, 5 new
+  `packageTemplates.test.ts` cases, and 6 new `demoRepository.test.ts`
+  cases covering catalog defaults/partial-update protection, package
+  template CRUD, seed-state coverage, and snapshot immutability), and
+  `npm run build` all clean.
+- Playwright smoke pass against a `vite preview` build confirmed no
+  regression to existing screens from the type/schema extension: demo mode
+  boots on the bumped seed version, Settings → Product Catalog still
+  renders with the richer demo catalog, and creating a quote through the
+  existing free-text option builder still works end-to-end untouched.
+- Migrations `0009` and `0010` were **not** applied to the live Supabase
+  project this round (no personal access token available — same
+  limitation as Round 9); both are committed and ready to run.
