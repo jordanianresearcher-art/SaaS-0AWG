@@ -80,48 +80,41 @@ const tintPercentSchema = z
   .refine((v) => (TINT_VLT_PERCENTS as readonly number[]).includes(v), 'Choose a valid tint %')
   .nullable()
 
-const tintWindowSchema = z
-  .object({
-    position: z.enum([
-      'front_left',
-      'front_right',
-      'rear_left',
-      'rear_right',
-      'rear_quarter_left',
-      'rear_quarter_right',
-      'back_glass',
-    ]),
-    included: z.boolean(),
-    vltPercent: tintPercentSchema,
-  })
-  .superRefine((v, ctx) => {
-    if (v.included && v.vltPercent === null) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['vltPercent'], message: 'Choose a tint %' })
-    }
-  })
+const tintWindowSchema = z.object({
+  position: z.enum([
+    'front_left',
+    'front_right',
+    'rear_left',
+    'rear_right',
+    'rear_quarter_left',
+    'rear_quarter_right',
+    'back_glass',
+  ]),
+  included: z.boolean(),
+  // A window can be marked included before a % is picked — a shop may not
+  // have decided yet. Blank just means "not shown" in the summary.
+  vltPercent: tintPercentSchema,
+})
 
 const optionalDollarSchema = z
   .string()
   .refine((v) => v.trim() === '' || parseDollarsToCents(v) !== null, 'Enter a valid dollar amount')
 
-const windowTintSchema = z
-  .object({
-    name: z.string().min(1, 'Name this tint option'),
-    bodyStyle: z.enum(['sedan_coupe', 'suv_wagon_van']),
-    tintType: z.enum(['normal', 'ceramic']),
-    windows: z.array(tintWindowSchema),
-    price: optionalDollarSchema,
-    removeOldTint: z.boolean(),
-    removeOldTintPrice: optionalDollarSchema,
-    windshieldIncluded: z.boolean(),
-    windshieldVltPercent: tintPercentSchema,
-    windshieldPrice: optionalDollarSchema,
-  })
-  .superRefine((v, ctx) => {
-    if (v.windshieldIncluded && v.windshieldVltPercent === null) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['windshieldVltPercent'], message: 'Choose a tint %' })
-    }
-  })
+const windowTintSchema = z.object({
+  // Blank falls back to a generic "Tint option" label at display time —
+  // not required, matching how little else on this form is required.
+  name: z.string(),
+  bodyStyle: z.enum(['sedan_coupe', 'suv_wagon_van']),
+  tintType: z.enum(['normal', 'ceramic']),
+  windows: z.array(tintWindowSchema),
+  price: optionalDollarSchema,
+  removeOldTint: z.boolean(),
+  removeOldTintPrice: optionalDollarSchema,
+  windshieldIncluded: z.boolean(),
+  // Not required even when windshieldIncluded — a shop may not have decided yet.
+  windshieldVltPercent: tintPercentSchema,
+  windshieldPrice: optionalDollarSchema,
+})
 
 const schema = z
   .object({
@@ -948,7 +941,7 @@ function TintOptionEditor({
     <fieldset className="rounded-xl border border-zinc-200 p-4">
       <legend className="px-1 text-base font-bold text-charcoal">Tint option {index + 1}</legend>
       <div className="space-y-4">
-        <Field label="Tint option name" htmlFor={`tint-${index}-name`} error={tintErrors?.name?.message} required>
+        <Field label="Tint option name" htmlFor={`tint-${index}-name`} error={tintErrors?.name?.message}>
           <Input
             id={`tint-${index}-name`}
             value={value.name}

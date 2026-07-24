@@ -268,7 +268,7 @@ export default function QuoteDetailPage() {
                     </p>
                     {summary.uniformPercent !== null ? (
                       <p className="text-zinc-700">All included windows at {summary.uniformPercent}%</p>
-                    ) : (
+                    ) : summary.windowLines.length > 0 ? (
                       <ul className="space-y-0.5 text-zinc-700">
                         {summary.windowLines.map((w) => (
                           <li key={w.label}>
@@ -276,6 +276,8 @@ export default function QuoteDetailPage() {
                           </li>
                         ))}
                       </ul>
+                    ) : (
+                      <p className="text-zinc-500">No tint percentages chosen yet.</p>
                     )}
                     {summary.priceCents !== null ? (
                       <p className="text-sm text-zinc-500">Tint job: {formatCurrency(summary.priceCents)}</p>

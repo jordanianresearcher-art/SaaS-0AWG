@@ -245,7 +245,9 @@ export default function PublicQuotePage() {
               const percentLabel =
                 summary.uniformPercent !== null
                   ? `${summary.uniformPercent}%`
-                  : summary.windowLines.map((w) => `${w.label} ${w.vltPercent}%`).join(', ')
+                  : summary.windowLines.length > 0
+                    ? summary.windowLines.map((w) => `${w.label} ${w.vltPercent}%`).join(', ')
+                    : null
               const extras = [
                 summary.removeOldTint ? 'old tint removed' : null,
                 summary.windshield ? `windshield ${summary.windshield.vltPercent}%` : null,
@@ -254,7 +256,8 @@ export default function PublicQuotePage() {
                 <div key={i} className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
                   <p className="text-base font-bold text-ink">{summary.name}</p>
                   <p className="mt-0.5 text-sm text-zinc-600">
-                    {summary.bodyStyleLabel} &middot; {summary.tintTypeLabel} &middot; {percentLabel}
+                    {summary.bodyStyleLabel} &middot; {summary.tintTypeLabel}
+                    {percentLabel ? ` · ${percentLabel}` : ''}
                     {extras.length > 0 ? ` · ${extras.join(', ')}` : ''}
                   </p>
                   {summary.totalCents > 0 ? (

@@ -162,7 +162,7 @@ export function summarizeWindowTint(config: WindowTintConfig): WindowTintSummary
   const uniformPercent = windowLines.length > 0 && percents.size === 1 ? windowLines[0].vltPercent : null
 
   return {
-    name: config.name ?? '',
+    name: config.name?.trim() || 'Tint option',
     bodyStyleLabel: BODY_STYLE_INFO[config.bodyStyle].label,
     tintTypeLabel: TINT_TYPE_INFO[config.tintType ?? 'normal'].label,
     windowLines,
