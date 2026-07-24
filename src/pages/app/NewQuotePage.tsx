@@ -20,7 +20,12 @@ import WindowTintEditor from '../../components/WindowTintEditor'
 import { parseDollarsToCents } from '../../lib/format'
 import { COMMON_MAKES, OTHER_MAKE, VEHICLE_YEARS, fetchModelsForMakeYear } from '../../lib/vehicleData'
 import { DEFAULT_DEPOSIT_PERCENT, PAYMENT_METHOD_INFO, computeDefaultDepositCents } from '../../lib/paymentMethods'
-import { TINT_VLT_PERCENTS, windowTintConfigToFormValues, windowTintFormValuesToConfig } from '../../lib/windowTint'
+import {
+  TINT_VLT_PERCENTS,
+  createDefaultWindowTintFormValues,
+  windowTintConfigToFormValues,
+  windowTintFormValuesToConfig,
+} from '../../lib/windowTint'
 import type { NewQuoteInput } from '../../data/repository'
 import type { CatalogItem, PaymentMethod, QuoteBundle, Tier } from '../../types'
 
@@ -101,6 +106,7 @@ const optionalDollarSchema = z
 
 const windowTintSchema = z
   .object({
+    name: z.string().min(1, 'Name this tint option'),
     bodyStyle: z.enum(['sedan_coupe', 'suv_wagon_van']),
     tintType: z.enum(['normal', 'ceramic']),
     windows: z.array(tintWindowSchema),
@@ -138,7 +144,7 @@ const schema = z
     nextFollowUpAt: z.string(),
     options: z.array(optionSchema).max(3, 'No more than three options'),
     recommendedIndex: z.coerce.number().int().min(0),
-    windowTint: windowTintSchema.nullable(),
+    windowTints: z.array(windowTintSchema).max(3, 'No more than three tint options'),
   })
   .superRefine((values, ctx) => {
     // Vehicle is all-or-nothing: blank is fine, a partial entry is not.
@@ -260,7 +266,7 @@ export default function NewQuotePage() {
           nextFollowUpAt: '',
           options: optionsFromBundle(duplicateFrom),
           recommendedIndex: Math.max(0, duplicateFrom.options.findIndex((o) => o.recommended)),
-          windowTint: duplicateFrom.quote.windowTint ? windowTintConfigToFormValues(duplicateFrom.quote.windowTint) : null,
+          windowTints: duplicateFrom.quote.windowTints.map(windowTintConfigToFormValues),
         }
       : {
           firstName: '',
@@ -277,11 +283,12 @@ export default function NewQuotePage() {
           nextFollowUpAt: '',
           options: [],
           recommendedIndex: 0,
-          windowTint: null,
+          windowTints: [],
         },
   })
 
   const { fields: optionFields, append, remove } = useFieldArray({ control, name: 'options' })
+  const { fields: tintFields, append: appendTint, remove: removeTint } = useFieldArray({ control, name: 'windowTints' })
 
   const watchedMake = watch('vehicleMake')
   const [customMake, setCustomMake] = useState(() =>
@@ -290,8 +297,6 @@ export default function NewQuotePage() {
   const [vehicleOpen, setVehicleOpen] = useState(() =>
     Boolean(duplicateFrom && (duplicateFrom.customer.vehicleYear || duplicateFrom.customer.vehicleMake || duplicateFrom.customer.vehicleModel)),
   )
-  const [tintOpen, setTintOpen] = useState(() => Boolean(duplicateFrom?.quote.windowTint))
-
   const onSubmit = async (values: FormValues) => {
     const input: NewQuoteInput = {
       customer: {
@@ -310,7 +315,7 @@ export default function NewQuotePage() {
         internalNotes: values.internalNotes.trim() || null,
         expirationDate: values.expirationDate ? new Date(`${values.expirationDate}T12:00:00`).toISOString() : null,
         nextFollowUpAt: values.nextFollowUpAt ? new Date(`${values.nextFollowUpAt}T09:00:00`).toISOString() : null,
-        windowTint: values.windowTint ? windowTintFormValuesToConfig(values.windowTint) : null,
+        windowTints: values.windowTints.map(windowTintFormValuesToConfig),
       },
       options: values.options.map((opt, i) => {
         const priceCents = parseDollarsToCents(opt.price) ?? 0
@@ -558,40 +563,43 @@ export default function NewQuotePage() {
           ) : null}
         </Card>
 
-        <Card className="space-y-4 lg:col-span-2">
+        <Card className="space-y-5 lg:col-span-2">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-bold text-ink">Window Tint</h2>
-            {!tintOpen ? (
-              <Button variant="secondary" onClick={() => setTintOpen(true)}>
-                <Plus className="h-5 w-5" aria-hidden="true" /> Add window tint
-              </Button>
-            ) : (
+            {tintFields.length < 3 ? (
               <Button
-                variant="ghost"
-                onClick={() => {
-                  setTintOpen(false)
-                  setValue('windowTint', null)
-                }}
+                variant="secondary"
+                onClick={() => appendTint(createDefaultWindowTintFormValues('sedan_coupe', `Tint option ${tintFields.length + 1}`))}
               >
-                <Trash2 className="h-5 w-5" aria-hidden="true" /> Remove window tint
+                <Plus className="h-5 w-5" aria-hidden="true" /> Add tint option
               </Button>
-            )}
+            ) : null}
           </div>
-          {tintOpen ? (
-            <>
-              <WindowTintEditor
-                value={watch('windowTint')}
-                onChange={(next) => setValue('windowTint', next, { shouldValidate: true, shouldDirty: true })}
-              />
-              {errors.windowTint ? (
-                <p role="alert" className="text-sm font-medium text-red-700">
-                  Check the tint details above — a % or price is missing or invalid.
-                </p>
-              ) : null}
-            </>
-          ) : (
-            <p className="text-sm text-zinc-500">Optional — describe any window tint work to include on the quote.</p>
-          )}
+          <p className="-mt-3 text-sm text-zinc-500">
+            Optional — describe any window tint work to include on the quote. Add more than one if you&apos;re pricing a
+            few different scenarios.
+          </p>
+          {tintFields.length === 0 ? (
+            <p className="text-sm text-zinc-500">No window tint options yet — add one if this quote includes tint.</p>
+          ) : null}
+          <div className="flex flex-col gap-4 lg:flex-row lg:flex-nowrap lg:items-start">
+            {tintFields.map((field, index) => (
+              <div key={field.id} className="lg:min-w-0 lg:flex-1 lg:basis-72">
+                <TintOptionEditor
+                  index={index}
+                  control={control}
+                  setValue={setValue}
+                  errors={errors}
+                  onRemove={() => removeTint(index)}
+                />
+              </div>
+            ))}
+          </div>
+          {typeof errors.windowTints?.message === 'string' ? (
+            <p role="alert" className="text-sm font-medium text-red-700">
+              {errors.windowTints.message}
+            </p>
+          ) : null}
         </Card>
 
         <Card className="space-y-4 lg:col-span-2">
@@ -916,6 +924,51 @@ function OptionEditor({
           ))}
         </ul>
       </Modal>
+    </fieldset>
+  )
+}
+
+function TintOptionEditor({
+  index,
+  control,
+  setValue,
+  errors,
+  onRemove,
+}: {
+  index: number
+  control: Control<FormValues>
+  setValue: UseFormSetValue<FormValues>
+  errors: FieldErrors<FormValues>
+  onRemove: () => void
+}) {
+  const value = useWatch({ control, name: `windowTints.${index}` })
+  const tintErrors = errors.windowTints?.[index]
+
+  return (
+    <fieldset className="rounded-xl border border-zinc-200 p-4">
+      <legend className="px-1 text-base font-bold text-charcoal">Tint option {index + 1}</legend>
+      <div className="space-y-4">
+        <Field label="Tint option name" htmlFor={`tint-${index}-name`} error={tintErrors?.name?.message} required>
+          <Input
+            id={`tint-${index}-name`}
+            value={value.name}
+            onChange={(e) => setValue(`windowTints.${index}.name`, e.target.value, { shouldValidate: true, shouldDirty: true })}
+          />
+        </Field>
+        <WindowTintEditor
+          index={index}
+          value={value}
+          onChange={(next) => setValue(`windowTints.${index}`, next, { shouldValidate: true, shouldDirty: true })}
+        />
+        {tintErrors ? (
+          <p role="alert" className="text-sm font-medium text-red-700">
+            Check the tint details above — a % or price is missing or invalid.
+          </p>
+        ) : null}
+        <Button variant="danger" onClick={onRemove}>
+          <Trash2 className="h-5 w-5" aria-hidden="true" /> Remove tint option
+        </Button>
+      </div>
     </fieldset>
   )
 }

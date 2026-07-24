@@ -68,9 +68,9 @@ describe('renderEmail', () => {
     expect(email.html).not.toMatch(/null|undefined/i)
   })
 
-  it('shows a window tint teaser only on the initial email, only when a tint config exists', () => {
+  it('shows a window tint teaser only on the initial email, only when there is at least one tint entry', () => {
     const ctx = makeContext()
-    expect(ctx.quote.windowTint).not.toBeNull() // fixture: the seeded F-150 quote has one
+    expect(ctx.quote.windowTints.length).toBeGreaterThan(0) // fixture: the seeded F-150 quote has one
 
     const initialWithTint = renderEmail('initial', ctx)
     expect(initialWithTint.text).toContain('Includes window tint')
@@ -78,7 +78,7 @@ describe('renderEmail', () => {
     const checkInWithTint = renderEmail('check_in', ctx)
     expect(checkInWithTint.text).not.toContain('Includes window tint')
 
-    const ctxNoTint = { ...ctx, quote: { ...ctx.quote, windowTint: null } }
+    const ctxNoTint = { ...ctx, quote: { ...ctx.quote, windowTints: [] } }
     const initialNoTint = renderEmail('initial', ctxNoTint)
     expect(initialNoTint.text).not.toContain('Includes window tint')
   })

@@ -82,7 +82,7 @@ function mapQuote(r: Row): Quote {
     nextFollowUpAt: r.next_follow_up_at,
     emailFollowUpAllowed: r.email_follow_up_allowed,
     wonAmountCents: r.won_amount_cents,
-    windowTint: r.window_tint,
+    windowTints: Array.isArray(r.window_tints) ? r.window_tints : [],
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }
@@ -343,7 +343,7 @@ export class SupabaseRepository implements DataRepository {
         internal_notes: input.quote.internalNotes,
         expiration_date: input.quote.expirationDate,
         next_follow_up_at: input.quote.nextFollowUpAt,
-        window_tint: input.quote.windowTint,
+        window_tints: input.quote.windowTints,
       })
       .select('*')
       .single()

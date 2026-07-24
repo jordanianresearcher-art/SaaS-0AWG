@@ -38,7 +38,7 @@ export interface NewQuoteInput {
     internalNotes: string | null
     expirationDate: string | null
     nextFollowUpAt: string | null
-    windowTint: WindowTintConfig | null
+    windowTints: WindowTintConfig[]
   }
   options: Array<{
     tier: Tier

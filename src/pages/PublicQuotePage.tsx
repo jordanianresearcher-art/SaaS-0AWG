@@ -143,32 +143,6 @@ export default function PublicQuotePage() {
               {quote.vehicle.trim ? ` ${quote.vehicle.trim}` : ''}
             </p>
           ) : null}
-          {quote.windowTint
-            ? (() => {
-                const summary = summarizeWindowTint(quote.windowTint)
-                const percentLabel =
-                  summary.uniformPercent !== null
-                    ? `${summary.uniformPercent}%`
-                    : summary.windowLines.map((w) => `${w.label} ${w.vltPercent}%`).join(', ')
-                const extras = [
-                  summary.removeOldTint ? 'old tint removed' : null,
-                  summary.windshield ? `windshield ${summary.windshield.vltPercent}%` : null,
-                ].filter(Boolean)
-                return (
-                  <>
-                    <p className="mt-1 text-base text-zinc-600">
-                      Window tint: {summary.bodyStyleLabel} &middot; {summary.tintTypeLabel} &middot; {percentLabel}
-                      {extras.length > 0 ? ` · ${extras.join(', ')}` : ''}
-                    </p>
-                    {summary.totalCents > 0 ? (
-                      <p className="text-base font-semibold text-zinc-700">
-                        Tint total: {formatCurrency(summary.totalCents)}
-                      </p>
-                    ) : null}
-                  </>
-                )
-              })()
-            : null}
           {quote.expirationDate ? (
             <p className="mt-2 text-base font-semibold text-zinc-700">
               Good through {formatDate(quote.expirationDate)}
@@ -261,6 +235,36 @@ export default function PublicQuotePage() {
             )
           })}
         </section>
+
+        {/* Window tint */}
+        {quote.windowTints.length > 0 ? (
+          <section aria-label="Window tint" className="mt-6 space-y-3">
+            <h2 className="text-lg font-black text-ink">Window tint</h2>
+            {quote.windowTints.map((tint, i) => {
+              const summary = summarizeWindowTint(tint)
+              const percentLabel =
+                summary.uniformPercent !== null
+                  ? `${summary.uniformPercent}%`
+                  : summary.windowLines.map((w) => `${w.label} ${w.vltPercent}%`).join(', ')
+              const extras = [
+                summary.removeOldTint ? 'old tint removed' : null,
+                summary.windshield ? `windshield ${summary.windshield.vltPercent}%` : null,
+              ].filter(Boolean)
+              return (
+                <div key={i} className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                  <p className="text-base font-bold text-ink">{summary.name}</p>
+                  <p className="mt-0.5 text-sm text-zinc-600">
+                    {summary.bodyStyleLabel} &middot; {summary.tintTypeLabel} &middot; {percentLabel}
+                    {extras.length > 0 ? ` · ${extras.join(', ')}` : ''}
+                  </p>
+                  {summary.totalCents > 0 ? (
+                    <p className="mt-1 text-sm font-semibold text-zinc-700">Tint total: {formatCurrency(summary.totalCents)}</p>
+                  ) : null}
+                </div>
+              )
+            })}
+          </section>
+        ) : null}
 
         {/* Contact buttons */}
         <section className="mt-6 grid grid-cols-2 gap-3">

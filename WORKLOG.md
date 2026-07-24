@@ -582,3 +582,80 @@ own price, and a price specifically for the windshield.
   `window_tint` rows existed (they did — two real quotes) — re-verified
   the backfill applied correctly via both a direct SQL query and a live
   anonymous `get_public_quote` RPC call.
+
+## Round 9 — Multiple named window tint options per quote
+
+The user asked for two things: explicit permission to stop worrying about
+migrating/preserving old (test-era) quotes' tint data going forward, and
+the ability to add several named window tint scenarios to one quote — the
+same "+ Add" / named-entry / individually-removable pattern already used
+for pricing Options.
+
+### Done
+- **`WindowTintConfig` gained a `name: string`.** `Quote.windowTint:
+  WindowTintConfig | null` and `PublicQuote.windowTint` both became
+  `windowTints: WindowTintConfig[]`.
+- **`src/lib/windowTint.ts`**: extracted `windowsForBodyStyle(bodyStyle)`
+  so switching body style on an *existing* entry resets only its window
+  list — not the name/price/tintType a shop may have already typed in,
+  which matters more now that each entry carries more state worth keeping.
+  `createDefaultWindowTintFormValues(bodyStyle, name?)` and both
+  config↔form-values converters and `summarizeWindowTint` all carry `name`
+  through.
+- **`WindowTintEditor.tsx`**: `value` is no longer nullable (an appended
+  entry is always fully populated via `createDefaultWindowTintFormValues`);
+  fixed the three previously-hardcoded DOM ids (`tint-price`,
+  `tint-removal-price`, `tint-windshield-price`) to be index-scoped
+  (`tint-${index}-price`, etc.) — with a single tint config these never
+  collided, but they would have the instant a quote carried two entries.
+- **`NewQuotePage.tsx`**: replaced the old `tintOpen` boolean with
+  `useFieldArray({ control, name: 'windowTints' })`, the exact same
+  mechanism already driving `options` (`optionFields`/`append`/`remove`).
+  Added a `TintOptionEditor` wrapper (mirrors `OptionEditor`) with a
+  "Tint option name" field at the top and a "Remove tint option" button at
+  the bottom; capped at three entries, same as Options.
+- **`QuoteDetailPage.tsx`** now loops over `quote.windowTints`, one card per
+  named entry. **`PublicQuotePage.tsx`** redesigned the tint summary from a
+  single inline line into small bordered per-entry cards (visually closer
+  to how the Option cards read), each showing its name, body style, film
+  type, percentages, and total.
+- **Email teaser condition** (`emailTemplates.ts` and the
+  `send-quote-email` Edge Function) changed from tint-object truthiness to
+  `windowTints.length > 0`; the teaser copy itself is unchanged.
+- **Migration `0008_window_tint_multiple.sql`**: renames `window_tint` →
+  `window_tints` and updates the `get_public_quote` RPC to key
+  `windowTints` off the new column, guarded with
+  `jsonb_typeof(...) = 'array'` so any legacy single-object or null row
+  reads back as `[]` instead of crashing the public quote page.
+  **Deliberately no backfill** — per the user's explicit "don't worry
+  about migrating old quotes, we're still testing them" — a real change
+  from the backfill-everything approach used in migration `0007`.
+  `supabaseRepository.ts`'s `mapQuote` mirrors the same guard at the
+  application layer (`Array.isArray(r.window_tints) ? r.window_tints :
+  []`).
+- **Demo data**: April's Mustang quote now carries **two** named tint
+  entries ("Full vehicle, ceramic" and "Front two only, normal film") to
+  showcase the new capability in demo mode; Marcus's F-150 quote carries
+  one ("Full vehicle"). `DEMO_SEED_VERSION` bumped 7 → 8.
+
+### Verification (this round)
+- `npm run lint`, `npx tsc -b --noEmit`, `npm run test -- --run` (131/131
+  across 11 files, including new `windowTint.test.ts` coverage for
+  `windowsForBodyStyle` and the `name` field through both converters and
+  `summarizeWindowTint`), and `npm run build` all clean.
+- Playwright smoke pass against a `vite preview` build: empty state →
+  add two tint entries → each gets a sensible default name ("Tint option
+  1"/"Tint option 2") → index-scoped price ids stay independent between
+  entries → switching body style on one entry preserves its name and
+  price → a third entry hits the three-entry cap and the Add button
+  disappears → removing an entry brings the Add button back → the quote
+  saves and its detail page shows both named entries → duplicating the
+  quote carries both entries' names and data over intact → the seeded
+  multi-entry demo quote (April) renders correctly on the public quote
+  page as two separate named, bordered cards with per-entry totals.
+- Migration `0008` was **not** applied to the live Supabase project this
+  round — the personal access token used for the Management API in prior
+  rounds was not available in this session, and the user asked to hold off
+  rather than provide a new one. The code (including the migration file)
+  is committed and pushed; the migration still needs to be run against the
+  live project before production quotes can use more than one tint entry.

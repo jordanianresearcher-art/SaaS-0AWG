@@ -94,7 +94,9 @@ export function renderEmail(templateType: TemplateType, ctx: EmailContext): Rend
     value > 0 ? (vehicle ? `Quoted from ${formatCurrency(value)} for your ${vehicle}.` : `Quoted from ${formatCurrency(value)}.`) : ''
   // Emails stay short — no window-by-window breakdown, just a pointer to the full quote.
   const tintTeaser =
-    templateType === 'initial' && quote.windowTint ? 'Includes window tint — see your quote for the full breakdown.' : ''
+    templateType === 'initial' && quote.windowTints.length > 0
+      ? 'Includes window tint — see your quote for the full breakdown.'
+      : ''
   const expiration = quote.expirationDate
     ? `This quote is good through ${formatDate(quote.expirationDate)}.`
     : ''

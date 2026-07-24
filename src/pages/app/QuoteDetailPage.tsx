@@ -256,50 +256,48 @@ export default function QuoteDetailPage() {
             </Card>
           ))}
 
-          {quote.windowTint ? (
+          {quote.windowTints.length > 0 ? (
             <>
               <h2 className="pt-2 text-xl font-bold text-ink">Window tint</h2>
-              <Card className="space-y-1.5 text-base">
-                {(() => {
-                  const summary = summarizeWindowTint(quote.windowTint)
-                  return (
-                    <>
-                      <p className="font-bold text-ink">
-                        {summary.bodyStyleLabel} &middot; {summary.tintTypeLabel}
+              {quote.windowTints.map((tint, i) => {
+                const summary = summarizeWindowTint(tint)
+                return (
+                  <Card key={i} className="space-y-1.5 text-base">
+                    <p className="font-bold text-ink">
+                      {summary.name} — {summary.bodyStyleLabel} &middot; {summary.tintTypeLabel}
+                    </p>
+                    {summary.uniformPercent !== null ? (
+                      <p className="text-zinc-700">All included windows at {summary.uniformPercent}%</p>
+                    ) : (
+                      <ul className="space-y-0.5 text-zinc-700">
+                        {summary.windowLines.map((w) => (
+                          <li key={w.label}>
+                            {w.label}: {w.vltPercent}%
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {summary.priceCents !== null ? (
+                      <p className="text-sm text-zinc-500">Tint job: {formatCurrency(summary.priceCents)}</p>
+                    ) : null}
+                    {summary.removeOldTint ? (
+                      <p className="text-sm text-zinc-500">
+                        Remove old tint
+                        {summary.removeOldTint.priceCents !== null ? `: ${formatCurrency(summary.removeOldTint.priceCents)}` : ''}
                       </p>
-                      {summary.uniformPercent !== null ? (
-                        <p className="text-zinc-700">All included windows at {summary.uniformPercent}%</p>
-                      ) : (
-                        <ul className="space-y-0.5 text-zinc-700">
-                          {summary.windowLines.map((w) => (
-                            <li key={w.label}>
-                              {w.label}: {w.vltPercent}%
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                      {summary.priceCents !== null ? (
-                        <p className="text-sm text-zinc-500">Tint job: {formatCurrency(summary.priceCents)}</p>
-                      ) : null}
-                      {summary.removeOldTint ? (
-                        <p className="text-sm text-zinc-500">
-                          Remove old tint
-                          {summary.removeOldTint.priceCents !== null ? `: ${formatCurrency(summary.removeOldTint.priceCents)}` : ''}
-                        </p>
-                      ) : null}
-                      {summary.windshield ? (
-                        <p className="text-sm text-zinc-500">
-                          Windshield: {summary.windshield.vltPercent}%
-                          {summary.windshield.priceCents !== null ? ` — ${formatCurrency(summary.windshield.priceCents)}` : ''}
-                        </p>
-                      ) : null}
-                      {summary.totalCents > 0 ? (
-                        <p className="pt-1 font-bold text-ink">Total: {formatCurrency(summary.totalCents)}</p>
-                      ) : null}
-                    </>
-                  )
-                })()}
-              </Card>
+                    ) : null}
+                    {summary.windshield ? (
+                      <p className="text-sm text-zinc-500">
+                        Windshield: {summary.windshield.vltPercent}%
+                        {summary.windshield.priceCents !== null ? ` — ${formatCurrency(summary.windshield.priceCents)}` : ''}
+                      </p>
+                    ) : null}
+                    {summary.totalCents > 0 ? (
+                      <p className="pt-1 font-bold text-ink">Total: {formatCurrency(summary.totalCents)}</p>
+                    ) : null}
+                  </Card>
+                )
+              })}
             </>
           ) : null}
 

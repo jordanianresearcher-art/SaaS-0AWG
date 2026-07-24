@@ -30,7 +30,7 @@ export interface DemoDB {
   seedVersion: number
 }
 
-export const DEMO_SEED_VERSION = 7
+export const DEMO_SEED_VERSION = 8
 
 const SHOP_ID = 'demo-shop'
 
@@ -59,7 +59,7 @@ interface QuoteSeed {
     expirationDaysAhead: number | null
     lastEmailedDaysAgo: number | null
     nextFollowUpInDays: number | null
-    windowTint?: WindowTintConfig | null
+    windowTints?: WindowTintConfig[]
   }
   options: Array<{
     tier: QuoteOption['tier']
@@ -86,15 +86,17 @@ const SEEDS: QuoteSeed[] = [
       status: 'viewed', internalNotes: 'Wants clean install, keeps rear seat storage. Leaning Better.',
       emailFollowUpAllowed: true, wonAmountCents: null,
       createdDaysAgo: 4, expirationDaysAhead: 26, lastEmailedDaysAgo: 3, nextFollowUpInDays: 0,
-      windowTint: windowTintFormValuesToConfig({
-        ...createDefaultWindowTintFormValues('suv_wagon_van'),
-        tintType: 'ceramic',
-        price: '450',
-        windows: createDefaultWindowTintFormValues('suv_wagon_van').windows.map((w) => ({ ...w, vltPercent: 20 })),
-        windshieldIncluded: true,
-        windshieldVltPercent: 70,
-        windshieldPrice: '120',
-      }),
+      windowTints: [
+        windowTintFormValuesToConfig({
+          ...createDefaultWindowTintFormValues('suv_wagon_van', 'Full vehicle'),
+          tintType: 'ceramic',
+          price: '450',
+          windows: createDefaultWindowTintFormValues('suv_wagon_van').windows.map((w) => ({ ...w, vltPercent: 20 })),
+          windshieldIncluded: true,
+          windshieldVltPercent: 70,
+          windshieldPrice: '120',
+        }),
+      ],
     },
     options: [
       {
@@ -365,20 +367,34 @@ const SEEDS: QuoteSeed[] = [
       status: 'responded', internalNotes: 'Payday is the 1st — she asked us to ping her after.',
       emailFollowUpAllowed: true, wonAmountCents: null,
       createdDaysAgo: 5, expirationDaysAhead: 25, lastEmailedDaysAgo: 4, nextFollowUpInDays: 0,
-      windowTint: windowTintFormValuesToConfig({
-        ...createDefaultWindowTintFormValues('sedan_coupe'),
-        tintType: 'normal',
-        price: '250',
-        removeOldTint: true,
-        removeOldTintPrice: '50',
-        windows: createDefaultWindowTintFormValues('sedan_coupe').windows.map((w) => ({
-          ...w,
-          vltPercent: w.position === 'back_glass' ? 5 : 35,
-        })),
-        windshieldIncluded: false,
-        windshieldVltPercent: null,
-        windshieldPrice: '',
-      }),
+      // Two named scenarios, same as she's comparing two pricing options —
+      // showcases a quote carrying more than one tint entry.
+      windowTints: [
+        windowTintFormValuesToConfig({
+          ...createDefaultWindowTintFormValues('sedan_coupe', 'Full vehicle, ceramic'),
+          tintType: 'ceramic',
+          price: '380',
+          removeOldTint: true,
+          removeOldTintPrice: '50',
+          windows: createDefaultWindowTintFormValues('sedan_coupe').windows.map((w) => ({
+            ...w,
+            vltPercent: w.position === 'back_glass' ? 5 : 35,
+          })),
+          windshieldIncluded: false,
+          windshieldVltPercent: null,
+          windshieldPrice: '',
+        }),
+        windowTintFormValuesToConfig({
+          ...createDefaultWindowTintFormValues('sedan_coupe', 'Front two only, normal film'),
+          tintType: 'normal',
+          price: '150',
+          windows: createDefaultWindowTintFormValues('sedan_coupe').windows.map((w) => ({
+            ...w,
+            included: w.position === 'front_left' || w.position === 'front_right',
+            vltPercent: w.position === 'front_left' || w.position === 'front_right' ? 35 : null,
+          })),
+        }),
+      ],
     },
     options: [
       {
@@ -474,7 +490,7 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
           : null,
       emailFollowUpAllowed: seed.quote.emailFollowUpAllowed,
       wonAmountCents: seed.quote.wonAmountCents,
-      windowTint: seed.quote.windowTint ?? null,
+      windowTints: seed.quote.windowTints ?? [],
       createdAt: created,
       updatedAt: created,
     })

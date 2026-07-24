@@ -322,7 +322,7 @@ Deno.serve(async (req) => {
       customer.vehicle_year && customer.vehicle_make && customer.vehicle_model
         ? `${customer.vehicle_year} ${customer.vehicle_make} ${customer.vehicle_model}`
         : null,
-    hasWindowTint: Boolean(quote.window_tint),
+    hasWindowTint: Array.isArray(quote.window_tints) && quote.window_tints.length > 0,
     valueCents,
     expirationDate: quote.expiration_date,
     publicUrl,

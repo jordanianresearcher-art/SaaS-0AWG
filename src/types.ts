@@ -72,6 +72,7 @@ export interface WindowTintWindow {
 }
 
 export interface WindowTintConfig {
+  name: string
   bodyStyle: TintBodyStyle
   tintType: TintType
   windows: WindowTintWindow[]
@@ -174,7 +175,7 @@ export interface Quote {
   nextFollowUpAt: string | null
   emailFollowUpAllowed: boolean
   wonAmountCents: number | null
-  windowTint: WindowTintConfig | null
+  windowTints: WindowTintConfig[]
   createdAt: string
   updatedAt: string
 }
@@ -240,7 +241,7 @@ export interface PublicQuote {
   quoteDisclaimer: string
   customerFirstName: string
   vehicle: { year: number | null; make: string | null; model: string | null; trim: string | null }
-  windowTint: WindowTintConfig | null
+  windowTints: WindowTintConfig[]
   status: QuoteStatus
   expirationDate: string | null
   optedOut: boolean

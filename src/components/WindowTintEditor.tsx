@@ -5,15 +5,17 @@ import {
   TINT_VLT_PERCENTS,
   TINT_WINDOW_LABELS,
   computeWindowTintTotalCents,
-  createDefaultWindowTintFormValues,
   windowTintFormValuesToConfig,
+  windowsForBodyStyle,
   type WindowTintFormValues,
 } from '../lib/windowTint'
 import { formatCurrency } from '../lib/format'
 import { Field, Input } from './ui'
 
 interface WindowTintEditorProps {
-  value: WindowTintFormValues | null
+  /** Scopes this entry's DOM ids when a quote carries several tint options. */
+  index: number
+  value: WindowTintFormValues
   onChange: (next: WindowTintFormValues) => void
 }
 
@@ -110,20 +112,18 @@ function WindowRow({
   )
 }
 
-export default function WindowTintEditor({ value, onChange }: WindowTintEditorProps) {
-  const bodyStyle = value?.bodyStyle ?? null
+export default function WindowTintEditor({ index, value, onChange }: WindowTintEditorProps) {
+  const bodyStyle = value.bodyStyle
 
   const updateWindow = (position: TintWindowPosition, patch: Partial<WindowTintWindow>) => {
-    if (!value) return
     onChange({ ...value, windows: value.windows.map((w) => (w.position === position ? { ...w, ...patch } : w)) })
   }
 
   const applyToAll = (percent: number) => {
-    if (!value) return
     onChange({ ...value, windows: value.windows.map((w) => (w.included ? { ...w, vltPercent: percent } : w)) })
   }
 
-  const totalCents = value ? computeWindowTintTotalCents(windowTintFormValuesToConfig(value)) : 0
+  const totalCents = computeWindowTintTotalCents(windowTintFormValuesToConfig(value))
 
   return (
     <div className="space-y-4">
@@ -134,7 +134,7 @@ export default function WindowTintEditor({ value, onChange }: WindowTintEditorPr
             <button
               key={style}
               type="button"
-              onClick={() => onChange(createDefaultWindowTintFormValues(style))}
+              onClick={() => onChange({ ...value, bodyStyle: style, windows: windowsForBodyStyle(style) })}
               aria-pressed={bodyStyle === style}
               className={`rounded-xl border-2 p-4 text-left transition-colors ${
                 bodyStyle === style ? 'border-brand bg-blue-50' : 'border-zinc-200 hover:border-zinc-300'
@@ -152,154 +152,150 @@ export default function WindowTintEditor({ value, onChange }: WindowTintEditorPr
         ) : null}
       </div>
 
-      {value && bodyStyle ? (
-        <>
-          <div>
-            <p className="mb-1.5 text-sm font-semibold text-ink">Film type</p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {TINT_TYPES.map((type) => (
-                <button
-                  key={type}
-                  type="button"
-                  onClick={() => onChange({ ...value, tintType: type })}
-                  aria-pressed={value.tintType === type}
-                  className={`rounded-xl border-2 p-4 text-left transition-colors ${
-                    value.tintType === type ? 'border-brand bg-blue-50' : 'border-zinc-200 hover:border-zinc-300'
-                  }`}
-                >
-                  <p className="text-base font-bold text-ink">{TINT_TYPE_INFO[type].label}</p>
-                  <p className="text-sm text-zinc-500">{TINT_TYPE_INFO[type].hint}</p>
-                </button>
-              ))}
+      <div>
+        <p className="mb-1.5 text-sm font-semibold text-ink">Film type</p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {TINT_TYPES.map((type) => (
+            <button
+              key={type}
+              type="button"
+              onClick={() => onChange({ ...value, tintType: type })}
+              aria-pressed={value.tintType === type}
+              className={`rounded-xl border-2 p-4 text-left transition-colors ${
+                value.tintType === type ? 'border-brand bg-blue-50' : 'border-zinc-200 hover:border-zinc-300'
+              }`}
+            >
+              <p className="text-base font-bold text-ink">{TINT_TYPE_INFO[type].label}</p>
+              <p className="text-sm text-zinc-500">{TINT_TYPE_INFO[type].hint}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <Field label="Tint job price" htmlFor={`tint-${index}-price`} hint="Covers all the windows you include below.">
+        <Input
+          id={`tint-${index}-price`}
+          inputMode="decimal"
+          placeholder="$350"
+          value={value.price}
+          onChange={(e) => onChange({ ...value, price: e.target.value })}
+        />
+      </Field>
+
+      <div>
+        <p className="mb-1.5 text-sm font-semibold text-ink">Apply one % to all windows</p>
+        <PercentPills value={null} onChange={applyToAll} label="Apply one percentage to all windows" />
+      </div>
+
+      <div className="relative mx-auto hidden aspect-[16/10] w-full max-w-sm sm:block">
+        <svg viewBox="0 0 200 120" className="absolute inset-0 h-full w-full" aria-hidden="true">
+          <path d={CAR_PATHS[bodyStyle]} fill="#f4f4f5" stroke="#d4d4d8" strokeWidth="2" />
+        </svg>
+        {value.windows.map((w) => {
+          const pos = WINDOW_LAYOUT[bodyStyle][w.position]
+          if (!pos) return null
+          return (
+            <button
+              key={w.position}
+              type="button"
+              onClick={() => updateWindow(w.position, { included: !w.included, vltPercent: !w.included ? w.vltPercent : null })}
+              aria-pressed={w.included}
+              aria-label={`${TINT_WINDOW_LABELS[w.position]} — ${w.included ? 'included' : 'not included'}`}
+              title={TINT_WINDOW_LABELS[w.position]}
+              style={{
+                top: pos.top,
+                left: pos.left,
+                opacity: w.included ? 1 - (w.vltPercent ?? 0) / 100 / 1.4 : 0.25,
+              }}
+              className="absolute flex h-9 w-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-md border-2 border-white bg-brand text-[11px] font-bold text-white shadow"
+            >
+              {w.included && w.vltPercent ? w.vltPercent : ''}
+            </button>
+          )
+        })}
+      </div>
+
+      <div className="space-y-2">
+        {value.windows.map((w) => (
+          <WindowRow key={w.position} window={w} onChange={(patch) => updateWindow(w.position, patch)} />
+        ))}
+      </div>
+
+      <div className="rounded-xl bg-zinc-50 p-3">
+        <label className="flex items-center gap-2.5 text-base font-medium text-ink">
+          <input
+            type="checkbox"
+            className="h-5 w-5 accent-[#1d4ed8]"
+            checked={value.removeOldTint}
+            onChange={(e) =>
+              onChange({
+                ...value,
+                removeOldTint: e.target.checked,
+                removeOldTintPrice: e.target.checked ? value.removeOldTintPrice : '',
+              })
+            }
+          />
+          Remove old tint first?
+        </label>
+        {value.removeOldTint ? (
+          <div className="mt-2 max-w-xs">
+            <Field label="Removal price" htmlFor={`tint-${index}-removal-price`}>
+              <Input
+                id={`tint-${index}-removal-price`}
+                inputMode="decimal"
+                placeholder="$50"
+                value={value.removeOldTintPrice}
+                onChange={(e) => onChange({ ...value, removeOldTintPrice: e.target.value })}
+              />
+            </Field>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="rounded-xl bg-zinc-50 p-3">
+        <label className="flex items-center gap-2.5 text-base font-medium text-ink">
+          <input
+            type="checkbox"
+            className="h-5 w-5 accent-[#1d4ed8]"
+            checked={value.windshieldIncluded}
+            onChange={(e) =>
+              onChange({
+                ...value,
+                windshieldIncluded: e.target.checked,
+                windshieldVltPercent: e.target.checked ? value.windshieldVltPercent : null,
+                windshieldPrice: e.target.checked ? value.windshieldPrice : '',
+              })
+            }
+          />
+          Also tint the windshield?
+        </label>
+        <p className="mt-1 text-sm text-zinc-500">
+          Most states treat windshield tint differently — often just a visor strip or a lighter %.
+        </p>
+        {value.windshieldIncluded ? (
+          <div className="mt-2 space-y-3">
+            <PercentPills
+              value={value.windshieldVltPercent}
+              onChange={(p) => onChange({ ...value, windshieldVltPercent: p })}
+              label="Windshield tint percentage"
+            />
+            <div className="max-w-xs">
+              <Field label="Windshield price" htmlFor={`tint-${index}-windshield-price`}>
+                <Input
+                  id={`tint-${index}-windshield-price`}
+                  inputMode="decimal"
+                  placeholder="$120"
+                  value={value.windshieldPrice}
+                  onChange={(e) => onChange({ ...value, windshieldPrice: e.target.value })}
+                />
+              </Field>
             </div>
           </div>
+        ) : null}
+      </div>
 
-          <Field label="Tint job price" htmlFor="tint-price" hint="Covers all the windows you include below.">
-            <Input
-              id="tint-price"
-              inputMode="decimal"
-              placeholder="$350"
-              value={value.price}
-              onChange={(e) => onChange({ ...value, price: e.target.value })}
-            />
-          </Field>
-
-          <div>
-            <p className="mb-1.5 text-sm font-semibold text-ink">Apply one % to all windows</p>
-            <PercentPills value={null} onChange={applyToAll} label="Apply one percentage to all windows" />
-          </div>
-
-          <div className="relative mx-auto hidden aspect-[16/10] w-full max-w-sm sm:block">
-            <svg viewBox="0 0 200 120" className="absolute inset-0 h-full w-full" aria-hidden="true">
-              <path d={CAR_PATHS[bodyStyle]} fill="#f4f4f5" stroke="#d4d4d8" strokeWidth="2" />
-            </svg>
-            {value.windows.map((w) => {
-              const pos = WINDOW_LAYOUT[bodyStyle][w.position]
-              if (!pos) return null
-              return (
-                <button
-                  key={w.position}
-                  type="button"
-                  onClick={() => updateWindow(w.position, { included: !w.included, vltPercent: !w.included ? w.vltPercent : null })}
-                  aria-pressed={w.included}
-                  aria-label={`${TINT_WINDOW_LABELS[w.position]} — ${w.included ? 'included' : 'not included'}`}
-                  title={TINT_WINDOW_LABELS[w.position]}
-                  style={{
-                    top: pos.top,
-                    left: pos.left,
-                    opacity: w.included ? 1 - (w.vltPercent ?? 0) / 100 / 1.4 : 0.25,
-                  }}
-                  className="absolute flex h-9 w-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-md border-2 border-white bg-brand text-[11px] font-bold text-white shadow"
-                >
-                  {w.included && w.vltPercent ? w.vltPercent : ''}
-                </button>
-              )
-            })}
-          </div>
-
-          <div className="space-y-2">
-            {value.windows.map((w) => (
-              <WindowRow key={w.position} window={w} onChange={(patch) => updateWindow(w.position, patch)} />
-            ))}
-          </div>
-
-          <div className="rounded-xl bg-zinc-50 p-3">
-            <label className="flex items-center gap-2.5 text-base font-medium text-ink">
-              <input
-                type="checkbox"
-                className="h-5 w-5 accent-[#1d4ed8]"
-                checked={value.removeOldTint}
-                onChange={(e) =>
-                  onChange({
-                    ...value,
-                    removeOldTint: e.target.checked,
-                    removeOldTintPrice: e.target.checked ? value.removeOldTintPrice : '',
-                  })
-                }
-              />
-              Remove old tint first?
-            </label>
-            {value.removeOldTint ? (
-              <div className="mt-2 max-w-xs">
-                <Field label="Removal price" htmlFor="tint-removal-price">
-                  <Input
-                    id="tint-removal-price"
-                    inputMode="decimal"
-                    placeholder="$50"
-                    value={value.removeOldTintPrice}
-                    onChange={(e) => onChange({ ...value, removeOldTintPrice: e.target.value })}
-                  />
-                </Field>
-              </div>
-            ) : null}
-          </div>
-
-          <div className="rounded-xl bg-zinc-50 p-3">
-            <label className="flex items-center gap-2.5 text-base font-medium text-ink">
-              <input
-                type="checkbox"
-                className="h-5 w-5 accent-[#1d4ed8]"
-                checked={value.windshieldIncluded}
-                onChange={(e) =>
-                  onChange({
-                    ...value,
-                    windshieldIncluded: e.target.checked,
-                    windshieldVltPercent: e.target.checked ? value.windshieldVltPercent : null,
-                    windshieldPrice: e.target.checked ? value.windshieldPrice : '',
-                  })
-                }
-              />
-              Also tint the windshield?
-            </label>
-            <p className="mt-1 text-sm text-zinc-500">
-              Most states treat windshield tint differently — often just a visor strip or a lighter %.
-            </p>
-            {value.windshieldIncluded ? (
-              <div className="mt-2 space-y-3">
-                <PercentPills
-                  value={value.windshieldVltPercent}
-                  onChange={(p) => onChange({ ...value, windshieldVltPercent: p })}
-                  label="Windshield tint percentage"
-                />
-                <div className="max-w-xs">
-                  <Field label="Windshield price" htmlFor="tint-windshield-price">
-                    <Input
-                      id="tint-windshield-price"
-                      inputMode="decimal"
-                      placeholder="$120"
-                      value={value.windshieldPrice}
-                      onChange={(e) => onChange({ ...value, windshieldPrice: e.target.value })}
-                    />
-                  </Field>
-                </div>
-              </div>
-            ) : null}
-          </div>
-
-          {totalCents > 0 ? (
-            <p className="text-right text-base font-bold text-ink">Total tint price: {formatCurrency(totalCents)}</p>
-          ) : null}
-        </>
+      {totalCents > 0 ? (
+        <p className="text-right text-base font-bold text-ink">Total tint price: {formatCurrency(totalCents)}</p>
       ) : null}
     </div>
   )

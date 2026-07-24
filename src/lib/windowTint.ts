@@ -1,4 +1,6 @@
-// Window tint configuration. A small manual body-style picker drives which
+// Window tint configuration. A quote can carry several named tint entries
+// (e.g. "Full vehicle", "Front two only"), the same way it carries several
+// pricing options. A small manual body-style picker per entry drives which
 // windows are tintable, since NHTSA's free vehicle API can't reliably
 // determine body class/window count from year+make+model alone (confirmed
 // via direct testing — only a VIN-based lookup gives that, and this app
@@ -56,6 +58,7 @@ export const TINT_TYPE_INFO: Record<TintType, { label: string; hint: string }> =
  * at the form boundary.
  */
 export interface WindowTintFormValues {
+  name: string
   bodyStyle: TintBodyStyle
   tintType: TintType
   windows: WindowTintWindow[]
@@ -67,15 +70,21 @@ export interface WindowTintFormValues {
   windshieldPrice: string
 }
 
-export function createDefaultWindowTintFormValues(bodyStyle: TintBodyStyle): WindowTintFormValues {
+/** Fresh window list for a body style — used both for a brand-new entry and when an existing entry switches body style (name/price/tintType carry over, only the windows reset). */
+export function windowsForBodyStyle(bodyStyle: TintBodyStyle): WindowTintWindow[] {
+  return BODY_STYLE_INFO[bodyStyle].windows.map((position) => ({
+    position,
+    included: true,
+    vltPercent: null,
+  }))
+}
+
+export function createDefaultWindowTintFormValues(bodyStyle: TintBodyStyle, name = ''): WindowTintFormValues {
   return {
+    name,
     bodyStyle,
     tintType: 'normal',
-    windows: BODY_STYLE_INFO[bodyStyle].windows.map((position) => ({
-      position,
-      included: true,
-      vltPercent: null,
-    })),
+    windows: windowsForBodyStyle(bodyStyle),
     price: '',
     removeOldTint: false,
     removeOldTintPrice: '',
@@ -87,6 +96,7 @@ export function createDefaultWindowTintFormValues(bodyStyle: TintBodyStyle): Win
 
 export function windowTintFormValuesToConfig(form: WindowTintFormValues): WindowTintConfig {
   return {
+    name: form.name.trim(),
     bodyStyle: form.bodyStyle,
     tintType: form.tintType,
     windows: form.windows,
@@ -103,6 +113,7 @@ export function windowTintFormValuesToConfig(form: WindowTintFormValues): Window
 
 export function windowTintConfigToFormValues(config: WindowTintConfig): WindowTintFormValues {
   return {
+    name: config.name ?? '',
     bodyStyle: config.bodyStyle,
     tintType: config.tintType ?? 'normal',
     windows: config.windows,
@@ -129,6 +140,7 @@ export function computeWindowTintTotalCents(config: WindowTintConfig): number {
 }
 
 export interface WindowTintSummary {
+  name: string
   bodyStyleLabel: string
   tintTypeLabel: string
   windowLines: Array<{ label: string; vltPercent: number }>
@@ -150,6 +162,7 @@ export function summarizeWindowTint(config: WindowTintConfig): WindowTintSummary
   const uniformPercent = windowLines.length > 0 && percents.size === 1 ? windowLines[0].vltPercent : null
 
   return {
+    name: config.name ?? '',
     bodyStyleLabel: BODY_STYLE_INFO[config.bodyStyle].label,
     tintTypeLabel: TINT_TYPE_INFO[config.tintType ?? 'normal'].label,
     windowLines,

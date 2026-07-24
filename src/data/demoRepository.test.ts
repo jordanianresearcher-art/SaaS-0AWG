@@ -69,7 +69,7 @@ describe('DemoRepository', () => {
         source: null,
         emailContactPermissionConfirmed: true,
       },
-      quote: { internalNotes: null, expirationDate: null, nextFollowUpAt: null, windowTint: null },
+      quote: { internalNotes: null, expirationDate: null, nextFollowUpAt: null, windowTints: [] },
       options: [
         {
           tier: 'good',
@@ -106,7 +106,7 @@ describe('DemoRepository', () => {
         source: null,
         emailContactPermissionConfirmed: true,
       },
-      quote: { internalNotes: null, expirationDate: null, nextFollowUpAt: null, windowTint: null },
+      quote: { internalNotes: null, expirationDate: null, nextFollowUpAt: null, windowTints: [] },
       options: [],
     })
     const bundle = await repo.getQuoteBundle(quote.id)
