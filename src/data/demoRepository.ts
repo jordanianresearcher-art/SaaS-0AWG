@@ -20,6 +20,7 @@ import type {
   NewPackageTemplateInput,
   NewQuoteInput,
   SendEmailResult,
+  ShopifyImportResult,
   ShopSettingsPatch,
 } from './repository'
 import { buildDemoData, DEMO_SEED_VERSION, type DemoDB } from './demoData'
@@ -217,6 +218,13 @@ export class DemoRepository implements DataRepository {
   async deleteCatalogItem(itemId: string): Promise<void> {
     this.db.catalogItems = this.db.catalogItems.filter((i) => i.id !== itemId)
     this.persist()
+  }
+
+  async runShopifyImport(): Promise<ShopifyImportResult> {
+    // Demo mode must never make real external calls (Shopify, AI, or web
+    // search) — this action only makes sense against a real Supabase
+    // project with real Shopify credentials configured.
+    throw new Error('Shopify import is only available in production mode.')
   }
 
   async listPackageTemplates(): Promise<PackageTemplate[]> {

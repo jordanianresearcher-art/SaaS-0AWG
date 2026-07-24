@@ -150,6 +150,24 @@ export interface NewPackageTemplateInput {
   }>
 }
 
+export interface ShopifyImportOptions {
+  /** Resume a prior run — pass back the nextCursor from its result. */
+  afterCursor?: string | null
+  /** Let Shopify's price win even over a price a staff member edited locally since the last sync. Defaults to false (never clobber a local edit). */
+  overwriteLocalPrices?: boolean
+}
+
+export interface ShopifyImportResult {
+  created: number
+  updated: number
+  unchanged: number
+  skipped: number
+  failed: number
+  errors: Array<{ product: string; message: string }>
+  hasMore: boolean
+  nextCursor: string | null
+}
+
 export interface DataRepository {
   readonly mode: 'demo' | 'production'
 
@@ -161,6 +179,8 @@ export interface DataRepository {
   createCatalogItem(input: NewCatalogItemInput): Promise<CatalogItem>
   updateCatalogItem(itemId: string, input: NewCatalogItemInput): Promise<CatalogItem>
   deleteCatalogItem(itemId: string): Promise<void>
+  /** Owner/manager only in production — imports one page of the shop's Shopify catalog. Never call in demo mode (see docs/CATALOG_AND_PACKAGES.md). */
+  runShopifyImport(options?: ShopifyImportOptions): Promise<ShopifyImportResult>
 
   listPackageTemplates(): Promise<PackageTemplate[]>
   createPackageTemplate(input: NewPackageTemplateInput): Promise<PackageTemplate>

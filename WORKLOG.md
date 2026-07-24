@@ -772,3 +772,69 @@ store) were provided mid-round and are now cloned/confirmed — see
 - Migrations `0009` and `0010` were **not** applied to the live Supabase
   project this round (no personal access token available — same
   limitation as Round 9); both are committed and ready to run.
+
+### Round 10 addendum — Shopify import (Phase 2 backend)
+
+Mid-round, the user supplied the two things flagged as Phase 2/5 blockers:
+the sibling product-scanner repo
+(`jordanianresearcher-art/car-audio-inventory`, cloned into this session)
+and confirmation that the Shopify connector already available in this
+session is live against **Super Car Audio (supercaraudio.com)**. Read the
+scanner repo's `src/lib/shopify.ts` (auth/pagination/GraphQL patterns —
+adapted, not copied, since it syncs the opposite direction, pushing
+scanned items *into* Shopify rather than pulling a catalog *out of* it)
+and its AI photo-identification route (informs Phase 5's design later).
+Fetched real Super Car Audio product data live via the Shopify MCP
+connector to ground the import's mapping logic in actual data rather than
+guesswork.
+
+- **`src/lib/shopifyImport.ts`** (pure, 16 tests, all against a fixture
+  shaped from a real fetched product — a Nemesis Audio NA-8SLM V.2
+  subwoofer): `guessCategoryFromProductType()` (best-effort, never an
+  authoritative claim), `mapShopifyVariantToCatalogItem()` (one catalog
+  item per Shopify *variant* — this catalog has no variant concept;
+  `compareAtPrice` → `msrpCents` only when genuinely higher than the
+  current price; non-`ACTIVE` products land `active: false` rather than
+  being skipped), and `planCatalogItemSync()` / `priceLikelyEditedSinceSync()`
+  — the "never silently overwrite a price a staff member edited since the
+  last sync" protection, driven off comparing `updatedAt` to
+  `priceCheckedAt` (a timestamp only a price-carrying sync write sets).
+- **`supabase/functions/shopify-import-catalog/index.ts`**: paginated
+  (resumable via a returned cursor, capped per invocation), owner/manager-
+  only (checks `shop_memberships.role` directly rather than the
+  `is_shop_admin()` RPC, which can't see `auth.uid()` under the function's
+  own service-role session — same reasoning already used in
+  `admin-create-shop`), idempotent upsert keyed on
+  `(shop_id, 'shopify', variant GID)`. Mirrors (duplicates, doesn't import
+  cross-directory) the tested logic in `shopifyImport.ts`, the same
+  precedent `send-quote-email` already set for `emailTemplates.ts`.
+  Reports `{created, updated, unchanged, skipped, failed, errors}` per
+  the spec's explicit ask. No Deno runtime available in this session to
+  execute it live, so it was instead verified to type-check cleanly in
+  isolation against a stubbed `Deno` global.
+- **`DataRepository.runShopifyImport()`** added to both repositories:
+  `SupabaseRepository` invokes the Edge Function; `DemoRepository` throws
+  immediately, since demo mode must never make a real external call.
+- **Still no UI** — same complete-backend-no-dangling-button approach as
+  the rest of this round. `docs/IMPLEMENTATION_STATUS.md` spells out the
+  exact remaining steps (deploy, set two Edge Function secrets, run the
+  import) and flags the one genuine remaining gap precisely: the Shopify
+  MCP *connector* used to research this round is a Claude-side connection
+  for the assistant, not something the deployed app can use at runtime —
+  the app itself still needs its own `SHOPIFY_STORE_DOMAIN` +
+  `SHOPIFY_ADMIN_ACCESS_TOKEN` as real Edge Function secrets (the sibling
+  `car-audio-inventory` repo already has a working token for this same
+  store, confirmed by its own code referencing the store's admin handle).
+
+### Verification (this addendum)
+- `npm run lint`, `npx tsc -b --noEmit`, `npm run test -- --run` (174/174
+  across 14 files, 16 new in `shopifyImport.test.ts`), and `npm run build`
+  all clean.
+- `shopify-import-catalog/index.ts` type-checked in isolation (stubbed
+  `Deno` global + stubbed `createClient`) since no Deno runtime was
+  available in this session — confirmed no syntax/type errors in the
+  duplicated mapping/sync logic.
+- Neither migrations `0009`/`0010` nor the new Edge Function were applied/
+  deployed to the live Supabase project this round — same access-token gap
+  as every prior round; exact deploy commands are in
+  `docs/CATALOG_AND_PACKAGES.md`.

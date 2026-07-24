@@ -25,6 +25,8 @@ import type {
   NewPackageTemplateInput,
   NewQuoteInput,
   SendEmailResult,
+  ShopifyImportOptions,
+  ShopifyImportResult,
   ShopSettingsPatch,
 } from './repository'
 
@@ -397,6 +399,18 @@ export class SupabaseRepository implements DataRepository {
   async deleteCatalogItem(itemId: string): Promise<void> {
     const { error } = await this.supabase.from('catalog_items').delete().eq('id', itemId)
     if (error) throw error
+  }
+
+  async runShopifyImport(options: ShopifyImportOptions = {}): Promise<ShopifyImportResult> {
+    const { data, error } = await this.supabase.functions.invoke('shopify-import-catalog', {
+      body: {
+        shopId: this.shopId,
+        afterCursor: options.afterCursor ?? null,
+        overwriteLocalPrices: options.overwriteLocalPrices ?? false,
+      },
+    })
+    if (error) throw error
+    return data as ShopifyImportResult
   }
 
   async listPackageTemplates(): Promise<PackageTemplate[]> {

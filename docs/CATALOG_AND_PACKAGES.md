@@ -102,6 +102,56 @@ Every template starts `pending_review` unless an owner/manager creates it
 directly — the same trigger-enforced approval-status protection as catalog
 items (`guard_package_template_approval`).
 
+## Shopify catalog import (`shopify-import-catalog` Edge Function)
+
+For the one Shopify-connected pilot shop (Super Car Audio), pulls the
+shop's real Shopify catalog into `catalog_items` — the opposite direction
+from the sibling `car-audio-inventory` repo, which pushes scanned
+inventory *into* Shopify. Owner/manager only.
+
+- **Mapping** (`src/lib/shopifyImport.ts`, unit-tested against real
+  Super Car Audio product data fetched during this round): one catalog
+  item per Shopify **variant** (0Gauge's catalog has no variant concept;
+  a variant's GID is already globally unique, so no composite key is
+  needed). Title/vendor/description/SKU/barcode/images come across
+  directly. `compareAtPrice` maps to `msrpCents` only when it's genuinely
+  higher than the current price (a real "was" price, not a lower/equal
+  value someone left in the field). `productType` is best-effort mapped to
+  a `ProductCategory` via a small pattern table
+  (`guessCategoryFromProductType`) — never treated as a verified
+  compatibility claim, just a labeling convenience staff can always
+  correct. Non-`ACTIVE` Shopify products are imported but land `active:
+  false` rather than skipped, so archived/draft listings don't just vanish.
+  Because these are the shop's own already-published, already-priced
+  listings (not an AI guess), imported items are `approvalStatus:
+  'approved'` directly — the `pending_review` gate is for uncertain
+  AI-identified data (Phase 5), not a shop's own live catalog.
+- **Idempotent re-runs**: each variant is looked up by
+  `(shop_id, import_source='shopify', external_source_product_id=<variant GID>)`
+  before deciding create vs. update vs. unchanged vs. skipped.
+- **Local-edit protection**: `priceLikelyEditedSinceSync()` compares a
+  catalog item's `updatedAt` against `priceCheckedAt` (stamped only when a
+  price-carrying write happens, e.g. this importer's own sync) — if a row
+  was touched *after* its last sync stamp, a plain re-import leaves that
+  item's price/MSRP alone (still refreshing title/image/description/active
+  if Shopify changed those) and reports it `skipped`, unless the caller
+  explicitly passes `overwriteLocalPrices: true`.
+- **Pagination**: one invocation processes up to 10 pages (Shopify
+  `products(first, after)` cursor pagination) and returns `hasMore` +
+  `nextCursor` so a caller resumes rather than risking one giant call
+  timing out on a large catalog.
+- **Auth**: verifies a real signed-in user, then checks
+  `shop_memberships.role` directly (`owner`/`manager`) rather than calling
+  the `is_shop_admin()` RPC — that RPC reads `auth.uid()`, which is null
+  under the function's own service-role session, same reasoning as
+  `admin-create-shop`'s platform-admin check.
+- **Repository**: `DataRepository.runShopifyImport()` — `SupabaseRepository`
+  invokes the Edge Function; `DemoRepository` throws immediately (demo mode
+  must never make a real external call).
+- **No UI yet** — same "complete backend, no dangling button" approach as
+  the rest of Phase 1/2's foundation. See IMPLEMENTATION_STATUS.md for
+  what's needed to actually run this against the live shop.
+
 ## What a shop sees where
 
 - **Settings → Product Catalog**: unchanged today — brand/model/name/price
@@ -124,16 +174,49 @@ than plain shop membership.
 
 ## Environment variables
 
-None yet — this phase (universal configs, extended catalog schema, package
-templates) needs no new credentials. Shopify import and AI photo onboarding
-(both deferred) will need their own — see IMPLEMENTATION_STATUS.md.
+Universal configs, the extended catalog schema, and package templates
+need no new credentials. The Shopify import needs two Edge Function
+secrets (not client-reachable `VITE_` variables):
+
+| Variable | Purpose |
+| --- | --- |
+| `SHOPIFY_STORE_DOMAIN` | e.g. `supercaraudio.com` or `your-store.myshopify.com` |
+| `SHOPIFY_ADMIN_ACCESS_TOKEN` | Admin API access token (`shpat_...`) from a custom app — Shopify admin → Settings → Apps and sales channels → Develop apps |
+
+Set with `supabase secrets set SHOPIFY_STORE_DOMAIN=... SHOPIFY_ADMIN_ACCESS_TOKEN=...`,
+same mechanism as `RESEND_API_KEY`. Supports exactly one Shopify-connected
+shop per deployment today (see IMPLEMENTATION_STATUS.md). AI photo
+onboarding (deferred) will need its own separate credentials.
 
 ## Running the new migrations
 
 Same process as every prior migration in this project — apply
 `supabase/migrations/0009_catalog_product_model.sql` and
 `0010_package_templates.sql` to your Supabase project (SQL editor, CLI, or
-the Management API), in that order, after `0008`.
+the Management API), in that order, after `0008`. Neither migration adds a
+table specifically for the Shopify import — it writes directly into the
+`catalog_items` columns `0009` already added.
+
+## Deploying and running the Shopify import
+
+```
+supabase functions deploy shopify-import-catalog
+supabase secrets set SHOPIFY_STORE_DOMAIN=... SHOPIFY_ADMIN_ACCESS_TOKEN=...
+```
+
+Then, as an owner/manager, call it (no UI yet — see IMPLEMENTATION_STATUS.md):
+
+```ts
+let result = await repo.runShopifyImport()
+while (result.hasMore) {
+  result = await repo.runShopifyImport({ afterCursor: result.nextCursor })
+}
+```
+
+Each call reports `{ created, updated, unchanged, skipped, failed, errors }`
+for the page it just processed. Safe to re-run any time — re-running
+never duplicates rows and never overwrites a price a staff member edited
+locally, unless you explicitly pass `overwriteLocalPrices: true`.
 
 ## Testing
 
@@ -146,9 +229,22 @@ the Management API), in that order, after `0008`.
   conversion is a true snapshot (mutating the source afterwards doesn't
   touch the draft already produced), and a converted draft's items satisfy
   `validatePackageSlots` for its configuration.
+- `src/lib/shopifyImport.test.ts` — category guessing against real
+  productType strings this shop actually uses; variant→catalog-item
+  mapping (pricing, MSRP-vs-compareAtPrice, availability thresholds,
+  multi-variant naming, non-ACTIVE→inactive) against a fixture shaped from
+  a real Super Car Audio product; the local-edit-protection heuristic; and
+  the full create/update/unchanged/skipped sync-planning decision,
+  including "a Shopify title change still flows through while a
+  staff-edited price stays protected."
 - `src/data/demoRepository.test.ts` — catalog item defaults and
   partial-update semantics (an edit never clobbers fields it wasn't told
   to touch), package template CRUD, seed data covering approved/pending/
   sourced-from-a-quote states, and a snapshot-immutability test (changing
   the original quote's status after saving a package never changes the
   saved package).
+- The Edge Function itself (`supabase/functions/shopify-import-catalog/`)
+  has no Deno runtime available in this session to execute against a live
+  store, but was verified to type-check cleanly in isolation (its
+  duplicated mapping/sync logic mirrors the tested `shopifyImport.ts`
+  functions exactly).
