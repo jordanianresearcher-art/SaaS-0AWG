@@ -500,3 +500,85 @@ a "really slick, modern" UI.
   anonymous `get_public_quote` RPC call against a real quote returned the
   new `windowTint` field correctly (`null`, since that quote predates the
   feature) alongside its unaffected existing vehicle data.
+
+---
+
+## Round 8 — Window tint pricing: film type, old-tint removal, windshield price
+
+The tint configurator shipped last round was deliberately priced at zero —
+purely descriptive. The user asked for real pricing: Normal vs Ceramic
+film, a price for the base job, a "remove old tint first" add-on with its
+own price, and a price specifically for the windshield.
+
+### Done
+- **`WindowTintConfig` gained a `tintType: 'normal' | 'ceramic'` and three
+  new price fields**: `priceCents` (base job), `removeOldTintPriceCents`
+  (gated on a new `removeOldTint` boolean), and `windshieldPriceCents`
+  (alongside the existing windshield include-toggle and percentage). Kept
+  as its own separate total — not folded into `quoteValueCents` or the
+  "quoted from $X" figure used in emails/reports, per the user's
+  confirmed choice — so `metrics.ts` and email value-line logic needed no
+  changes.
+- **A form-values/persisted-config split**, matching this app's existing
+  pattern for money fields (option price/deposit amount are dollar strings
+  in form state, parsed to cents only at submit): new
+  `WindowTintFormValues` type in `src/lib/windowTint.ts` plus
+  `windowTintFormValuesToConfig()`/`windowTintConfigToFormValues()`
+  converters. `WindowTintEditor.tsx` now edits the form shape directly
+  (plain controlled dollar-string inputs); `NewQuotePage.tsx` converts at
+  the submit and duplicate-prefill boundaries, the same two places
+  `optionsFromBundle`/`onSubmit` already do this for option prices.
+- **`WindowTintEditor.tsx`** gained: a Normal/Ceramic film-type picker
+  (same tile styling as the body-style picker), a base "Tint job price"
+  field, a "Remove old tint first?" block (checkbox + price, styled like
+  the existing windshield block), a price field added to the windshield
+  block, and a live-computed total shown only once something's actually
+  priced.
+- **Display sites updated**: `QuoteDetailPage.tsx` now shows film type,
+  base price, removal price, windshield price, and a bold total;
+  `PublicQuotePage.tsx` shows the same breakdown to the customer (they're
+  deciding whether to book — same "no phone tag" principle from last
+  round, now extended to cover the price). Email copy was deliberately
+  left unchanged — the existing generic teaser line already covers it, and
+  the full quote (now including tint's price) still never rides inside
+  the email, consistent with `emailTemplates.ts`'s own stated intent.
+- **`window_tint` needed no schema migration** — it's a schemaless `jsonb`
+  column, so the new keys just appear on future writes. Still shipped
+  migration `0007` as a defensive backfill (`tintType`/`removeOldTint`
+  onto any pre-existing blob), and it turned out **not** to be a no-op:
+  the real shop already had two real quotes with tint data from last
+  round, now correctly backfilled to `tintType: 'normal'`,
+  `removeOldTint: false`, with prices staying `null` (nothing was ever
+  priced under the old version) — verified live via the Management API
+  before and after, and via a live anonymous `get_public_quote` call.
+
+### Verification (this round)
+- `npm run lint`, `npx tsc -b --noEmit`, `npm run test -- --run` (129/129
+  across 11 files, including 9 new `windowTint.test.ts` cases covering the
+  form↔config round-trip, total computation respecting each add-on's
+  toggle, and defaults for a pre-pricing config missing the new keys), and
+  `npm run build` all clean.
+- Fixed a genuinely flaky test caught during this round's verification:
+  `PublicQuotePage.test.tsx`'s not-found-state test was resolving in
+  ~970ms against testing-library's default 1000ms timeout — consistently
+  tipping over under the heavier demo dataset now in the module graph.
+  Confirmed via an isolated run with an extended timeout that it wasn't a
+  regression (the app behaves correctly, just slower than the default
+  margin allows), then gave that one test explicit headroom
+  (`{ timeout: 5000 }`) rather than loosening the global default.
+- Playwright smoke pass against a `vite preview` build: the body-style,
+  film-type, and remove-old-tint pickers all work; the live total computed
+  correctly ($620 across a $450 base + $50 removal + $120 windshield); a
+  real bug in the *smoke test itself* was caught and fixed mid-pass — it
+  tried to view a fresh quote's public page without first sending the
+  email, and correctly got "not found" back, since a draft quote is
+  supposed to be invisible on the public page (fixed by clicking "Send
+  demo email" first, which is also what actually exercises the real path).
+  Confirmed `QuoteDetailPage` and the public quote page both show the full
+  price breakdown and total, and that duplicating a quote carries every
+  tint price over verbatim through the new conversion functions.
+- Migration `0007` applied to the live Supabase project via the Management
+  API (same route as `0001`-`0006`) after first confirming live non-null
+  `window_tint` rows existed (they did — two real quotes) — re-verified
+  the backfill applied correctly via both a direct SQL query and a live
+  anonymous `get_public_quote` RPC call.

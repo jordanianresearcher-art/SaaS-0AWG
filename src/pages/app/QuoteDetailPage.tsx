@@ -264,7 +264,9 @@ export default function QuoteDetailPage() {
                   const summary = summarizeWindowTint(quote.windowTint)
                   return (
                     <>
-                      <p className="font-bold text-ink">{summary.bodyStyleLabel}</p>
+                      <p className="font-bold text-ink">
+                        {summary.bodyStyleLabel} &middot; {summary.tintTypeLabel}
+                      </p>
                       {summary.uniformPercent !== null ? (
                         <p className="text-zinc-700">All included windows at {summary.uniformPercent}%</p>
                       ) : (
@@ -276,8 +278,23 @@ export default function QuoteDetailPage() {
                           ))}
                         </ul>
                       )}
+                      {summary.priceCents !== null ? (
+                        <p className="text-sm text-zinc-500">Tint job: {formatCurrency(summary.priceCents)}</p>
+                      ) : null}
+                      {summary.removeOldTint ? (
+                        <p className="text-sm text-zinc-500">
+                          Remove old tint
+                          {summary.removeOldTint.priceCents !== null ? `: ${formatCurrency(summary.removeOldTint.priceCents)}` : ''}
+                        </p>
+                      ) : null}
                       {summary.windshield ? (
-                        <p className="text-sm text-zinc-500">Windshield: {summary.windshield.vltPercent}%</p>
+                        <p className="text-sm text-zinc-500">
+                          Windshield: {summary.windshield.vltPercent}%
+                          {summary.windshield.priceCents !== null ? ` — ${formatCurrency(summary.windshield.priceCents)}` : ''}
+                        </p>
+                      ) : null}
+                      {summary.totalCents > 0 ? (
+                        <p className="pt-1 font-bold text-ink">Total: {formatCurrency(summary.totalCents)}</p>
                       ) : null}
                     </>
                   )

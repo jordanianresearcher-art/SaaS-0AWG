@@ -53,6 +53,8 @@ export type PaymentMethod = 'link' | 'zelle' | 'cashapp' | 'venmo' | 'paypal'
 
 export type TintBodyStyle = 'sedan_coupe' | 'suv_wagon_van'
 
+export type TintType = 'normal' | 'ceramic'
+
 export type TintWindowPosition =
   | 'front_left'
   | 'front_right'
@@ -71,9 +73,15 @@ export interface WindowTintWindow {
 
 export interface WindowTintConfig {
   bodyStyle: TintBodyStyle
+  tintType: TintType
   windows: WindowTintWindow[]
+  /** Base job price, covers all included windows. */
+  priceCents: number | null
+  removeOldTint: boolean
+  removeOldTintPriceCents: number | null
   windshieldIncluded: boolean
   windshieldVltPercent: number | null
+  windshieldPriceCents: number | null
 }
 
 export interface Shop {

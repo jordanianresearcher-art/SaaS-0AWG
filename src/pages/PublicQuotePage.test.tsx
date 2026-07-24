@@ -96,6 +96,9 @@ describe('PublicQuotePage', () => {
 
   it('shows a friendly not-found state for bad tokens', async () => {
     renderPage('not-a-real-token')
-    expect(await screen.findByText(/quote not found/i)).toBeInTheDocument()
+    // This path re-seeds and scans the full demo dataset before concluding
+    // "not found," which can run close to the default 1s async-util timeout
+    // under sandbox CPU contention — give it more headroom than the default.
+    expect(await screen.findByText(/quote not found/i, {}, { timeout: 5000 })).toBeInTheDocument()
   })
 })

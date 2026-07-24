@@ -1,17 +1,24 @@
-import type { TintBodyStyle, TintWindowPosition, WindowTintConfig, WindowTintWindow } from '../types'
+import type { TintBodyStyle, TintType, TintWindowPosition, WindowTintWindow } from '../types'
 import {
   BODY_STYLE_INFO,
+  TINT_TYPE_INFO,
   TINT_VLT_PERCENTS,
   TINT_WINDOW_LABELS,
-  createDefaultWindowTintConfig,
+  computeWindowTintTotalCents,
+  createDefaultWindowTintFormValues,
+  windowTintFormValuesToConfig,
+  type WindowTintFormValues,
 } from '../lib/windowTint'
+import { formatCurrency } from '../lib/format'
+import { Field, Input } from './ui'
 
 interface WindowTintEditorProps {
-  value: WindowTintConfig | null
-  onChange: (next: WindowTintConfig) => void
+  value: WindowTintFormValues | null
+  onChange: (next: WindowTintFormValues) => void
 }
 
 const BODY_STYLES = Object.keys(BODY_STYLE_INFO) as TintBodyStyle[]
+const TINT_TYPES = Object.keys(TINT_TYPE_INFO) as TintType[]
 
 // Rough, illustrative top-down outlines — not to scale. Purely a visual
 // backdrop for the window tiles, so the diagram reads as "a car" at a
@@ -116,6 +123,8 @@ export default function WindowTintEditor({ value, onChange }: WindowTintEditorPr
     onChange({ ...value, windows: value.windows.map((w) => (w.included ? { ...w, vltPercent: percent } : w)) })
   }
 
+  const totalCents = value ? computeWindowTintTotalCents(windowTintFormValuesToConfig(value)) : 0
+
   return (
     <div className="space-y-4">
       <div>
@@ -125,7 +134,7 @@ export default function WindowTintEditor({ value, onChange }: WindowTintEditorPr
             <button
               key={style}
               type="button"
-              onClick={() => onChange(createDefaultWindowTintConfig(style))}
+              onClick={() => onChange(createDefaultWindowTintFormValues(style))}
               aria-pressed={bodyStyle === style}
               className={`rounded-xl border-2 p-4 text-left transition-colors ${
                 bodyStyle === style ? 'border-brand bg-blue-50' : 'border-zinc-200 hover:border-zinc-300'
@@ -145,6 +154,36 @@ export default function WindowTintEditor({ value, onChange }: WindowTintEditorPr
 
       {value && bodyStyle ? (
         <>
+          <div>
+            <p className="mb-1.5 text-sm font-semibold text-ink">Film type</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {TINT_TYPES.map((type) => (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => onChange({ ...value, tintType: type })}
+                  aria-pressed={value.tintType === type}
+                  className={`rounded-xl border-2 p-4 text-left transition-colors ${
+                    value.tintType === type ? 'border-brand bg-blue-50' : 'border-zinc-200 hover:border-zinc-300'
+                  }`}
+                >
+                  <p className="text-base font-bold text-ink">{TINT_TYPE_INFO[type].label}</p>
+                  <p className="text-sm text-zinc-500">{TINT_TYPE_INFO[type].hint}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <Field label="Tint job price" htmlFor="tint-price" hint="Covers all the windows you include below.">
+            <Input
+              id="tint-price"
+              inputMode="decimal"
+              placeholder="$350"
+              value={value.price}
+              onChange={(e) => onChange({ ...value, price: e.target.value })}
+            />
+          </Field>
+
           <div>
             <p className="mb-1.5 text-sm font-semibold text-ink">Apply one % to all windows</p>
             <PercentPills value={null} onChange={applyToAll} label="Apply one percentage to all windows" />
@@ -189,12 +228,44 @@ export default function WindowTintEditor({ value, onChange }: WindowTintEditorPr
               <input
                 type="checkbox"
                 className="h-5 w-5 accent-[#1d4ed8]"
+                checked={value.removeOldTint}
+                onChange={(e) =>
+                  onChange({
+                    ...value,
+                    removeOldTint: e.target.checked,
+                    removeOldTintPrice: e.target.checked ? value.removeOldTintPrice : '',
+                  })
+                }
+              />
+              Remove old tint first?
+            </label>
+            {value.removeOldTint ? (
+              <div className="mt-2 max-w-xs">
+                <Field label="Removal price" htmlFor="tint-removal-price">
+                  <Input
+                    id="tint-removal-price"
+                    inputMode="decimal"
+                    placeholder="$50"
+                    value={value.removeOldTintPrice}
+                    onChange={(e) => onChange({ ...value, removeOldTintPrice: e.target.value })}
+                  />
+                </Field>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="rounded-xl bg-zinc-50 p-3">
+            <label className="flex items-center gap-2.5 text-base font-medium text-ink">
+              <input
+                type="checkbox"
+                className="h-5 w-5 accent-[#1d4ed8]"
                 checked={value.windshieldIncluded}
                 onChange={(e) =>
                   onChange({
                     ...value,
                     windshieldIncluded: e.target.checked,
                     windshieldVltPercent: e.target.checked ? value.windshieldVltPercent : null,
+                    windshieldPrice: e.target.checked ? value.windshieldPrice : '',
                   })
                 }
               />
@@ -204,15 +275,30 @@ export default function WindowTintEditor({ value, onChange }: WindowTintEditorPr
               Most states treat windshield tint differently — often just a visor strip or a lighter %.
             </p>
             {value.windshieldIncluded ? (
-              <div className="mt-2">
+              <div className="mt-2 space-y-3">
                 <PercentPills
                   value={value.windshieldVltPercent}
                   onChange={(p) => onChange({ ...value, windshieldVltPercent: p })}
                   label="Windshield tint percentage"
                 />
+                <div className="max-w-xs">
+                  <Field label="Windshield price" htmlFor="tint-windshield-price">
+                    <Input
+                      id="tint-windshield-price"
+                      inputMode="decimal"
+                      placeholder="$120"
+                      value={value.windshieldPrice}
+                      onChange={(e) => onChange({ ...value, windshieldPrice: e.target.value })}
+                    />
+                  </Field>
+                </div>
               </div>
             ) : null}
           </div>
+
+          {totalCents > 0 ? (
+            <p className="text-right text-base font-bold text-ink">Total tint price: {formatCurrency(totalCents)}</p>
+          ) : null}
         </>
       ) : null}
     </div>

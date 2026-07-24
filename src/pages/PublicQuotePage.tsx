@@ -150,11 +150,22 @@ export default function PublicQuotePage() {
                   summary.uniformPercent !== null
                     ? `${summary.uniformPercent}%`
                     : summary.windowLines.map((w) => `${w.label} ${w.vltPercent}%`).join(', ')
+                const extras = [
+                  summary.removeOldTint ? 'old tint removed' : null,
+                  summary.windshield ? `windshield ${summary.windshield.vltPercent}%` : null,
+                ].filter(Boolean)
                 return (
-                  <p className="mt-1 text-base text-zinc-600">
-                    Window tint: {summary.bodyStyleLabel} &middot; {percentLabel}
-                    {summary.windshield ? ` · Windshield ${summary.windshield.vltPercent}%` : ''}
-                  </p>
+                  <>
+                    <p className="mt-1 text-base text-zinc-600">
+                      Window tint: {summary.bodyStyleLabel} &middot; {summary.tintTypeLabel} &middot; {percentLabel}
+                      {extras.length > 0 ? ` · ${extras.join(', ')}` : ''}
+                    </p>
+                    {summary.totalCents > 0 ? (
+                      <p className="text-base font-semibold text-zinc-700">
+                        Tint total: {formatCurrency(summary.totalCents)}
+                      </p>
+                    ) : null}
+                  </>
                 )
               })()
             : null}

@@ -20,7 +20,7 @@ import WindowTintEditor from '../../components/WindowTintEditor'
 import { parseDollarsToCents } from '../../lib/format'
 import { COMMON_MAKES, OTHER_MAKE, VEHICLE_YEARS, fetchModelsForMakeYear } from '../../lib/vehicleData'
 import { DEFAULT_DEPOSIT_PERCENT, PAYMENT_METHOD_INFO, computeDefaultDepositCents } from '../../lib/paymentMethods'
-import { TINT_VLT_PERCENTS } from '../../lib/windowTint'
+import { TINT_VLT_PERCENTS, windowTintConfigToFormValues, windowTintFormValuesToConfig } from '../../lib/windowTint'
 import type { NewQuoteInput } from '../../data/repository'
 import type { CatalogItem, PaymentMethod, QuoteBundle, Tier } from '../../types'
 
@@ -95,12 +95,21 @@ const tintWindowSchema = z
     }
   })
 
+const optionalDollarSchema = z
+  .string()
+  .refine((v) => v.trim() === '' || parseDollarsToCents(v) !== null, 'Enter a valid dollar amount')
+
 const windowTintSchema = z
   .object({
     bodyStyle: z.enum(['sedan_coupe', 'suv_wagon_van']),
+    tintType: z.enum(['normal', 'ceramic']),
     windows: z.array(tintWindowSchema),
+    price: optionalDollarSchema,
+    removeOldTint: z.boolean(),
+    removeOldTintPrice: optionalDollarSchema,
     windshieldIncluded: z.boolean(),
     windshieldVltPercent: tintPercentSchema,
+    windshieldPrice: optionalDollarSchema,
   })
   .superRefine((v, ctx) => {
     if (v.windshieldIncluded && v.windshieldVltPercent === null) {
@@ -251,7 +260,7 @@ export default function NewQuotePage() {
           nextFollowUpAt: '',
           options: optionsFromBundle(duplicateFrom),
           recommendedIndex: Math.max(0, duplicateFrom.options.findIndex((o) => o.recommended)),
-          windowTint: duplicateFrom.quote.windowTint,
+          windowTint: duplicateFrom.quote.windowTint ? windowTintConfigToFormValues(duplicateFrom.quote.windowTint) : null,
         }
       : {
           firstName: '',
@@ -301,7 +310,7 @@ export default function NewQuotePage() {
         internalNotes: values.internalNotes.trim() || null,
         expirationDate: values.expirationDate ? new Date(`${values.expirationDate}T12:00:00`).toISOString() : null,
         nextFollowUpAt: values.nextFollowUpAt ? new Date(`${values.nextFollowUpAt}T09:00:00`).toISOString() : null,
-        windowTint: values.windowTint,
+        windowTint: values.windowTint ? windowTintFormValuesToConfig(values.windowTint) : null,
       },
       options: values.options.map((opt, i) => {
         const priceCents = parseDollarsToCents(opt.price) ?? 0
@@ -576,7 +585,7 @@ export default function NewQuotePage() {
               />
               {errors.windowTint ? (
                 <p role="alert" className="text-sm font-medium text-red-700">
-                  Choose a tint % for each window you&apos;re including, or turn it off.
+                  Check the tint details above — a % or price is missing or invalid.
                 </p>
               ) : null}
             </>
