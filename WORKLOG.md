@@ -838,3 +838,84 @@ guesswork.
   deployed to the live Supabase project this round — same access-token gap
   as every prior round; exact deploy commands are in
   `docs/CATALOG_AND_PACKAGES.md`.
+
+## Round 11 — Fast visual package builder (Phase 3)
+
+The user asked to deploy migrations `0009`/`0010`, the `shopify-import-catalog`
+function, set its secrets, and run the import against Super Car Audio, then
+build the fast visual drag-and-drop package builder against the real
+imported catalog. The deploy/secrets/import portion stayed blocked for the
+same reason as every prior round — no Supabase personal access token, no
+CLI, no Supabase MCP tools, and no real `SHOPIFY_ADMIN_ACCESS_TOKEN`
+available in this session (re-confirmed via `ToolSearch`, `which supabase`,
+and checking the environment for secrets, all empty). That's communicated
+to the user as a real, standing blocker. The builder itself needs no
+deploy access and works against demo data today, so that's what got built:
+
+- **`@dnd-kit/core`** added as a dependency, chosen over native HTML5
+  drag-and-drop specifically because HTML5 DnD doesn't work on touch
+  devices and this app's primary target is phones/tablets in a shop.
+  `PointerSensor` (8px activation distance, so a tap isn't misread as a
+  drag) + `KeyboardSensor` cover mouse, touch, and keyboard.
+- **`src/lib/packageBuilder.ts`** (pure, 19 tests): which catalog products
+  are eligible for a slot (`catalogItemsForSlot` — active + approved +
+  matching category only), the add/set-quantity/remove assignment
+  reducers, converting filled slots into quote items
+  (`assignmentsToQuoteItems`) or package-template items with images
+  (`assignmentsToPackageItems`), the component subtotal, completeness via
+  the existing `validatePackageSlots`, `requiresCompatibilityConfirmation()`
+  (always `true` — no owner-vetted compatibility ruleset exists anywhere
+  in this system yet, so the builder never implies a check it can't back
+  up), and folding a separate labor-price field into the same generic
+  slot-assignment model as a synthetic, non-persisted `CatalogItem`
+  (`resolveBuilderCatalog`) so no other calculation needs a labor special case.
+- **`src/components/PackageBuilder.tsx`**: the actual slot-filling UI —
+  vehicle type → configuration → drag (or tap) products into slots → a
+  labor price field → an installed-price override → the compatibility
+  confirmation gate. Every draggable product card is also a plain tap
+  target (`onClick`), so the same interaction works with or without real
+  drag support. A cross-category drop is rejected with a toast rather than
+  silently accepted.
+- **Wired into `NewQuotePage.tsx`**: each option now has a "Build with
+  drag & drop" / "Switch to manual entry" toggle. The builder is a
+  self-contained draft (`PackageBuilderValue`) that only writes to the
+  option's real `items`/`price`/`configId` once staff taps "Apply to this
+  option" — the existing free-text product list is fully preserved and
+  becomes the post-apply review/edit surface, per the spec's explicit
+  "preserve the existing builder" requirement. A "Save as package" button
+  next to it calls `createPackageTemplate` directly, independent of the
+  quote's own form state, so a good build can become a reusable package
+  before the quote itself is even saved.
+- **Not built this round**: "Start from a saved package" (pre-filling the
+  builder from an existing `package_templates` row) and an owner-approval
+  screen for pending packages — both real, scoped-out enhancements
+  documented in `docs/IMPLEMENTATION_STATUS.md`'s recommended next steps,
+  not half-built UI.
+- Demo catalog (seeded in Round 10) already covers every *required* slot
+  category for all 12 bass configurations, so no demo-data changes were
+  needed to get a good demo of the builder.
+- Docs updated: `docs/CATALOG_AND_PACKAGES.md` gained a full "Fast visual
+  package builder" section; `docs/IMPLEMENTATION_STATUS.md` moved the
+  builder from "Deferred" to "Completed (Phase 3)" and rewrote the
+  recommended next step; `README.md` and `docs/ROADMAP.md` updated to stop
+  describing the builder as upcoming.
+
+### Verification (this round)
+- `npm run lint`, `npx tsc -b --noEmit`, `npm run test -- --run` (193/193
+  across 15 files — 19 new in `packageBuilder.test.ts`), and `npm run
+  build` all clean.
+- A Playwright smoke pass against a `vite preview` build exercised the
+  builder end to end in demo mode: picked Truck → Truck 2×8, tap-added a
+  subwoofer/enclosure/amp/wiring kit, bumped subwoofer quantity to 2, did
+  a **real dnd-kit pointer-sensor drag** (mouse-move/down/move/up, not a
+  synthetic drop event) to fill the optional bass-control slot, confirmed
+  a cross-category drop never fills the wrong slot, saved the in-progress
+  build as a reusable package, confirmed the Apply button is gated
+  correctly on the compatibility checkbox, applied it (verified the
+  computed installed price — $744.00 — and all six item names landed in
+  the manual product list), then saved the quote end-to-end.
+- Migrations `0009`/`0010` and the `shopify-import-catalog` function
+  remain **not deployed** to the live Supabase project — same access gap
+  as every prior round. The Shopify import against Super Car Audio has
+  still never been run against real data; the builder was verified
+  against demo data only, exactly as flagged to the user up front.

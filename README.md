@@ -26,11 +26,13 @@ sent by a person pressing **Send**.
 
 ## In progress — selling catalog & packages
 
-0Gauge is evolving from quote recovery into a full visual selling system
-(universal car-audio configurations, an expanded product catalog, reusable
-package templates). Foundation is built and tested; no UI yet. See
-[docs/CATALOG_AND_PACKAGES.md](docs/CATALOG_AND_PACKAGES.md) for the
-concepts and [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md)
+0Gauge is evolving from quote recovery into a full visual selling system:
+universal car-audio configurations, an expanded product catalog, reusable
+package templates, a Shopify catalog import backend, and a phone/tablet
+drag-and-drop package builder (pick a vehicle + configuration, drag
+products into slots, price it, apply to a quote option) are built and
+tested. See [docs/CATALOG_AND_PACKAGES.md](docs/CATALOG_AND_PACKAGES.md)
+for the concepts and [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md)
 for exactly what's done, in progress, and deferred.
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for later phases (System Builder, package

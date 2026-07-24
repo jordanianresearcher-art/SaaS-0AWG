@@ -12,11 +12,20 @@ import {
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { addDays, format } from 'date-fns'
-import { Package, Plus, Trash2 } from 'lucide-react'
+import { LayoutGrid, Package, Plus, Trash2 } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
 import { Button, Card, Field, Input, Modal, Select, Textarea } from '../../components/ui'
 import WindowTintEditor from '../../components/WindowTintEditor'
+import PackageBuilder, { createEmptyPackageBuilderValue, type PackageBuilderValue } from '../../components/PackageBuilder'
+import { getConfiguration } from '../../lib/audioConfigs'
+import {
+  assignmentsToPackageItems,
+  assignmentsToQuoteItems,
+  computeComponentSubtotalCents,
+  isBuilderComplete,
+  resolveBuilderCatalog,
+} from '../../lib/packageBuilder'
 import { parseDollarsToCents } from '../../lib/format'
 import { COMMON_MAKES, OTHER_MAKE, VEHICLE_YEARS, fetchModelsForMakeYear } from '../../lib/vehicleData'
 import { DEFAULT_DEPOSIT_PERCENT, PAYMENT_METHOD_INFO, computeDefaultDepositCents } from '../../lib/paymentMethods'
@@ -27,7 +36,7 @@ import {
   windowTintFormValuesToConfig,
 } from '../../lib/windowTint'
 import type { NewQuoteInput } from '../../data/repository'
-import type { CatalogItem, PaymentMethod, QuoteBundle, Tier } from '../../types'
+import type { CatalogItem, PaymentMethod, ProductCategory, QuoteBundle, Tier } from '../../types'
 
 const PAYMENT_METHODS = Object.keys(PAYMENT_METHOD_INFO) as PaymentMethod[]
 
@@ -36,6 +45,9 @@ const itemSchema = z.object({
   model: z.string(),
   name: z.string().min(1, 'What is this item?'),
   quantity: z.coerce.number().int().min(1, 'At least 1'),
+  // Set when this row came from the drag-and-drop package builder, so it can fill a
+  // configuration slot again later (e.g. duplicating the quote). Manual/catalog rows leave it null.
+  category: z.string().nullable(),
 })
 
 const optionSchema = z
@@ -55,6 +67,8 @@ const optionSchema = z
     depositMethod: z.enum(['none', 'link', 'zelle', 'cashapp', 'venmo', 'paypal']),
     depositHandle: z.string(),
     items: z.array(itemSchema).min(1, 'Add at least one product'),
+    // Which universal configuration (e.g. 'truck_2x8') this option was built against, if any.
+    configId: z.string().nullable(),
   })
   .superRefine((values, ctx) => {
     if (!values.depositOverride || values.depositMethod === 'none') return
@@ -174,7 +188,8 @@ function emptyOption(index: number): FormValues['options'][number] {
     depositOverride: false,
     depositMethod: 'none',
     depositHandle: '',
-    items: [{ brand: '', model: '', name: '', quantity: 1 }],
+    items: [{ brand: '', model: '', name: '', quantity: 1, category: null }],
+    configId: null,
   }
 }
 
@@ -193,7 +208,8 @@ function optionsFromBundle(bundle: QuoteBundle): FormValues['options'] {
     depositOverride: o.depositPaymentMethod !== null,
     depositMethod: o.depositPaymentMethod ?? 'none',
     depositHandle: o.depositPaymentHandle ?? '',
-    items: o.items.map((i) => ({ brand: i.brand ?? '', model: i.model ?? '', name: i.name, quantity: i.quantity })),
+    items: o.items.map((i) => ({ brand: i.brand ?? '', model: i.model ?? '', name: i.name, quantity: i.quantity, category: i.category })),
+    configId: o.configId,
   }))
 }
 
@@ -338,12 +354,14 @@ export default function NewQuotePage() {
           depositPaymentHandle: resolvedHandle,
           depositAmountCents: resolvedAmount,
           recommended: i === Number(values.recommendedIndex),
+          configId: opt.configId,
           items: opt.items.map((item) => ({
             brand: item.brand.trim() || null,
             model: item.model.trim() || null,
             name: item.name.trim(),
             quantity: item.quantity,
             description: null,
+            category: item.category as ProductCategory | null,
           })),
         }
       }),
@@ -690,9 +708,85 @@ function OptionEditor({
   catalogItems: CatalogItem[]
   itemHistory: { brands: string[]; models: string[]; names: string[] }
 }) {
-  const { fields: itemFields, append, remove } = useFieldArray({ control, name: `options.${index}.items` })
+  const { fields: itemFields, append, remove, replace } = useFieldArray({ control, name: `options.${index}.items` })
   const optionErrors = errors.options?.[index]
   const [catalogOpen, setCatalogOpen] = useState(false)
+  const repo = useRepo()
+  const toast = useToast()
+
+  // The fast visual (drag-and-drop) package builder is a separate draft — it only
+  // touches this option's real items/price/configId once staff explicitly applies it,
+  // so an abandoned or half-filled builder session never silently changes the quote.
+  const [builderOpen, setBuilderOpen] = useState(false)
+  const [builderValue, setBuilderValue] = useState<PackageBuilderValue>(createEmptyPackageBuilderValue)
+  const [packageName, setPackageName] = useState('')
+  const [savingPackage, setSavingPackage] = useState(false)
+
+  const builderConfig = builderValue.configId ? getConfiguration(builderValue.configId) : null
+  const builderItemCount = Object.values(builderValue.assignments).reduce((n, list) => n + list.length, 0)
+  const builderComplete = builderConfig ? isBuilderComplete(builderConfig, builderValue.assignments, catalogItems) : false
+  const canApplyBuilder = builderValue.confirmed && builderConfig !== null && builderItemCount > 0
+
+  function resolveBuilderOutput() {
+    const laborCents = builderValue.laborPrice.trim() ? parseDollarsToCents(builderValue.laborPrice) : null
+    const { catalog: resolvedCatalog, assignments: resolvedAssignments } = resolveBuilderCatalog(
+      builderConfig,
+      catalogItems,
+      builderValue.assignments,
+      laborCents,
+    )
+    const subtotalCents = computeComponentSubtotalCents(resolvedAssignments, resolvedCatalog)
+    const overrideCents = builderValue.priceOverride.trim() ? parseDollarsToCents(builderValue.priceOverride) : null
+    return { resolvedCatalog, resolvedAssignments, priceCents: overrideCents ?? subtotalCents }
+  }
+
+  function applyBuilder() {
+    if (!canApplyBuilder || !builderConfig) return
+    const { resolvedAssignments, resolvedCatalog, priceCents } = resolveBuilderOutput()
+    const items = assignmentsToQuoteItems(resolvedAssignments, resolvedCatalog)
+    if (items.length === 0) {
+      toast('error', 'Add at least one product before applying.')
+      return
+    }
+    replace(items.map((item) => ({ brand: item.brand ?? '', model: item.model ?? '', name: item.name, quantity: item.quantity, category: item.category })))
+    setValue(`options.${index}.price`, (priceCents / 100).toFixed(2), { shouldValidate: true, shouldDirty: true })
+    setValue(`options.${index}.configId`, builderConfig.id, { shouldValidate: true, shouldDirty: true })
+    setBuilderOpen(false)
+  }
+
+  async function saveAsPackageTemplate() {
+    if (!builderConfig) return
+    const trimmedName = packageName.trim()
+    if (!trimmedName) {
+      toast('error', 'Name this package before saving it.')
+      return
+    }
+    const { resolvedAssignments, resolvedCatalog, priceCents } = resolveBuilderOutput()
+    const items = assignmentsToPackageItems(resolvedAssignments, resolvedCatalog)
+    if (items.length === 0) {
+      toast('error', 'Add at least one product before saving a package.')
+      return
+    }
+    setSavingPackage(true)
+    try {
+      await repo.createPackageTemplate({
+        name: trimmedName,
+        description: '',
+        configId: builderConfig.id,
+        vehicleTypes: builderConfig.vehicleTypes,
+        installedPriceCents: priceCents,
+        laborIncluded: builderValue.laborPrice.trim() !== '' && (parseDollarsToCents(builderValue.laborPrice) ?? 0) > 0,
+        source: 'staff_saved',
+        items,
+      })
+      toast('success', `Saved "${trimmedName}" — pending manager approval before other staff can use it.`)
+      setPackageName('')
+    } catch {
+      toast('error', 'Could not save this package. Please try again.')
+    } finally {
+      setSavingPackage(false)
+    }
+  }
 
   const brandListId = `brand-suggestions-${index}`
   const modelListId = `model-suggestions-${index}`
@@ -742,78 +836,131 @@ function OptionEditor({
         </Field>
 
         <div>
-          <p className="mb-1.5 text-base font-semibold text-ink">Products</p>
-          <datalist id={brandListId}>
-            {itemHistory.brands.map((b) => (
-              <option key={b} value={b} />
-            ))}
-          </datalist>
-          <datalist id={modelListId}>
-            {itemHistory.models.map((m) => (
-              <option key={m} value={m} />
-            ))}
-          </datalist>
-          <datalist id={nameListId}>
-            {itemHistory.names.map((n) => (
-              <option key={n} value={n} />
-            ))}
-          </datalist>
-          <div className="space-y-2">
-            {itemFields.map((item, j) => (
-              <div key={item.id} className="grid grid-cols-[1fr_1fr_auto] gap-2 sm:grid-cols-[1fr_1fr_2fr_4.5rem_auto]">
-                <Input
-                  aria-label="Brand"
-                  placeholder="Brand"
-                  list={brandListId}
-                  {...register(`options.${index}.items.${j}.brand`)}
-                />
-                <Input
-                  aria-label="Model"
-                  placeholder="Model #"
-                  list={modelListId}
-                  {...register(`options.${index}.items.${j}.model`)}
-                />
-                <Input
-                  aria-label="Item name"
-                  placeholder="What is it? (e.g. 12-inch subwoofer)"
-                  list={nameListId}
-                  className="col-span-2 sm:col-span-1"
-                  {...register(`options.${index}.items.${j}.name`)}
-                />
-                <Input
-                  aria-label="Quantity"
-                  type="number"
-                  min={1}
-                  inputMode="numeric"
-                  {...register(`options.${index}.items.${j}.quantity`)}
-                />
-                <button
-                  type="button"
-                  aria-label="Remove item"
-                  disabled={itemFields.length === 1}
-                  onClick={() => remove(j)}
-                  className="flex h-12 w-12 items-center justify-center rounded-xl text-zinc-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-30"
-                >
-                  <Trash2 className="h-5 w-5" aria-hidden="true" />
-                </button>
-              </div>
-            ))}
-          </div>
-          {optionErrors?.items?.[0]?.name?.message ? (
-            <p role="alert" className="mt-1 text-sm font-medium text-red-700">
-              {optionErrors.items[0].name.message}
-            </p>
-          ) : null}
-          <div className="mt-2 flex flex-wrap gap-2">
-            <Button variant="ghost" onClick={() => append({ brand: '', model: '', name: '', quantity: 1 })}>
-              <Plus className="h-5 w-5" aria-hidden="true" /> Add product
-            </Button>
+          <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-base font-semibold text-ink">Products</p>
             {catalogItems.length > 0 ? (
-              <Button variant="ghost" onClick={() => setCatalogOpen(true)}>
-                <Package className="h-5 w-5" aria-hidden="true" /> From catalog
+              <Button variant="ghost" onClick={() => setBuilderOpen((open) => !open)}>
+                <LayoutGrid className="h-5 w-5" aria-hidden="true" /> {builderOpen ? 'Switch to manual entry' : 'Build with drag & drop'}
               </Button>
             ) : null}
           </div>
+
+          {builderOpen ? (
+            <div className="space-y-3 rounded-xl border border-blue-200 bg-blue-50/40 p-3">
+              <PackageBuilder catalogItems={catalogItems} value={builderValue} onChange={setBuilderValue} />
+              {builderConfig && !builderComplete ? (
+                <p className="text-sm font-medium text-amber-700">
+                  Some required slots aren&apos;t filled yet — you can still apply and finish it in the product list below.
+                </p>
+              ) : null}
+              <div className="flex flex-wrap items-center gap-2">
+                <Button type="button" onClick={applyBuilder} disabled={!canApplyBuilder}>
+                  Apply to this option
+                </Button>
+                <Button type="button" variant="ghost" onClick={() => setBuilderOpen(false)}>
+                  Cancel
+                </Button>
+              </div>
+              {builderConfig ? (
+                <div className="flex flex-wrap items-end gap-2 border-t border-blue-100 pt-3">
+                  <Field
+                    label="Save this build as a reusable package"
+                    htmlFor={`opt-${index}-pkg-name`}
+                    hint="Any staff member can reuse it later, once a manager approves it."
+                  >
+                    <Input
+                      id={`opt-${index}-pkg-name`}
+                      placeholder="e.g. Daily Bass 1×12"
+                      value={packageName}
+                      onChange={(e) => setPackageName(e.target.value)}
+                    />
+                  </Field>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={savingPackage || builderItemCount === 0}
+                    onClick={() => void saveAsPackageTemplate()}
+                  >
+                    {savingPackage ? 'Saving…' : 'Save as package'}
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <>
+              <datalist id={brandListId}>
+                {itemHistory.brands.map((b) => (
+                  <option key={b} value={b} />
+                ))}
+              </datalist>
+              <datalist id={modelListId}>
+                {itemHistory.models.map((m) => (
+                  <option key={m} value={m} />
+                ))}
+              </datalist>
+              <datalist id={nameListId}>
+                {itemHistory.names.map((n) => (
+                  <option key={n} value={n} />
+                ))}
+              </datalist>
+              <div className="space-y-2">
+                {itemFields.map((item, j) => (
+                  <div key={item.id} className="grid grid-cols-[1fr_1fr_auto] gap-2 sm:grid-cols-[1fr_1fr_2fr_4.5rem_auto]">
+                    <Input
+                      aria-label="Brand"
+                      placeholder="Brand"
+                      list={brandListId}
+                      {...register(`options.${index}.items.${j}.brand`)}
+                    />
+                    <Input
+                      aria-label="Model"
+                      placeholder="Model #"
+                      list={modelListId}
+                      {...register(`options.${index}.items.${j}.model`)}
+                    />
+                    <Input
+                      aria-label="Item name"
+                      placeholder="What is it? (e.g. 12-inch subwoofer)"
+                      list={nameListId}
+                      className="col-span-2 sm:col-span-1"
+                      {...register(`options.${index}.items.${j}.name`)}
+                    />
+                    <Input
+                      aria-label="Quantity"
+                      type="number"
+                      min={1}
+                      inputMode="numeric"
+                      {...register(`options.${index}.items.${j}.quantity`)}
+                    />
+                    <button
+                      type="button"
+                      aria-label="Remove item"
+                      disabled={itemFields.length === 1}
+                      onClick={() => remove(j)}
+                      className="flex h-12 w-12 items-center justify-center rounded-xl text-zinc-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-30"
+                    >
+                      <Trash2 className="h-5 w-5" aria-hidden="true" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              {optionErrors?.items?.[0]?.name?.message ? (
+                <p role="alert" className="mt-1 text-sm font-medium text-red-700">
+                  {optionErrors.items[0].name.message}
+                </p>
+              ) : null}
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button variant="ghost" onClick={() => append({ brand: '', model: '', name: '', quantity: 1, category: null })}>
+                  <Plus className="h-5 w-5" aria-hidden="true" /> Add product
+                </Button>
+                {catalogItems.length > 0 ? (
+                  <Button variant="ghost" onClick={() => setCatalogOpen(true)}>
+                    <Package className="h-5 w-5" aria-hidden="true" /> From catalog
+                  </Button>
+                ) : null}
+              </div>
+            </>
+          )}
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
@@ -899,6 +1046,7 @@ function OptionEditor({
                     model: catalogItem.model ?? '',
                     name: catalogItem.name,
                     quantity: 1,
+                    category: catalogItem.category,
                   })
                   setCatalogOpen(false)
                 }}

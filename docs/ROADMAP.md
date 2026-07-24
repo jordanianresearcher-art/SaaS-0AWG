@@ -23,12 +23,16 @@ Guided package building for common vehicles: pick the truck, pick the goal
 (daily driver / bass / show), and get a starting parts list with labor, priced
 from the shop's own preferred brands. Output feeds directly into a quote.
 
-The universal-configuration engine, expanded catalog model, and package
-template schema are built and tested (`src/lib/audioConfigs.ts`,
-migrations `0009`/`0010`) — see
+The universal-configuration engine, expanded catalog model, package
+template schema, Shopify catalog import backend, and the fast visual
+drag-and-drop package builder are built and tested
+(`src/lib/audioConfigs.ts`, migrations `0009`/`0010`,
+`src/components/PackageBuilder.tsx`) — see
 [docs/CATALOG_AND_PACKAGES.md](CATALOG_AND_PACKAGES.md) and
-[docs/IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). The visual
-builder UI, Shopify catalog import, and AI bulk-photo onboarding are next.
+[docs/IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). Still needed:
+running the Shopify import against a real shop (blocked on deploy
+access/credentials), an owner approval screen for pending packages, the
+customer-facing visual quote redesign, and AI bulk-photo onboarding.
 
 ## Phase 3 — Package Page Generator
 

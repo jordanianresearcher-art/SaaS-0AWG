@@ -67,27 +67,60 @@ work in this area so effort isn't duplicated.
   type-check cleanly in isolation (no Deno runtime available in this
   session to execute it against a live store — see below).
 
+## Completed (Phase 3 — Fast visual package builder)
+
+- **`src/components/PackageBuilder.tsx`**: the phone/tablet-optimized
+  slot-filling UI — vehicle type → configuration (e.g. "Truck 2×8") →
+  drag-and-drop (or tap-to-add) products into each required/recommended/
+  optional slot → a separate installation-labor price field → an
+  installed-price override → a "compatibility not verified, please
+  confirm" gate. Built on `@dnd-kit/core` (not native HTML5 drag-and-drop,
+  which doesn't work on touch devices — this app's primary target is
+  phones/tablets in a shop) with pointer, touch, and keyboard sensors, so
+  every drag also has a tap/keyboard equivalent.
+- **`src/lib/packageBuilder.ts`**: the pure logic underneath it — which
+  catalog products are eligible for a slot (`catalogItemsForSlot`), the
+  add/set-quantity/remove slot-assignment reducers, converting filled
+  slots into quote line items (`assignmentsToQuoteItems`) or into
+  package-template items with images (`assignmentsToPackageItems`), the
+  component subtotal, completeness against `validatePackageSlots`, and
+  folding the separate labor price field into the same generic
+  slot-assignment model as a synthetic catalog item
+  (`resolveBuilderCatalog`) so no other calculation needs labor-specific
+  branching. 19 tests.
+- **Wired into `NewQuotePage.tsx`'s option editor**: each pricing option
+  now has a "Build with drag & drop" / "Switch to manual entry" toggle.
+  The builder is a self-contained draft — it only writes to the option's
+  real `items`/`price`/`configId` fields when staff taps "Apply to this
+  option," at which point the existing free-text product list (still
+  fully present and editable, per the spec's "preserve the existing
+  builder" requirement) is populated from it for final review. A "Save as
+  package" action alongside it calls `createPackageTemplate` directly
+  (independent of the quote's own form state) so a good build can become
+  a reusable package before the quote is even saved — the "fast builder"
+  path of the three package-creation methods described in
+  `docs/CATALOG_AND_PACKAGES.md`.
+- **Not built this round**: "Start from a saved package" (pre-filling the
+  builder from an existing `package_templates` row). `package_template_items`
+  are a price/spec snapshot with no live `catalog_item_id` back-reference
+  (by the same "quotes are immutable" philosophy as everything else in
+  this app), so re-linking a saved package to live catalog rows to make it
+  editable again isn't a small addition — see "Known limitations."
+- 212/212 tests passing (19 new in `packageBuilder.test.ts`), lint/
+  typecheck/build clean.
+
 ## Partially completed
 
-- **Component-slot readiness on real quotes**: `quote_items.category` and
-  `quote_options.config_id` columns exist and are threaded through both
-  repositories and covered by an integration test (creating a quote with a
-  categorized item + config, reading it back, validating it against
-  `validatePackageSlots`). **No UI sets these yet** — `NewQuotePage.tsx`'s
-  existing free-text option builder is untouched; a staff member typing a
-  quote today never picks a category or configuration. That's the fast
-  package builder's job (Phase 3).
+- **Repeated/won-combination intelligence** (Phase 3, not built) — a
+  query layer detecting "this combination has appeared in N quotes / M
+  won jobs, create a reusable package?" Needs real quote volume with
+  categorized items to be meaningful. The fast builder now produces that
+  categorized data (`quote_items.category`, `quote_options.config_id` are
+  set whenever a staff member applies a builder session), but nothing
+  queries it yet.
 
 ## Deferred (by explicit phase ordering)
 
-- **Fast visual package builder** (Phase 3) — the phone/tablet-optimized
-  slot-filling UI (vehicle type → configuration → subwoofer/enclosure/amp/
-  wiring/labor/upgrades → installed price), including the "Save as
-  package" button and owner approval screen for pending packages.
-- **Repeated/won-combination intelligence** (Phase 3) — a query layer
-  detecting "this combination has appeared in N quotes / M won jobs,
-  create a reusable package?" Needs real quote volume with categorized
-  items to be meaningful, which the fast builder produces.
 - **Customer-facing visual quote redesign** (Phase 4) — product images,
   plain-language outcomes, an expandable technical-details section, a
   compact Subwoofers → Enclosure → Amplifier → Wiring → Installation
@@ -99,9 +132,8 @@ work in this area so effort isn't duplicated.
   image research, the exception-focused owner review queue, and the
   interview/advertisement intake. None of this is implemented; see
   "Required credentials" below for what unlocks it.
-- **Drag-and-drop package building** (raised alongside this spec) — a UI
-  affordance for the fast builder (Phase 3), not a separate system. It
-  will consume the same slot/category model built in this phase.
+- **"Start from a saved package"** — see above; a real but scoped-out
+  enhancement to the Phase 3 builder.
 
 ## Required credentials / access
 
@@ -126,10 +158,18 @@ work in this area so effort isn't duplicated.
   the builder starts surfacing specs to staff. The Shopify import doesn't
   populate `specs` at all — Shopify has no structured spec fields to map from.
 - Quote items don't currently record which catalog item (if any) they
-  were copied from, so saving a quote option as a package can't carry an
-  image forward automatically (`imageUrl` lands `null` on every converted
-  package item). Fixable later by adding a `source_catalog_item_id` to
-  `quote_items`, but out of scope for this round.
+  were copied from. Saving a package **directly from the fast builder**
+  does carry product images forward (it still has the live catalog items
+  in hand). But **saving an already-existing quote option** as a package
+  (`quoteOptionToPackageTemplateDraft` in `src/lib/packageTemplates.ts`)
+  can't — `imageUrl` lands `null` on every item converted that way.
+  Fixable later by adding a `source_catalog_item_id` to `quote_items`, but
+  out of scope for this round.
+- The builder's "Apply to this option" button doesn't block on
+  `isBuilderComplete()` — it warns when required slots are under-filled
+  but still lets staff apply and finish the option manually below. This
+  is deliberate (a shop might genuinely sell a sub-only job with no
+  enclosure yet in stock), not an oversight.
 - The Shopify import currently supports **exactly one Shopify-connected
   shop per deployment** (a single global secret pair, mirroring how
   `RESEND_API_KEY` already works for all shops today) — matches the
@@ -146,9 +186,8 @@ work in this area so effort isn't duplicated.
 
 ## Recommended next step
 
-Two independent things can happen next, in either order:
-
-1. **Get the Shopify import actually running against Super Car Audio.**
+1. **Get the Shopify import actually running against Super Car Audio**,
+   then use the real imported catalog in the now-built fast builder.
    Needs: (a) apply migrations `0009`/`0010`, (b) deploy
    `shopify-import-catalog` (`supabase functions deploy shopify-import-catalog`),
    (c) set `SHOPIFY_STORE_DOMAIN` + `SHOPIFY_ADMIN_ACCESS_TOKEN` as Edge
@@ -157,11 +196,17 @@ Two independent things can happen next, in either order:
    `repo.runShopifyImport()` in a loop until `hasMore` is false. All of
    this needs either a Supabase personal access token handed to this
    session, or for you to run these steps yourself with the exact
-   commands in `docs/CATALOG_AND_PACKAGES.md`.
-2. **Build the fast visual package builder (Phase 3)** against whatever
-   catalog exists at the time (demo data today, or the real imported
-   catalog once step 1 runs) — the vehicle-type → configuration → slot-
-   filling UI, the "save as package" button, and the owner approval
-   screen for pending packages. This doesn't strictly need step 1 to be
-   done first, but testing it against real products (per the original
-   request) does.
+   commands in `docs/CATALOG_AND_PACKAGES.md`. **This remains the single
+   biggest blocker** — the builder itself is fully built and tested
+   against demo data, but has never been driven against real Shopify-
+   imported products because nothing in this session can deploy/import.
+2. Once real products exist, someone with owner/manager access should
+   review and approve the imported catalog rows (`approvalStatus`
+   defaults to whatever the import sets) — the builder only offers
+   `active` + `approved` products to drag into slots, by design.
+3. **Owner approval screen for pending package templates** — `package_templates`
+   already has the `approvalStatus`/`setPackageTemplateApproval` plumbing
+   from Phase 1, and both the fast builder's "Save as package" and the
+   older save-from-quote path default new packages to `pending_review`,
+   but there's still no settings-page UI listing them for an owner/manager
+   to approve or reject. Small, contained addition on top of what exists.

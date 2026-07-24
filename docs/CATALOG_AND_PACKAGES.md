@@ -85,22 +85,70 @@ against a configuration — e.g. "Truck 2×8 Starter" at $799 installed. Three
 ways one comes to exist (per the product spec; see IMPLEMENTATION_STATUS
 for which are wired to a UI today):
 
-1. **Staff saves a quote option as a package** — the only one implemented
-   so far, and only at the data/logic layer (no UI button yet). See
-   `src/lib/packageTemplates.ts`'s `quoteOptionToPackageTemplateDraft()` —
-   a **pure snapshot conversion**: every product, quantity, price, and the
-   configuration are copied. `sourceQuoteId`/`sourceQuoteOptionId` are kept
-   for provenance only (`on delete set null` in the schema) — editing or
-   deleting the original quote later never changes an already-saved
-   package, and vice versa.
-2. **Fast visual package builder** (deferred) — staff pick a vehicle type,
-   a configuration, and fill slots from the catalog.
+1. **Fast visual package builder** — pick a vehicle type and a
+   configuration in `src/components/PackageBuilder.tsx`, drag (or tap)
+   catalog products into its slots, then tap "Save as package" in
+   `NewQuotePage.tsx`'s option editor. Calls `createPackageTemplate`
+   directly — this can happen before the quote itself is even saved, so
+   `sourceQuoteId`/`sourceQuoteOptionId` are left `null` (there's no quote
+   yet to point at).
+2. **Staff saves an existing quote option as a package** — data/logic
+   layer only, no UI button yet. See `src/lib/packageTemplates.ts`'s
+   `quoteOptionToPackageTemplateDraft()` — a **pure snapshot conversion**:
+   every product, quantity, price, and the configuration are copied.
+   `sourceQuoteId`/`sourceQuoteOptionId` are kept for provenance only
+   (`on delete set null` in the schema) — editing or deleting the original
+   quote later never changes an already-saved package, and vice versa.
 3. **AI-drafted onboarding packages** (deferred) — drafted from an imported
    catalog + interview notes; always `pending_review`.
 
 Every template starts `pending_review` unless an owner/manager creates it
 directly — the same trigger-enforced approval-status protection as catalog
-items (`guard_package_template_approval`).
+items (`guard_package_template_approval`). There's still no settings-page
+screen listing pending packages for an owner/manager to approve — see
+IMPLEMENTATION_STATUS.md's recommended next step.
+
+## Fast visual package builder (`src/components/PackageBuilder.tsx`)
+
+Lives inside `NewQuotePage.tsx`'s per-option editor as a "Build with drag &
+drop" / "Switch to manual entry" toggle — it doesn't replace the existing
+free-text product list, it's an alternate way to fill it in:
+
+1. Pick a **vehicle type** (truck / car / sedan / hatchback / suv), then a
+   **configuration** (e.g. "Truck 2×8") — `configurationsForVehicleType()`
+   filters `AUDIO_CONFIGURATIONS` down to the relevant ones.
+2. Drag a product card from the tray onto a slot, or tap a slot then tap a
+   product (dnd-kit's `PointerSensor`/`KeyboardSensor` cover mouse, touch,
+   and keyboard — plain HTML5 drag-and-drop doesn't work on phones/tablets,
+   this app's primary target). A slot only ever accepts its own category —
+   dropping a mismatched product shows a toast, not a silent no-op.
+3. Set an **installation labor price** in its own field — labor isn't a
+   catalog product, so `resolveBuilderCatalog()` folds it into the same
+   slot-assignment model as a synthetic, non-persisted `CatalogItem`
+   (`id: '__labor_charge__'`) purely so every other calculation (subtotal,
+   completeness) doesn't need a special case for it.
+4. The parts+labor subtotal is computed live; an **installed-price
+   override** field lets staff quote package pricing instead of a straight
+   parts markup.
+5. A **"Compatibility not verified"** checkbox must be checked before
+   applying. `requiresCompatibilityConfirmation()` always returns `true`
+   today — nothing in this system holds a real, owner-vetted compatibility
+   ruleset yet, so the builder never implies a compatibility check it can't
+   back up.
+6. **"Apply to this option"** copies the filled slots into that option's
+   real `items`, sets its `price` to the computed (or overridden) total,
+   and stamps its `configId` — then closes the builder so the now-populated
+   manual list is there for a final look before saving. Under-filled
+   required slots produce a warning, not a block — a shop might genuinely
+   be quoting a partial job.
+7. **"Save as package"** (shown once a configuration is picked) names the
+   current build and calls `createPackageTemplate` directly — independent
+   of react-hook-form, so it works even before the quote itself is saved.
+
+Only `active` + `approvalStatus: 'approved'` catalog items are offered in
+slots or the search tray (`catalogItemsForSlot`) — a shop's own
+not-yet-approved or deactivated products never get dragged into a quote by
+accident.
 
 ## Shopify catalog import (`shopify-import-catalog` Edge Function)
 
@@ -158,9 +206,12 @@ inventory *into* Shopify. Owner/manager only.
   only. The richer fields exist in the schema and repository layer for a
   future import to populate; no manual-entry UI for them yet (deliberately
   — see IMPLEMENTATION_STATUS).
-- **Nowhere yet**: package templates have no screen. The repository/type
-  layer is complete and tested; the "fast package builder" and "save as
-  package" button are the next phase's UI work.
+- **New Quote → each pricing option**: the "Build with drag & drop" toggle
+  and "Save as package" button described above.
+- **Nowhere yet**: package templates have no *listing/approval* screen —
+  they can be created (via the builder or, at the data layer, from a saved
+  quote option) but an owner/manager has no page to review, approve, or
+  reject a `pending_review` one. See IMPLEMENTATION_STATUS.md.
 
 ## Security
 
@@ -248,3 +299,16 @@ locally, unless you explicitly pass `overwriteLocalPrices: true`.
   store, but was verified to type-check cleanly in isolation (its
   duplicated mapping/sync logic mirrors the tested `shopifyImport.ts`
   functions exactly).
+- `src/lib/packageBuilder.test.ts` — slot eligibility (active + approved +
+  matching category only), the add/set-quantity/remove assignment
+  reducers, completeness against `validatePackageSlots` (including a
+  dangling assignment pointing at a deleted catalog item never fills
+  anything), the quote-item and package-item conversions, the component
+  subtotal, and `resolveBuilderCatalog`'s synthetic labor item (created
+  when a price is set, absent at zero/blank, cleared when the price is
+  removed, a no-op with no configuration picked yet).
+- A Playwright smoke pass against `vite preview` in demo mode covering the
+  builder end to end: pick vehicle type → configuration, drag a subwoofer
+  onto its slot, tap-add an enclosure/amp/wiring kit, set a labor price,
+  confirm compatibility, apply, and verify the option's product list,
+  price, and total all land correctly — then save the quote.
