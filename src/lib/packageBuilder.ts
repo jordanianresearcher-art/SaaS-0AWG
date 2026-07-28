@@ -6,6 +6,7 @@
 // rows, and how the installed price is computed.
 
 import { validatePackageSlots, type AudioConfiguration, type ConfigSlot, type SlottableItem } from './audioConfigs'
+import { parseDollarsToCents } from './format'
 import type { CatalogItem, ProductCategory } from '../types'
 
 /** One catalog product assigned to (part of) a slot, with how many of it are used there. */
@@ -227,4 +228,40 @@ export function resolveBuilderCatalog(
     catalog: [...catalogItems, makeLaborCatalogItem(laborPriceCents)],
     assignments: { ...assignments, [laborSlot.key]: [{ catalogItemId: LABOR_CATALOG_ITEM_ID, quantity: 1 }] },
   }
+}
+
+// --- Extra / custom items: one-off items outside any config slot -------
+//
+// A configuration's slots only cover the categories that configuration
+// defines. Real jobs sometimes need something that isn't one of those —
+// a misc hardware charge, a shop-supplies fee, a part not worth adding to
+// the permanent catalog. These are plain name+price+quantity lines with no
+// catalog product or category behind them at all, kept separate from the
+// slot-assignment model (they never fill a slot, never affect
+// completeness) and merged in only at quote-item/subtotal time.
+
+export interface CustomBuilderItem {
+  id: string
+  name: string
+  /** Dollar string — same form-values convention as labor/price-override fields. */
+  price: string
+  quantity: number
+}
+
+export function customItemsSubtotalCents(items: CustomBuilderItem[]): number {
+  return items.reduce((sum, item) => sum + (parseDollarsToCents(item.price) ?? 0) * item.quantity, 0)
+}
+
+function customItemsToBuilderItems(items: CustomBuilderItem[]): BuilderQuoteItem[] {
+  return items
+    .filter((item) => item.name.trim())
+    .map((item) => ({ brand: null, model: null, name: item.name.trim(), quantity: item.quantity, description: null, category: null }))
+}
+
+export function customItemsToQuoteItems(items: CustomBuilderItem[]): BuilderQuoteItem[] {
+  return customItemsToBuilderItems(items)
+}
+
+export function customItemsToPackageItems(items: CustomBuilderItem[]): BuilderPackageItem[] {
+  return customItemsToBuilderItems(items).map((item) => ({ ...item, imageUrl: null }))
 }

@@ -201,4 +201,12 @@ describe('planCatalogItemSync', () => {
     expect(plan.action).toBe('update')
     expect(plan.input?.defaultPriceCents).toBe(14999)
   })
+
+  it('re-categorizes an already-imported row once Shopify productType/tags are fixed and re-imported', () => {
+    // e.g. a shop originally imported before its productType was recognized, landing category: null
+    const uncategorized = makeExisting({ category: null })
+    const plan = planCatalogItemSync(uncategorized, mapped) // mapped resolves to 'subwoofer' for this fixture
+    expect(plan.action).toBe('update')
+    expect(plan.input?.category).toBe('subwoofer')
+  })
 })

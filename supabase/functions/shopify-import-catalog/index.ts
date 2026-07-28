@@ -160,7 +160,10 @@ function planSync(existing: Row | null, mapped: MappedRow, overwriteLocalPrices:
     existing.name !== mapped.name ||
     existing.description !== mapped.description ||
     existing.image_url !== mapped.image_url ||
-    existing.active !== mapped.active
+    existing.active !== mapped.active ||
+    // Lets a shop fix Shopify's productType/tags and re-run the import to
+    // actually re-categorize already-imported rows, not just new ones.
+    existing.category !== mapped.category
 
   const priceChanged = existing.default_price_cents !== mapped.default_price_cents || existing.msrp_cents !== mapped.msrp_cents
   const protectPrice = priceLikelyEditedSinceSync(existing) && !overwriteLocalPrices

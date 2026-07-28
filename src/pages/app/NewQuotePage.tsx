@@ -12,7 +12,7 @@ import {
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { addDays, format } from 'date-fns'
-import { LayoutGrid, Package, Plus, Trash2 } from 'lucide-react'
+import { Check, LayoutGrid, Package, Plus, Trash2, TriangleAlert } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
 import { Button, Card, Field, Input, Modal, Select, Textarea } from '../../components/ui'
@@ -23,6 +23,9 @@ import {
   assignmentsToPackageItems,
   assignmentsToQuoteItems,
   computeComponentSubtotalCents,
+  customItemsSubtotalCents,
+  customItemsToPackageItems,
+  customItemsToQuoteItems,
   isBuilderComplete,
   resolveBuilderCatalog,
 } from '../../lib/packageBuilder'
@@ -723,7 +726,9 @@ function OptionEditor({
   const [savingPackage, setSavingPackage] = useState(false)
 
   const builderConfig = builderValue.configId ? getConfiguration(builderValue.configId) : null
-  const builderItemCount = Object.values(builderValue.assignments).reduce((n, list) => n + list.length, 0)
+  const builderNamedCustomItemCount = builderValue.customItems.filter((i) => i.name.trim()).length
+  const builderItemCount =
+    Object.values(builderValue.assignments).reduce((n, list) => n + list.length, 0) + builderNamedCustomItemCount
   const builderComplete = builderConfig ? isBuilderComplete(builderConfig, builderValue.assignments, catalogItems) : false
   const canApplyBuilder = builderValue.confirmed && builderConfig !== null && builderItemCount > 0
 
@@ -735,7 +740,8 @@ function OptionEditor({
       builderValue.assignments,
       laborCents,
     )
-    const subtotalCents = computeComponentSubtotalCents(resolvedAssignments, resolvedCatalog)
+    const subtotalCents =
+      computeComponentSubtotalCents(resolvedAssignments, resolvedCatalog) + customItemsSubtotalCents(builderValue.customItems)
     const overrideCents = builderValue.priceOverride.trim() ? parseDollarsToCents(builderValue.priceOverride) : null
     return { resolvedCatalog, resolvedAssignments, priceCents: overrideCents ?? subtotalCents }
   }
@@ -743,7 +749,7 @@ function OptionEditor({
   function applyBuilder() {
     if (!canApplyBuilder || !builderConfig) return
     const { resolvedAssignments, resolvedCatalog, priceCents } = resolveBuilderOutput()
-    const items = assignmentsToQuoteItems(resolvedAssignments, resolvedCatalog)
+    const items = [...assignmentsToQuoteItems(resolvedAssignments, resolvedCatalog), ...customItemsToQuoteItems(builderValue.customItems)]
     if (items.length === 0) {
       toast('error', 'Add at least one product before applying.')
       return
@@ -762,7 +768,7 @@ function OptionEditor({
       return
     }
     const { resolvedAssignments, resolvedCatalog, priceCents } = resolveBuilderOutput()
-    const items = assignmentsToPackageItems(resolvedAssignments, resolvedCatalog)
+    const items = [...assignmentsToPackageItems(resolvedAssignments, resolvedCatalog), ...customItemsToPackageItems(builderValue.customItems)]
     if (items.length === 0) {
       toast('error', 'Add at least one product before saving a package.')
       return
@@ -849,13 +855,13 @@ function OptionEditor({
             <div className="space-y-3">
               <PackageBuilder catalogItems={catalogItems} value={builderValue} onChange={setBuilderValue} />
               {builderConfig && !builderComplete ? (
-                <p className="text-sm font-medium text-amber-700">
-                  Some required slots aren&apos;t filled yet — you can still apply and finish it in the product list.
+                <p className="flex items-center gap-1.5 text-sm font-medium text-amber-700">
+                  <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden="true" /> Some required slots are empty
                 </p>
               ) : null}
               <div className="flex flex-wrap items-center gap-2 border-t border-zinc-100 pt-3">
                 <Button type="button" onClick={applyBuilder} disabled={!canApplyBuilder}>
-                  Apply to this option
+                  <Check className="h-5 w-5" aria-hidden="true" /> Apply
                 </Button>
                 <Button type="button" variant="ghost" onClick={() => setBuilderOpen(false)}>
                   Cancel
@@ -863,11 +869,7 @@ function OptionEditor({
               </div>
               {builderConfig ? (
                 <div className="flex flex-wrap items-end gap-2 border-t border-zinc-100 pt-3">
-                  <Field
-                    label="Save this build as a reusable package"
-                    htmlFor={`opt-${index}-pkg-name`}
-                    hint="Any staff member can reuse it later, once a manager approves it."
-                  >
+                  <Field label="Package name" htmlFor={`opt-${index}-pkg-name`}>
                     <Input
                       id={`opt-${index}-pkg-name`}
                       placeholder="e.g. Daily Bass 1×12"

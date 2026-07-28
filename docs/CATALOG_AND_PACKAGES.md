@@ -160,11 +160,29 @@ fill it in:
 7. **"Save as package"** (shown once a configuration is picked) names the
    current build and calls `createPackageTemplate` directly — independent
    of react-hook-form, so it works even before the quote itself is saved.
+8. **Extra / custom items** — a plain name + price + quantity list, kept
+   deliberately outside the slot-assignment model entirely (`packageBuilder.ts`'s
+   `CustomBuilderItem`, `customItemsSubtotalCents`, `customItemsToQuoteItems`/
+   `customItemsToPackageItems`). For a one-off item that isn't worth adding
+   to the permanent catalog and doesn't belong to any of a configuration's
+   slot categories — a misc hardware charge, a shop-supplies fee. Counted
+   into the subtotal and merged into the applied/saved item list, but
+   never fills a slot and never affects completeness.
 
 Only `active` + `approvalStatus: 'approved'` catalog items are offered in
 slots or the search tray (`catalogItemsForSlot`) — a shop's own
 not-yet-approved or deactivated products never get dragged into a quote by
 accident.
+
+**UI is icon-led, not text-led**: the requirement badge on each slot
+(required/recommended/optional) is a small icon with an accessible
+label/tooltip rather than a spelled-out word; an empty slot shows a plus
+icon instead of a full sentence; a product tray card's drag affordance is
+an icon in the corner (with a native tooltip) rather than a caption line.
+The border color coding (red = required and empty, green = filled) was
+already doing most of the communicating — the icons are there for the
+cases color alone doesn't cover (recommended vs. optional, or a note like
+"add when integrating with a factory radio").
 
 ## Shopify catalog import (`shopify-import-catalog` Edge Function)
 
@@ -192,7 +210,11 @@ inventory *into* Shopify. Owner/manager only.
   AI-identified data (Phase 5), not a shop's own live catalog.
 - **Idempotent re-runs**: each variant is looked up by
   `(shop_id, import_source='shopify', external_source_product_id=<variant GID>)`
-  before deciding create vs. update vs. unchanged vs. skipped.
+  before deciding create vs. update vs. unchanged vs. skipped. `category`
+  is part of that change comparison (fixed after a live run surfaced the
+  gap) — fixing a product's `productType`/tags in Shopify and re-running
+  the import re-categorizes the already-imported row, not just new ones
+  going forward.
 - **Local-edit protection**: `priceLikelyEditedSinceSync()` compares a
   catalog item's `updatedAt` against `priceCheckedAt` (stamped only when a
   price-carrying write happens, e.g. this importer's own sync) — if a row

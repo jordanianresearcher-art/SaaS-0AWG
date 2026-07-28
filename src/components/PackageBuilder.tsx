@@ -21,7 +21,7 @@ import {
   useSensors,
   type DragEndEvent,
 } from '@dnd-kit/core'
-import { GripVertical, Package, Search, Trash2 } from 'lucide-react'
+import { CircleAlert, GripVertical, Info, Package, Plus, Search, Star, Trash2, TriangleAlert } from 'lucide-react'
 import {
   PRODUCT_CATEGORY_INFO,
   VEHICLE_TYPE_INFO,
@@ -35,16 +35,18 @@ import {
   addToSlot,
   catalogItemsForSlot,
   computeComponentSubtotalCents,
+  customItemsSubtotalCents,
   removeFromSlot,
   requiresCompatibilityConfirmation,
   resolveBuilderCatalog,
   setSlotQuantity,
+  type CustomBuilderItem,
   type SlotAssignment,
   type SlotAssignments,
 } from '../lib/packageBuilder'
 import { formatCurrency, parseDollarsToCents } from '../lib/format'
 import { useToast } from './Toast'
-import { Field, Input } from './ui'
+import { Button, Field, Input } from './ui'
 import type { CatalogItem, VehicleType } from '../types'
 
 export interface PackageBuilderValue {
@@ -53,13 +55,29 @@ export interface PackageBuilderValue {
   assignments: SlotAssignments
   /** Dollar string — priced separately from the parts, per a direct field rather than a drag target. */
   laborPrice: string
-  /** Dollar string — blank means "use the computed parts+labor subtotal". */
+  /** One-off items with no catalog product or slot category behind them (a fee, misc hardware, etc.). */
+  customItems: CustomBuilderItem[]
+  /** Dollar string — blank means "use the computed parts+labor+extras subtotal". */
   priceOverride: string
   confirmed: boolean
 }
 
 export function createEmptyPackageBuilderValue(): PackageBuilderValue {
-  return { vehicleType: null, configId: null, assignments: {}, laborPrice: '', priceOverride: '', confirmed: false }
+  return {
+    vehicleType: null,
+    configId: null,
+    assignments: {},
+    laborPrice: '',
+    customItems: [],
+    priceOverride: '',
+    confirmed: false,
+  }
+}
+
+let customItemCounter = 0
+function nextCustomItemId(): string {
+  customItemCounter += 1
+  return `custom-${customItemCounter}`
 }
 
 interface PackageBuilderProps {
@@ -81,7 +99,7 @@ export default function PackageBuilder({ catalogItems, value, onChange }: Packag
     value.assignments,
     laborPriceCents,
   )
-  const subtotalCents = computeComponentSubtotalCents(builderAssignments, builderCatalog)
+  const subtotalCents = computeComponentSubtotalCents(builderAssignments, builderCatalog) + customItemsSubtotalCents(value.customItems)
   const overrideCents = value.priceOverride.trim() ? parseDollarsToCents(value.priceOverride) : null
   const finalPriceCents = overrideCents ?? subtotalCents
 
@@ -203,8 +221,72 @@ export default function PackageBuilder({ catalogItems, value, onChange }: Packag
                 </Field>
               </div>
 
+              <div className="space-y-2 rounded-xl bg-zinc-50 p-3">
+                <p className="text-sm font-semibold text-ink">Extra / custom items</p>
+                <p className="-mt-1 text-xs text-zinc-500">Anything that isn&apos;t a slot above — a fee, misc hardware, a one-off part.</p>
+                {value.customItems.map((item) => (
+                  <div key={item.id} className="grid grid-cols-[1fr_5rem_3.5rem_auto] gap-2">
+                    <Input
+                      aria-label="Item name"
+                      placeholder="What is it?"
+                      value={item.name}
+                      onChange={(e) =>
+                        onChange({
+                          ...value,
+                          customItems: value.customItems.map((i) => (i.id === item.id ? { ...i, name: e.target.value } : i)),
+                        })
+                      }
+                    />
+                    <Input
+                      aria-label="Price"
+                      inputMode="decimal"
+                      placeholder="$0"
+                      value={item.price}
+                      onChange={(e) =>
+                        onChange({
+                          ...value,
+                          customItems: value.customItems.map((i) => (i.id === item.id ? { ...i, price: e.target.value } : i)),
+                        })
+                      }
+                    />
+                    <Input
+                      aria-label="Quantity"
+                      type="number"
+                      min={1}
+                      inputMode="numeric"
+                      value={item.quantity}
+                      onChange={(e) =>
+                        onChange({
+                          ...value,
+                          customItems: value.customItems.map((i) =>
+                            i.id === item.id ? { ...i, quantity: Math.max(1, Number(e.target.value) || 1) } : i,
+                          ),
+                        })
+                      }
+                    />
+                    <button
+                      type="button"
+                      aria-label="Remove item"
+                      onClick={() => onChange({ ...value, customItems: value.customItems.filter((i) => i.id !== item.id) })}
+                      className="flex h-11 w-11 items-center justify-center rounded-xl text-zinc-400 hover:bg-red-100 hover:text-red-600"
+                    >
+                      <Trash2 className="h-5 w-5" aria-hidden="true" />
+                    </button>
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() =>
+                    onChange({ ...value, customItems: [...value.customItems, { id: nextCustomItemId(), name: '', price: '', quantity: 1 }] })
+                  }
+                >
+                  <Plus className="h-5 w-5" aria-hidden="true" /> Add extra item
+                </Button>
+              </div>
+
               <div className="space-y-2 rounded-xl border border-zinc-200 p-3">
-                <p className="text-sm text-zinc-600">Parts + labor subtotal: {formatCurrency(subtotalCents)}</p>
+                <p className="text-sm text-zinc-600">Parts + labor + extras subtotal: {formatCurrency(subtotalCents)}</p>
                 <Field
                   label="Installed price to quote"
                   htmlFor="builder-price-override"
@@ -222,17 +304,15 @@ export default function PackageBuilder({ catalogItems, value, onChange }: Packag
               </div>
 
               {requiresCompatibilityConfirmation() ? (
-                <label className="flex items-start gap-2.5 rounded-xl bg-amber-50 p-3 text-sm text-ink">
+                <label className="flex items-center gap-2.5 rounded-xl bg-amber-50 p-3 text-sm text-ink">
                   <input
                     type="checkbox"
-                    className="mt-0.5 h-5 w-5 accent-[#1d4ed8]"
+                    className="h-5 w-5 accent-[#1d4ed8]"
                     checked={value.confirmed}
                     onChange={(e) => onChange({ ...value, confirmed: e.target.checked })}
                   />
-                  <span>
-                    <strong>Compatibility not verified.</strong> Nothing here checks that these parts actually work together —
-                    confirm you&apos;ve checked that yourself before using this in a quote.
-                  </span>
+                  <TriangleAlert className="h-4 w-4 shrink-0 text-amber-600" aria-hidden="true" />
+                  <span>Compatibility not verified — I&apos;ve checked these parts myself.</span>
                 </label>
               ) : null}
             </div>
@@ -306,23 +386,31 @@ function SlotCard({
         isOver ? '!border-brand' : ''
       }`}
     >
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-sm font-bold text-ink">{slot.label}</p>
-        <span
-          className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${
-            slot.requirement === 'required'
-              ? 'bg-red-100 text-red-700'
-              : slot.requirement === 'recommended'
-                ? 'bg-amber-100 text-amber-700'
-                : 'bg-zinc-100 text-zinc-600'
-          }`}
-        >
-          {slot.requirement === 'required' ? 'Required' : slot.requirement === 'recommended' ? 'Recommended' : 'Optional'}
-        </span>
+      <div className="flex items-center gap-1.5">
+        <p className="flex-1 text-sm font-bold text-ink">{slot.label}</p>
+        {slot.note ? (
+          <span title={slot.note} aria-label={slot.note} className="shrink-0 text-zinc-400">
+            <Info className="h-4 w-4" aria-hidden="true" />
+          </span>
+        ) : null}
+        {slot.requirement === 'required' ? (
+          <span title="Required" aria-label="Required" className="shrink-0 text-red-500">
+            <CircleAlert className="h-4 w-4" aria-hidden="true" />
+          </span>
+        ) : slot.requirement === 'recommended' ? (
+          <span title="Recommended" aria-label="Recommended" className="shrink-0 text-amber-500">
+            <Star className="h-4 w-4" aria-hidden="true" />
+          </span>
+        ) : null}
       </div>
-      {slot.note ? <p className="mt-0.5 text-xs text-zinc-500">{slot.note}</p> : null}
       {assignments.length === 0 ? (
-        <p className="mt-2 text-sm text-zinc-500">{isOver ? 'Drop it here' : 'Tap to select, then drag or tap a product below'}</p>
+        isOver ? (
+          <p className="mt-2 text-sm font-medium text-brand">Drop here</p>
+        ) : (
+          <div className="mt-2 flex items-center gap-1.5 text-sm text-zinc-400">
+            <Plus className="h-4 w-4" aria-hidden="true" /> Add
+          </div>
+        )
       ) : (
         <div className="mt-2 space-y-1.5">
           {assignments.map((a) => {
@@ -435,13 +523,17 @@ function ProductTrayCard({ item, onTapAdd }: { item: CatalogItem; onTapAdd: () =
     <div
       ref={setNodeRef}
       onClick={onTapAdd}
+      title="Drag or tap to add"
       style={transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined}
-      className={`flex touch-none flex-col items-start gap-1 rounded-xl border border-zinc-200 bg-white p-2 text-left ${
+      className={`relative flex touch-none flex-col items-start gap-1 rounded-xl border border-zinc-200 bg-white p-2 text-left ${
         isDragging ? 'z-10 opacity-70 shadow-lg' : ''
       }`}
       {...listeners}
       {...attributes}
     >
+      <span className="absolute top-1.5 right-1.5 text-zinc-300" aria-hidden="true">
+        <GripVertical className="h-3.5 w-3.5" />
+      </span>
       <div className="flex h-16 w-full items-center justify-center rounded-lg bg-blue-50">
         {item.imageUrl ? (
           <img src={item.imageUrl} alt="" className="h-full w-full rounded-lg object-contain" />
@@ -450,10 +542,7 @@ function ProductTrayCard({ item, onTapAdd }: { item: CatalogItem; onTapAdd: () =
         )}
       </div>
       <p className="line-clamp-2 text-xs font-semibold text-ink">{item.name}</p>
-      <p className="text-xs text-zinc-500">{item.defaultPriceCents !== null ? formatCurrency(item.defaultPriceCents) : 'No price'}</p>
-      <span className="flex items-center gap-1 text-[10px] text-zinc-400">
-        <GripVertical className="h-3 w-3" aria-hidden="true" /> Drag or tap
-      </span>
+      <p className="text-xs text-zinc-500">{item.defaultPriceCents !== null ? formatCurrency(item.defaultPriceCents) : '—'}</p>
     </div>
   )
 }

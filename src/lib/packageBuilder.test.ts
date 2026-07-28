@@ -6,12 +6,16 @@ import {
   assignmentsToSlottableItems,
   catalogItemsForSlot,
   computeComponentSubtotalCents,
+  customItemsSubtotalCents,
+  customItemsToPackageItems,
+  customItemsToQuoteItems,
   isBuilderComplete,
   LABOR_CATALOG_ITEM_ID,
   removeFromSlot,
   requiresCompatibilityConfirmation,
   resolveBuilderCatalog,
   setSlotQuantity,
+  type CustomBuilderItem,
   type SlotAssignments,
 } from './packageBuilder'
 import { getConfiguration } from './audioConfigs'
@@ -211,5 +215,43 @@ describe('resolveBuilderCatalog', () => {
 
   it('is a no-op when there is no configuration yet', () => {
     expect(resolveBuilderCatalog(null, catalog, {}, 15000)).toEqual({ catalog, assignments: {} })
+  })
+})
+
+describe('custom items (one-off items with no catalog product or slot)', () => {
+  const items: CustomBuilderItem[] = [
+    { id: 'c1', name: 'Shop supplies fee', price: '25', quantity: 1 },
+    { id: 'c2', name: 'Extra fuse kit', price: '9.99', quantity: 2 },
+  ]
+
+  it('sums price x quantity across every custom item', () => {
+    expect(customItemsSubtotalCents(items)).toBe(2500 + 999 * 2)
+  })
+
+  it('treats a blank or invalid price as zero rather than throwing', () => {
+    const blank: CustomBuilderItem[] = [{ id: 'c1', name: 'TBD item', price: '', quantity: 1 }]
+    expect(customItemsSubtotalCents(blank)).toBe(0)
+  })
+
+  it('converts named items into the quote-item shape, dropping blank-named rows', () => {
+    const withBlank = [...items, { id: 'c3', name: '   ', price: '5', quantity: 1 }]
+    const quoteItems = customItemsToQuoteItems(withBlank)
+    expect(quoteItems).toEqual([
+      { brand: null, model: null, name: 'Shop supplies fee', quantity: 1, description: null, category: null },
+      { brand: null, model: null, name: 'Extra fuse kit', quantity: 2, description: null, category: null },
+    ])
+  })
+
+  it('converts to package-item shape with a null image (no catalog product behind it)', () => {
+    const packageItems = customItemsToPackageItems(items)
+    expect(packageItems[0]).toEqual({
+      brand: null,
+      model: null,
+      name: 'Shop supplies fee',
+      quantity: 1,
+      description: null,
+      category: null,
+      imageUrl: null,
+    })
   })
 })

@@ -165,7 +165,10 @@ export function planCatalogItemSync(
     existing.name !== mapped.name ||
     existing.description !== mapped.description ||
     existing.imageUrl !== mapped.imageUrl ||
-    existing.active !== mapped.active
+    existing.active !== mapped.active ||
+    // Lets a shop fix Shopify's productType/tags and re-run the import to
+    // actually re-categorize already-imported rows, not just new ones.
+    existing.category !== mapped.category
 
   const priceChanged = existing.defaultPriceCents !== mapped.defaultPriceCents || existing.msrpCents !== mapped.msrpCents
 

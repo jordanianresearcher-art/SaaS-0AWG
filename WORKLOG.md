@@ -1058,3 +1058,58 @@ positioned on the right to drag from. All three addressed:
   and checking "Search all products" reveals a cross-category item (a
   demo enclosure, while a subwoofer slot was selected) that was hidden
   a moment before.
+
+## Round 15 — Sync bug fix, custom items, icon-led UI, Codex prompt
+
+Four more asks after the user kept using the builder against their real
+catalog: their Shopify categorization needs improving (asked for a Codex
+prompt to do that work), a way to add something with no category at all,
+less text/more icons, and self-explanatory buttons.
+
+- **Real bug found and fixed first**: `planCatalogItemSync()`'s change
+  detection (in both `src/lib/shopifyImport.ts` and the duplicated
+  `supabase/functions/shopify-import-catalog/index.ts`) never compared
+  `category`, only brand/model/name/description/image/active. That meant
+  fixing a product's categorization in Shopify and re-running the import
+  would silently do nothing to an already-imported row — only brand-new
+  products would ever pick up a category fix. Without this, the entire
+  point of the Codex categorization work below would've had zero effect
+  on the ~7+ products already imported. Added `category` to the
+  comparison in both places; new test in `shopifyImport.test.ts`.
+- **Extra / custom items** (`src/lib/packageBuilder.ts`): a
+  `CustomBuilderItem` (name/price/quantity, no catalog product or
+  category) kept deliberately outside the slot-assignment model — never
+  fills a slot, never affects completeness, only folds into the subtotal
+  and the final applied/saved item list. UI in `PackageBuilder.tsx`
+  mirrors the existing manual-entry row pattern from `NewQuotePage.tsx`.
+  4 new tests.
+- **Icon-led UI pass** (`PackageBuilder.tsx`, `NewQuotePage.tsx`): slot
+  requirement badges ("Required"/"Recommended"/"Optional") became small
+  icons with accessible labels/tooltips instead of spelled-out words; the
+  repeated-on-every-empty-slot sentence "Tap to select, then drag or tap
+  a product below" became a plus icon + "Add"; a slot's `note` text moved
+  from always-visible to an info-icon tooltip; a product tray card's
+  "Drag or tap" caption became a corner grip icon with a native tooltip;
+  the compatibility confirmation shrank from a bold header + two
+  sentences to one line with a warning icon; "Apply to this option" →
+  "Apply" (with a check icon) since the modal's own context already says
+  which option; the "Save as package" field dropped its explanatory hint
+  in favor of a plain "Package name" label.
+- **Codex prompt**: delivered directly in chat (not a repo file) — a
+  complete, self-contained prompt covering the exact `ProductCategory`
+  taxonomy this app's importer recognizes, the current
+  `guessCategoryFromProductType` regex hint table so Codex's output
+  actually round-trips into a correct category on next import, and SEO
+  guidance (Shopify `productType`/tags/meta description/title) per the
+  user's explicit ask that categorization serve both purposes.
+
+### Verification (this round)
+- `npm run lint`, `npx tsc -b --noEmit`, `npm run test -- --run`
+  (198/198 across 15 files — 1 new in `shopifyImport.test.ts`, 4 new in
+  `packageBuilder.test.ts`), and `npm run build` all clean.
+- A Playwright smoke pass confirmed: the old requirement-badge text and
+  the verbose empty-slot sentence are both gone, a custom item with no
+  category can be added and its price lands in the subtotal, applying an
+  option with *only* a custom item (no slots touched at all) still works
+  end to end, and the custom item's name lands correctly in the manual
+  product list afterward.
