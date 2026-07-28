@@ -110,9 +110,11 @@ IMPLEMENTATION_STATUS.md's recommended next step.
 
 ## Fast visual package builder (`src/components/PackageBuilder.tsx`)
 
-Lives inside `NewQuotePage.tsx`'s per-option editor as a "Build with drag &
-drop" / "Switch to manual entry" toggle — it doesn't replace the existing
-free-text product list, it's an alternate way to fill it in:
+Lives inside `NewQuotePage.tsx`'s per-option editor behind a "Build with
+drag & drop" button that opens it in a wide (`Modal size="xl"`) dialog — it
+doesn't replace the existing free-text product list (still there
+underneath, untouched, once the dialog closes), it's an alternate way to
+fill it in:
 
 1. Pick a **vehicle type** (truck / car / sedan / hatchback / suv), then a
    **configuration** (e.g. "Truck 2×8") — `configurationsForVehicleType()`
@@ -121,7 +123,21 @@ free-text product list, it's an alternate way to fill it in:
    product (dnd-kit's `PointerSensor`/`KeyboardSensor` cover mouse, touch,
    and keyboard — plain HTML5 drag-and-drop doesn't work on phones/tablets,
    this app's primary target). A slot only ever accepts its own category —
-   dropping a mismatched product shows a toast, not a silent no-op.
+   dropping a mismatched product shows a toast, not a silent no-op. On
+   `lg`+ screens the slot grid sits on the left and the product tray is a
+   sticky scrollable sidebar on the right, so dragging never means
+   scrolling up and down between the two; on phones/tablets it stacks
+   (tray below the slots) since there's no spare width to spend.
+3. Each product card's category-filtered tray can miss a product whose
+   Shopify `productType` wasn't recognized by `guessCategoryFromProductType`
+   (it imports with `category: null`, so it never matches a slot's exact
+   category) — or one that's just filed under a category staff wouldn't
+   expect. A **"Search all products"** checkbox appears once a slot is
+   selected, dropping the category filter entirely so every active/approved
+   product in the catalog is searchable and taggable to that slot; tap-to-add
+   doesn't enforce category anyway (only a *drag* onto the wrong slot gets
+   the mismatch toast), so this is a real escape hatch, not just a wider
+   search box.
 3. Set an **installation labor price** in its own field — labor isn't a
    catalog product, so `resolveBuilderCatalog()` folds it into the same
    slot-assignment model as a synthetic, non-persisted `CatalogItem`

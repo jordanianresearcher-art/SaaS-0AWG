@@ -1010,3 +1010,51 @@ Fixed in `supabase/functions/shopify-import-catalog/index.ts`:
 - Whether the smaller batch size actually clears Super Car Audio's real
   catalog without hitting the quota again is something only the user's
   next "Run import" click can confirm — not observable from this session.
+
+## Round 14 — Builder UI feedback after using it against a real catalog
+
+The user ran the fast builder against the now-imported real Super Car
+Audio catalog and gave three pieces of concrete UI feedback: some real
+products (e.g. a "RAM box") weren't findable in their expected slot
+category, the working area felt cramped, and they wanted the product tray
+positioned on the right to drag from. All three addressed:
+
+- **`src/components/ui.tsx`**: `Modal` gained a `size?: 'default' | 'wide' | 'xl'`
+  prop (`xl` → `sm:max-w-6xl`), keeping the existing `wide` boolean prop
+  working unchanged for its one other caller (`EmailPreviewModal`).
+- **`src/pages/app/NewQuotePage.tsx`**: the builder now opens in that `xl`
+  modal instead of inline inside the narrow per-option card — the option
+  card's free-text product list is no longer conditionally hidden while
+  the builder is open (there's nothing to hide from now that the builder
+  floats above everything as a dialog), it's always there underneath.
+- **`src/components/PackageBuilder.tsx`**: restructured into a two-column
+  `lg:grid` layout — slot grid/labor/price/confirmation on the left, the
+  `ProductTray` as a `lg:sticky` right sidebar (stays in view while the
+  slot list scrolls). Below `lg`, it stays exactly as before — a single
+  stacked column, since phones/tablets (the primary target) don't have
+  spare width for a sidebar. `ProductTray`'s own grid also got an
+  `lg:grid-cols-2` override, since its previous `sm:`/`md:` column counts
+  assumed full-viewport-width placement and would've been far too dense
+  squeezed into a 22rem sidebar.
+- **`ProductTray`** gained a **"Search all products"** checkbox, shown
+  once a slot is selected, that drops the category filter entirely and
+  searches the shop's whole active/approved catalog instead. This is the
+  honest fix for miscategorized/unrecognized Shopify imports — rather than
+  trying to guess-expand `guessCategoryFromProductType`'s pattern table
+  for one specific unseen product name (which risks miscategorizing
+  something else), give staff a direct way to find and assign anything
+  regardless of its stored category. Tap-to-add already didn't enforce
+  category (only a *drag* onto a slot does), so this genuinely surfaces
+  items that were simply invisible before, not just widens a search box.
+
+### Verification (this round)
+- `npm run lint`, `npx tsc -b --noEmit`, `npm run test -- --run`
+  (193/193 — unchanged; this round is UI-only, no new pure-logic
+  functions), and `npm run build` all clean.
+- A Playwright smoke pass against `vite preview` (1440px viewport)
+  confirmed: the builder opens in a dialog (not inline), the dialog is
+  genuinely wide (~1152px, not the old ~768px cap), the product tray sits
+  to the right of the slot grid, the tray defaults to category-scoped,
+  and checking "Search all products" reveals a cross-category item (a
+  demo enclosure, while a subwoofer slot was selected) that was hidden
+  a moment before.

@@ -171,13 +171,17 @@ export function Modal({
   title,
   children,
   wide = false,
+  size,
 }: {
   open: boolean
   onClose: () => void
   title: string
   children: ReactNode
+  /** @deprecated use `size="wide"` instead — kept so existing callers don't need to change. */
   wide?: boolean
+  size?: 'default' | 'wide' | 'xl'
 }) {
+  const resolvedSize = size ?? (wide ? 'wide' : 'default')
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -200,7 +204,9 @@ export function Modal({
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
-        className={`max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl ${wide ? 'sm:max-w-3xl' : 'sm:max-w-lg'}`}
+        className={`max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl ${
+          resolvedSize === 'xl' ? 'sm:max-w-6xl' : resolvedSize === 'wide' ? 'sm:max-w-3xl' : 'sm:max-w-lg'
+        }`}
       >
         <div className="mb-4 flex items-center justify-between gap-4">
           <h2 className="text-xl font-bold text-ink">{title}</h2>

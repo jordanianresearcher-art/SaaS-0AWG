@@ -839,21 +839,21 @@ function OptionEditor({
           <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
             <p className="text-base font-semibold text-ink">Products</p>
             {catalogItems.length > 0 ? (
-              <Button variant="ghost" onClick={() => setBuilderOpen((open) => !open)}>
-                <LayoutGrid className="h-5 w-5" aria-hidden="true" /> {builderOpen ? 'Switch to manual entry' : 'Build with drag & drop'}
+              <Button variant="ghost" onClick={() => setBuilderOpen(true)}>
+                <LayoutGrid className="h-5 w-5" aria-hidden="true" /> Build with drag & drop
               </Button>
             ) : null}
           </div>
 
-          {builderOpen ? (
-            <div className="space-y-3 rounded-xl border border-blue-200 bg-blue-50/40 p-3">
+          <Modal open={builderOpen} onClose={() => setBuilderOpen(false)} title="Build with drag & drop" size="xl">
+            <div className="space-y-3">
               <PackageBuilder catalogItems={catalogItems} value={builderValue} onChange={setBuilderValue} />
               {builderConfig && !builderComplete ? (
                 <p className="text-sm font-medium text-amber-700">
-                  Some required slots aren&apos;t filled yet — you can still apply and finish it in the product list below.
+                  Some required slots aren&apos;t filled yet — you can still apply and finish it in the product list.
                 </p>
               ) : null}
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 border-t border-zinc-100 pt-3">
                 <Button type="button" onClick={applyBuilder} disabled={!canApplyBuilder}>
                   Apply to this option
                 </Button>
@@ -862,7 +862,7 @@ function OptionEditor({
                 </Button>
               </div>
               {builderConfig ? (
-                <div className="flex flex-wrap items-end gap-2 border-t border-blue-100 pt-3">
+                <div className="flex flex-wrap items-end gap-2 border-t border-zinc-100 pt-3">
                   <Field
                     label="Save this build as a reusable package"
                     htmlFor={`opt-${index}-pkg-name`}
@@ -886,24 +886,25 @@ function OptionEditor({
                 </div>
               ) : null}
             </div>
-          ) : (
-            <>
-              <datalist id={brandListId}>
-                {itemHistory.brands.map((b) => (
-                  <option key={b} value={b} />
-                ))}
-              </datalist>
-              <datalist id={modelListId}>
-                {itemHistory.models.map((m) => (
-                  <option key={m} value={m} />
-                ))}
-              </datalist>
-              <datalist id={nameListId}>
-                {itemHistory.names.map((n) => (
-                  <option key={n} value={n} />
-                ))}
-              </datalist>
-              <div className="space-y-2">
+          </Modal>
+
+          <>
+            <datalist id={brandListId}>
+              {itemHistory.brands.map((b) => (
+                <option key={b} value={b} />
+              ))}
+            </datalist>
+            <datalist id={modelListId}>
+              {itemHistory.models.map((m) => (
+                <option key={m} value={m} />
+              ))}
+            </datalist>
+            <datalist id={nameListId}>
+              {itemHistory.names.map((n) => (
+                <option key={n} value={n} />
+              ))}
+            </datalist>
+            <div className="space-y-2">
                 {itemFields.map((item, j) => (
                   <div key={item.id} className="grid grid-cols-[1fr_1fr_auto] gap-2 sm:grid-cols-[1fr_1fr_2fr_4.5rem_auto]">
                     <Input
@@ -960,7 +961,6 @@ function OptionEditor({
                 ) : null}
               </div>
             </>
-          )}
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">

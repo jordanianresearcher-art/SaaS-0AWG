@@ -162,91 +162,99 @@ export default function PackageBuilder({ catalogItems, value, onChange }: Packag
         <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
           <p className="text-sm text-zinc-600">{config.description}</p>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            {nonLaborSlots.map((slot) => {
-              const result = slotResults?.slots.find((s) => s.slot.key === slot.key)
-              return (
-                <SlotCard
-                  key={slot.key}
-                  slot={slot}
-                  status={result?.status ?? 'missing'}
-                  assignments={value.assignments[slot.key] ?? []}
-                  catalogItems={catalogItems}
-                  selected={selectedSlotKey === slot.key}
-                  onSelect={() => setSelectedSlotKey(slot.key)}
-                  onQuantityChange={(catalogItemId, quantity) =>
-                    onChange({ ...value, assignments: setSlotQuantity(value.assignments, slot.key, catalogItemId, quantity) })
+          <div className="mt-3 lg:grid lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start lg:gap-6">
+            <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                {nonLaborSlots.map((slot) => {
+                  const result = slotResults?.slots.find((s) => s.slot.key === slot.key)
+                  return (
+                    <SlotCard
+                      key={slot.key}
+                      slot={slot}
+                      status={result?.status ?? 'missing'}
+                      assignments={value.assignments[slot.key] ?? []}
+                      catalogItems={catalogItems}
+                      selected={selectedSlotKey === slot.key}
+                      onSelect={() => setSelectedSlotKey(slot.key)}
+                      onQuantityChange={(catalogItemId, quantity) =>
+                        onChange({ ...value, assignments: setSlotQuantity(value.assignments, slot.key, catalogItemId, quantity) })
+                      }
+                      onRemove={(catalogItemId) =>
+                        onChange({ ...value, assignments: removeFromSlot(value.assignments, slot.key, catalogItemId) })
+                      }
+                    />
+                  )
+                })}
+              </div>
+
+              <div className="rounded-xl bg-zinc-50 p-3">
+                <Field
+                  label="Installation labor price"
+                  htmlFor="builder-labor-price"
+                  hint="Priced separately from the parts above — not a catalog product."
+                >
+                  <Input
+                    id="builder-labor-price"
+                    inputMode="decimal"
+                    placeholder="$150"
+                    value={value.laborPrice}
+                    onChange={(e) => onChange({ ...value, laborPrice: e.target.value })}
+                  />
+                </Field>
+              </div>
+
+              <div className="space-y-2 rounded-xl border border-zinc-200 p-3">
+                <p className="text-sm text-zinc-600">Parts + labor subtotal: {formatCurrency(subtotalCents)}</p>
+                <Field
+                  label="Installed price to quote"
+                  htmlFor="builder-price-override"
+                  hint="Defaults to the subtotal above — override for package pricing."
+                >
+                  <Input
+                    id="builder-price-override"
+                    inputMode="decimal"
+                    placeholder={(subtotalCents / 100).toFixed(2)}
+                    value={value.priceOverride}
+                    onChange={(e) => onChange({ ...value, priceOverride: e.target.value })}
+                  />
+                </Field>
+                <p className="text-right text-base font-bold text-ink">Total: {formatCurrency(finalPriceCents)}</p>
+              </div>
+
+              {requiresCompatibilityConfirmation() ? (
+                <label className="flex items-start gap-2.5 rounded-xl bg-amber-50 p-3 text-sm text-ink">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-5 w-5 accent-[#1d4ed8]"
+                    checked={value.confirmed}
+                    onChange={(e) => onChange({ ...value, confirmed: e.target.checked })}
+                  />
+                  <span>
+                    <strong>Compatibility not verified.</strong> Nothing here checks that these parts actually work together —
+                    confirm you&apos;ve checked that yourself before using this in a quote.
+                  </span>
+                </label>
+              ) : null}
+            </div>
+
+            {/* Product tray sits on the right on wide screens (drag leftward onto a slot) and
+               stays put while the slot list scrolls; on phones/tablets it just follows below. */}
+            <div className="mt-4 lg:sticky lg:top-0 lg:mt-0 lg:max-h-[75vh] lg:overflow-y-auto lg:pl-1">
+              <ProductTray
+                catalogItems={catalogItems}
+                selectedSlot={selectedSlot}
+                search={search}
+                onSearchChange={setSearch}
+                onTapAdd={(catalogItemId) => {
+                  if (!selectedSlotKey) {
+                    toast('error', 'Tap a slot above first, then tap a product to add it there.')
+                    return
                   }
-                  onRemove={(catalogItemId) =>
-                    onChange({ ...value, assignments: removeFromSlot(value.assignments, slot.key, catalogItemId) })
-                  }
-                />
-              )
-            })}
-          </div>
-
-          <ProductTray
-            catalogItems={catalogItems}
-            selectedSlot={selectedSlot}
-            search={search}
-            onSearchChange={setSearch}
-            onTapAdd={(catalogItemId) => {
-              if (!selectedSlotKey) {
-                toast('error', 'Tap a slot above first, then tap a product to add it there.')
-                return
-              }
-              onChange({ ...value, assignments: addToSlot(value.assignments, selectedSlotKey, catalogItemId) })
-            }}
-          />
-
-          <div className="rounded-xl bg-zinc-50 p-3">
-            <Field
-              label="Installation labor price"
-              htmlFor="builder-labor-price"
-              hint="Priced separately from the parts above — not a catalog product."
-            >
-              <Input
-                id="builder-labor-price"
-                inputMode="decimal"
-                placeholder="$150"
-                value={value.laborPrice}
-                onChange={(e) => onChange({ ...value, laborPrice: e.target.value })}
+                  onChange({ ...value, assignments: addToSlot(value.assignments, selectedSlotKey, catalogItemId) })
+                }}
               />
-            </Field>
+            </div>
           </div>
-
-          <div className="space-y-2 rounded-xl border border-zinc-200 p-3">
-            <p className="text-sm text-zinc-600">Parts + labor subtotal: {formatCurrency(subtotalCents)}</p>
-            <Field
-              label="Installed price to quote"
-              htmlFor="builder-price-override"
-              hint="Defaults to the subtotal above — override for package pricing."
-            >
-              <Input
-                id="builder-price-override"
-                inputMode="decimal"
-                placeholder={(subtotalCents / 100).toFixed(2)}
-                value={value.priceOverride}
-                onChange={(e) => onChange({ ...value, priceOverride: e.target.value })}
-              />
-            </Field>
-            <p className="text-right text-base font-bold text-ink">Total: {formatCurrency(finalPriceCents)}</p>
-          </div>
-
-          {requiresCompatibilityConfirmation() ? (
-            <label className="flex items-start gap-2.5 rounded-xl bg-amber-50 p-3 text-sm text-ink">
-              <input
-                type="checkbox"
-                className="mt-0.5 h-5 w-5 accent-[#1d4ed8]"
-                checked={value.confirmed}
-                onChange={(e) => onChange({ ...value, confirmed: e.target.checked })}
-              />
-              <span>
-                <strong>Compatibility not verified.</strong> Nothing here checks that these parts actually work together —
-                confirm you&apos;ve checked that yourself before using this in a quote.
-              </span>
-            </label>
-          ) : null}
         </DndContext>
       ) : null}
     </div>
@@ -368,8 +376,10 @@ function ProductTray({
   onSearchChange: (v: string) => void
   onTapAdd: (catalogItemId: string) => void
 }) {
-  const base = selectedSlot
-    ? catalogItemsForSlot(catalogItems, selectedSlot)
+  const [searchAll, setSearchAll] = useState(false)
+  const scoped = Boolean(selectedSlot) && !searchAll
+  const base = scoped
+    ? catalogItemsForSlot(catalogItems, selectedSlot!)
     : catalogItems.filter((i) => i.active && i.approvalStatus === 'approved')
   const q = search.trim().toLowerCase()
   const filtered = q
@@ -382,18 +392,30 @@ function ProductTray({
         <Search className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden="true" />
         <input
           type="search"
-          placeholder={selectedSlot ? `Search ${PRODUCT_CATEGORY_INFO[selectedSlot.category].label.toLowerCase()}…` : 'Search all products…'}
+          placeholder={scoped ? `Search ${PRODUCT_CATEGORY_INFO[selectedSlot!.category].label.toLowerCase()}…` : 'Search all products…'}
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
           className="min-h-11 flex-1 bg-transparent text-sm outline-none"
         />
       </div>
+      {selectedSlot ? (
+        <label className="mb-2 flex items-center gap-2 text-sm text-zinc-600">
+          <input
+            type="checkbox"
+            checked={searchAll}
+            onChange={(e) => setSearchAll(e.target.checked)}
+            className="h-4 w-4 accent-[#1d4ed8]"
+          />
+          Search all products
+          <span className="text-zinc-400">— not just {PRODUCT_CATEGORY_INFO[selectedSlot.category].label.toLowerCase()}</span>
+        </label>
+      ) : null}
       {filtered.length === 0 ? (
         <p className="text-sm text-zinc-500">
-          {selectedSlot ? `No ${PRODUCT_CATEGORY_INFO[selectedSlot.category].label.toLowerCase()} in your catalog yet.` : 'No products found.'}
+          {scoped ? `No ${PRODUCT_CATEGORY_INFO[selectedSlot!.category].label.toLowerCase()} in your catalog yet.` : 'No products found.'}
         </p>
       ) : (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-2">
           {filtered.map((item) => (
             <ProductTrayCard key={item.id} item={item} onTapAdd={() => onTapAdd(item.id)} />
           ))}
