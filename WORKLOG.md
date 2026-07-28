@@ -972,3 +972,41 @@ built the real thing:
   Audio catalog succeeds is not something this session can observe
   directly — the button, its error-message surfacing, and its
   hidden-in-demo-mode behavior are what got verified here.
+
+## Round 13 — Real import ran; fixed a compute-quota failure partway through
+
+The user got the Shopify auth 401 sorted themselves (with a local Claude
+Code instance debugging the actual token/domain directly, since this
+remote session has no access to their terminal) and successfully ran the
+import against the real Super Car Audio store — real Nemesis Audio
+products (NA-6.9HCX, NA-2.75, NA-6.5HCX, etc.) landed in the Product
+Catalog with real prices. Partway through, the function failed with
+"not having enough compute resources."
+
+Root cause: each variant costs 2-3 sequential Postgres round trips
+(existence check, then an insert-with-a-fresh-COUNT-query or an update)
+on top of the Shopify GraphQL call itself — and the function was sized to
+do up to 500 products (50/page x 10 pages) in one invocation, comfortably
+enough sequential I/O to blow past Supabase's per-invocation Edge
+Function compute budget on a real catalog.
+
+Fixed in `supabase/functions/shopify-import-catalog/index.ts`:
+- `DEFAULT_PRODUCTS_PER_PAGE` 50 → 15, `MAX_PAGES_PER_RUN` 10 → 1 — one
+  invocation now does far less work; the "Run import" button already
+  loops on `hasMore` automatically, so this just means more (automatic)
+  calls, not a worse import.
+- Removed the per-created-row COUNT query used only to assign `position`
+  — it's now counted once up front and incremented locally, cutting a
+  third round trip off exactly the case (a fresh import, everything a
+  `create`) that had just failed.
+- Re-verified the function type-checks cleanly in isolation (same
+  stubbed-`Deno`-global approach as Phase 2, no Deno runtime available in
+  this session) since there's still no way to execute it directly here.
+
+### Verification (this round)
+- `npm run lint`, `npx tsc -b --noEmit`, `npm run test -- --run`
+  (193/193 — unchanged, this round only touches the Edge Function, which
+  has no local test runner), and `npm run build` all clean.
+- Whether the smaller batch size actually clears Super Car Audio's real
+  catalog without hitting the quota again is something only the user's
+  next "Run import" click can confirm — not observable from this session.

@@ -21,8 +21,16 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const API_VERSION = '2025-01'
 const VARIANTS_PER_PRODUCT = 50
-const DEFAULT_PRODUCTS_PER_PAGE = 50
-const MAX_PAGES_PER_RUN = 10 // caps one invocation's work; caller resumes with the returned cursor
+// Each variant costs 2-3 sequential Postgres round trips (existence check, then an
+// insert-with-count or an update) on top of the Shopify GraphQL call itself. A real
+// run against Super Car Audio's live catalog hit Supabase's Edge Function compute
+// quota at the previous, much larger values (50 products/page x 10 pages/invocation)
+// — these are deliberately small so one invocation always finishes comfortably
+// within budget; the caller (SettingsPage's "Run import" button) already loops on
+// `hasMore` until the whole catalog is processed, so a smaller per-call batch just
+// means more (automatic) round trips, not a worse import.
+const DEFAULT_PRODUCTS_PER_PAGE = 15
+const MAX_PAGES_PER_RUN = 1 // caps one invocation's work; caller resumes with the returned cursor
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -253,6 +261,15 @@ Deno.serve(async (req) => {
   let hasMore = true
   let pagesProcessed = 0
 
+  // Counted once up front rather than re-queried for every created row — on a fresh
+  // import (every item a 'create') that was tripling round trips per item right when
+  // the invocation is most likely to run into its compute budget.
+  const { count: startingCount } = await admin
+    .from('catalog_items')
+    .select('id', { count: 'exact', head: true })
+    .eq('shop_id', shopId)
+  let nextPosition = startingCount ?? 0
+
   try {
     while (hasMore && pagesProcessed < MAX_PAGES_PER_RUN) {
       const data = await shopifyGraphQL<{
@@ -273,11 +290,7 @@ Deno.serve(async (req) => {
 
             const plan = planSync(existing, mapped, overwriteLocalPrices)
             if (plan.action === 'create') {
-              const { count } = await admin
-                .from('catalog_items')
-                .select('id', { count: 'exact', head: true })
-                .eq('shop_id', shopId)
-              const { error } = await admin.from('catalog_items').insert({ shop_id: shopId, position: count ?? 0, ...plan.row })
+              const { error } = await admin.from('catalog_items').insert({ shop_id: shopId, position: nextPosition++, ...plan.row })
               if (error) throw error
               results.created += 1
             } else if (plan.action === 'update') {

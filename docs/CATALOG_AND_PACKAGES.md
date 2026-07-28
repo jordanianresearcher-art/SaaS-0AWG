@@ -184,10 +184,16 @@ inventory *into* Shopify. Owner/manager only.
   item's price/MSRP alone (still refreshing title/image/description/active
   if Shopify changed those) and reports it `skipped`, unless the caller
   explicitly passes `overwriteLocalPrices: true`.
-- **Pagination**: one invocation processes up to 10 pages (Shopify
+- **Pagination**: one invocation processes one page of 15 products (Shopify
   `products(first, after)` cursor pagination) and returns `hasMore` +
   `nextCursor` so a caller resumes rather than risking one giant call
-  timing out on a large catalog.
+  timing out on a large catalog. Kept deliberately small — each variant
+  costs 2-3 sequential Postgres round trips on top of the Shopify call
+  itself, and a real run against Super Car Audio's live catalog hit
+  Supabase's Edge Function compute quota at the original, much larger
+  values (50 products/page x 10 pages/invocation). The Settings → Shopify
+  catalog import button already loops on `hasMore` automatically, so a
+  smaller batch just means more (automatic) calls, not a worse import.
 - **Auth**: verifies a real signed-in user, then checks
   `shop_memberships.role` directly (`owner`/`manager`) rather than calling
   the `is_shop_admin()` RPC — that RPC reads `auth.uid()`, which is null
