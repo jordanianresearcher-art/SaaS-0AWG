@@ -10,7 +10,7 @@
 // reads PackageBuilderValue back out and applies it to the option's real
 // items/price/configId fields only when staff explicitly confirms.
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   DndContext,
   KeyboardSensor,
@@ -465,6 +465,11 @@ function ProductTray({
   onTapAdd: (catalogItemId: string) => void
 }) {
   const [searchAll, setSearchAll] = useState(false)
+  // A "search all" override on one slot shouldn't silently carry over once staff moves
+  // on to a different slot — that's surprising, not a time-saver.
+  useEffect(() => {
+    setSearchAll(false)
+  }, [selectedSlot?.key])
   const scoped = Boolean(selectedSlot) && !searchAll
   const base = scoped
     ? catalogItemsForSlot(catalogItems, selectedSlot!)

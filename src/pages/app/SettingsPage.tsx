@@ -2,13 +2,15 @@ import { useCallback, useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Download, Package, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
+import { Download, LayoutGrid, Package, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
 import { Button, Card, EmptyState, Field, Input, LoadingBlock, Modal, Select, Textarea } from '../../components/ui'
+import CatalogOrganizer from '../../components/CatalogOrganizer'
 import { formatCurrency, parseDollarsToCents } from '../../lib/format'
 import { PAYMENT_METHOD_INFO } from '../../lib/paymentMethods'
-import type { CatalogItem, PaymentMethod } from '../../types'
+import { PRODUCT_CATEGORIES, PRODUCT_CATEGORY_INFO } from '../../lib/audioConfigs'
+import type { CatalogItem, PaymentMethod, ProductCategory } from '../../types'
 import type { NewCatalogItemInput, ShopifyImportResult } from '../../data/repository'
 
 const PAYMENT_METHODS = Object.keys(PAYMENT_METHOD_INFO) as PaymentMethod[]
@@ -313,6 +315,8 @@ const catalogSchema = z.object({
   model: z.string(),
   name: z.string().min(1, 'Give this product a name'),
   price: z.string().refine((v) => v === '' || parseDollarsToCents(v) !== null, 'Enter a valid dollar amount'),
+  // Blank means "uncategorized" — a real ProductCategory value is the only other option.
+  category: z.string(),
 })
 type CatalogFormValues = z.infer<typeof catalogSchema>
 
@@ -322,6 +326,7 @@ function toCatalogInput(values: CatalogFormValues): NewCatalogItemInput {
     model: values.model.trim() || null,
     name: values.name.trim(),
     defaultPriceCents: values.price.trim() ? parseDollarsToCents(values.price) : null,
+    category: (values.category || null) as ProductCategory | null,
   }
 }
 
@@ -330,6 +335,7 @@ function CatalogSection({ reloadSignal }: { reloadSignal: number }) {
   const toast = useToast()
   const [items, setItems] = useState<CatalogItem[] | null>(null)
   const [editing, setEditing] = useState<CatalogItem | 'new' | null>(null)
+  const [organizing, setOrganizing] = useState(false)
 
   const load = useCallback(async () => {
     setItems(await repo.listCatalogItems())
@@ -339,6 +345,19 @@ function CatalogSection({ reloadSignal }: { reloadSignal: number }) {
     void load()
     // reloadSignal: re-fetch after a Shopify import completes elsewhere on this page.
   }, [load, reloadSignal])
+
+  const setItemCategory = async (itemId: string, category: ProductCategory | null) => {
+    const item = items?.find((i) => i.id === itemId)
+    if (!item) return
+    await repo.updateCatalogItem(itemId, {
+      brand: item.brand,
+      model: item.model,
+      name: item.name,
+      defaultPriceCents: item.defaultPriceCents,
+      category,
+    })
+    setItems((prev) => (prev ? prev.map((i) => (i.id === itemId ? { ...i, category } : i)) : prev))
+  }
 
   const {
     register,
@@ -351,12 +370,13 @@ function CatalogSection({ reloadSignal }: { reloadSignal: number }) {
     setEditing(item)
     reset(
       item === 'new'
-        ? { brand: '', model: '', name: '', price: '' }
+        ? { brand: '', model: '', name: '', price: '', category: '' }
         : {
             brand: item.brand ?? '',
             model: item.model ?? '',
             name: item.name,
             price: item.defaultPriceCents !== null ? (item.defaultPriceCents / 100).toString() : '',
+            category: item.category ?? '',
           },
     )
   }
@@ -396,9 +416,16 @@ function CatalogSection({ reloadSignal }: { reloadSignal: number }) {
             Save products you sell often so you can add them to a quote with one tap instead of retyping them.
           </p>
         </div>
-        <Button onClick={() => openEdit('new')}>
-          <Plus className="h-5 w-5" aria-hidden="true" /> Add
-        </Button>
+        <div className="flex shrink-0 gap-2">
+          {items && items.length > 0 ? (
+            <Button variant="secondary" onClick={() => setOrganizing(true)}>
+              <LayoutGrid className="h-5 w-5" aria-hidden="true" /> Organize by category
+            </Button>
+          ) : null}
+          <Button onClick={() => openEdit('new')}>
+            <Plus className="h-5 w-5" aria-hidden="true" /> Add
+          </Button>
+        </div>
       </div>
 
       {items === null ? (
@@ -422,9 +449,16 @@ function CatalogSection({ reloadSignal }: { reloadSignal: number }) {
                     {item.brand || item.model ? ' — ' : ''}
                     {item.name}
                   </p>
-                  {item.defaultPriceCents !== null ? (
-                    <p className="text-sm text-zinc-500">{formatCurrency(item.defaultPriceCents)}</p>
-                  ) : null}
+                  <p className="flex items-center gap-1.5 text-sm text-zinc-500">
+                    {item.defaultPriceCents !== null ? formatCurrency(item.defaultPriceCents) : null}
+                    {item.category ? (
+                      <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600">
+                        {PRODUCT_CATEGORY_INFO[item.category].label}
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">Uncategorized</span>
+                    )}
+                  </p>
                 </div>
               </div>
               <div className="flex shrink-0 gap-1">
@@ -471,10 +505,28 @@ function CatalogSection({ reloadSignal }: { reloadSignal: number }) {
           >
             <Input id="cat-price" inputMode="decimal" {...register('price')} placeholder="$249" />
           </Field>
+          <Field
+            label="Category"
+            htmlFor="cat-category"
+            hint="Lets this product fill a slot in the drag-and-drop package builder."
+          >
+            <Select id="cat-category" {...register('category')}>
+              <option value="">Uncategorized</option>
+              {PRODUCT_CATEGORIES.map((c) => (
+                <option key={c} value={c}>
+                  {PRODUCT_CATEGORY_INFO[c].label}
+                </option>
+              ))}
+            </Select>
+          </Field>
           <Button type="submit" disabled={isSubmitting} className="w-full">
             {isSubmitting ? 'Saving…' : 'Save product'}
           </Button>
         </form>
+      </Modal>
+
+      <Modal open={organizing} onClose={() => setOrganizing(false)} title="Organize by category" size="xl">
+        {items ? <CatalogOrganizer items={items} onSetCategory={setItemCategory} /> : null}
       </Modal>
     </Card>
   )

@@ -1113,3 +1113,52 @@ less text/more icons, and self-explanatory buttons.
   option with *only* a custom item (no slots touched at all) still works
   end to end, and the custom item's name lands correctly in the manual
   product list afterward.
+
+## Round 16 — In-app categorization tools (automatic + manual drag-and-drop)
+
+The Codex categorization pass didn't fully resolve the user's findability
+problem, and rather than keep iterating on Shopify-side fixes alone, the
+user asked for the app itself to be able to fix this — both automatically
+and by hand. Also a small but clear UX fix: the "search all products"
+override was staying checked across slot changes, contrary to what the
+user wanted.
+
+- **`src/lib/categorize.ts`** (new): `guessCategoryFromName(name,
+  description)` — a regex hint table matching against a product's own
+  name/description text rather than Shopify's `productType` field, so it
+  works for *any* catalog item regardless of source (manually-entered
+  products included, which Shopify's importer never touches). Pattern
+  order matters here — enclosure checked before subwoofer ("Sub Box"
+  would otherwise match `\bsub\b` first), wiring_kit before mono/multi
+  amp ("Amp Wiring Kit" would otherwise match `amp(lifier)?` first). 4 tests.
+- **`src/pages/app/SettingsPage.tsx`**: the catalog item add/edit modal
+  gained a **Category** dropdown (previously category had no manual-entry
+  UI at all), and each catalog list row now shows its category or an
+  "Uncategorized" badge.
+- **`src/components/CatalogOrganizer.tsx`** (new): a bulk categorization
+  tool opened from Settings → Product Catalog → "Organize by category" (a
+  new `Modal size="xl"`). Drag a product card onto a category, or tap a
+  card then tap a category — mirrors the package builder's product-tray
+  interaction model, reusing the same `@dnd-kit` setup. Every category
+  accepts every product here (unlike a config slot, there's no "wrong"
+  category — the whole point is setting one). An **"Auto-categorize"**
+  button runs `guessCategoryFromName()` against everything currently
+  uncategorized and reports a count of what it placed versus what still
+  needs a manual look, rather than forcing a low-confidence guess.
+- **`src/components/PackageBuilder.tsx`**: `ProductTray`'s "Search all
+  products" checkbox now resets to unchecked whenever `selectedSlot`
+  changes (a `useEffect` keyed on `selectedSlot?.key`) — an override on
+  one slot no longer silently carries over to the next slot clicked.
+
+### Verification (this round)
+- `npm run lint`, `npx tsc -b --noEmit`, `npm run test -- --run`
+  (202/202 across 16 files — 4 new in `categorize.test.ts`), and `npm run
+  build` all clean.
+- A Playwright smoke pass confirmed: the category dropdown is present in
+  the edit modal, the organizer opens as a dialog, tap-select-then-tap-
+  assign correctly moves an item out of the "uncategorized only" filtered
+  view, and "Auto-categorize" runs and reports a summary toast (in the
+  demo catalog, it correctly picked up the one remaining uncategorized
+  bundle product via its name's "amp" mention — landing it in
+  `multi_amp`, a reasonable if imperfect guess for a sub+amp bundle,
+  exactly the kind of case staff can still correct by hand afterward).

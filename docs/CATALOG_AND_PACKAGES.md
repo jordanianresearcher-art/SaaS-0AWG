@@ -257,11 +257,30 @@ inventory *into* Shopify. Owner/manager only.
 
 - **Settings → Shopify catalog import**: the "Run import" button described
   above (production mode only).
-- **Settings → Product Catalog**: manual add/edit form is unchanged —
-  brand/model/name/price only. The richer fields (category, MSRP, images,
-  etc.) exist in the schema and repository layer and do get populated by
-  the Shopify import; there's just no *manual*-entry UI for them yet
-  (deliberately — see IMPLEMENTATION_STATUS).
+- **Settings → Product Catalog**: the add/edit form now includes a
+  **Category** dropdown (the 21-value `ProductCategory` taxonomy — same
+  list the builder's slots use), and each row shows its current category
+  (or an "Uncategorized" badge) at a glance. The richer fields beyond
+  category (MSRP, images, specs, etc.) still have no manual-entry UI
+  (deliberately — see IMPLEMENTATION_STATUS); category was worth breaking
+  that pattern for since it's the one field that directly gates whether a
+  product is even findable in the drag-and-drop builder.
+- **Settings → Product Catalog → "Organize by category"**
+  (`src/components/CatalogOrganizer.tsx`): a bulk categorization tool for
+  when Shopify's own `productType`/tags don't map cleanly (or a product
+  was added manually and never had a source to guess from). Two ways to
+  work: drag a product card onto a category, or tap a card then tap a
+  category — the same dual interaction model as the package builder's
+  product tray, via the same `@dnd-kit` setup. A category accepts any
+  product (there's no "wrong category" here — the whole point is setting
+  it), unlike a config slot's strict category match. An **"Auto-categorize"**
+  button runs `guessCategoryFromName()` (`src/lib/categorize.ts` — a
+  broader regex hint table than the Shopify importer's, since it matches
+  against a product's own name/description text rather than a structured
+  `productType` field, so it also works for manually-entered products)
+  against everything currently uncategorized and reports how many it
+  could confidently place versus how many still need a manual look —
+  never forces a guess it isn't reasonably sure of.
 - **New Quote → each pricing option**: the "Build with drag & drop" toggle
   and "Save as package" button described above.
 - **Nowhere yet**: package templates have no *listing/approval* screen —
