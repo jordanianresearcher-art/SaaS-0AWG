@@ -1203,3 +1203,77 @@ real product names already visible earlier in this conversation.
   subwoofer slot, found via "Search all products") succeeds silently with
   no rejection toast and the item actually lands in the slot, and the
   empty-tray state shows the new pointer toward extra/custom items.
+
+## Round 18 — Voice/speaker and complete-system shells, wiring-kit variants
+
+The user described their real domain model in full (bass system: enclosure,
+subs, mono amp, LOC, bass restoration; voice system: door speakers,
+tweeters, 4/5-channel amps; factory retention: T-harnesses / integration
+modules; optional head unit and DSP; four wiring-kit variants — 0-gauge and
+4-gauge, each in CCA and OFC) and asked for a "code building system that can
+work on any car or any truck" they can resell to other shops. The
+`ConfigShell`/`SHELL_INFO` architecture from Phase 1 already anticipated
+this (`door_speakers` and `full_system` were declared but inert, `active:
+false`, zero configs) — this round populates them rather than inventing a
+new mechanism.
+
+- **`src/lib/audioConfigs.ts`**: `AudioConfiguration.subCount`/
+  `subSizeInches` made optional (voice-only builds don't size by sub
+  count). Added `speakerSlots()`/`speakerConfig()` and four
+  `DOOR_SPEAKER_CONFIGS` (2-way/3-way × front-only/front+rear, offered for
+  every vehicle type, unlike bass sizing) — door speaker required (min
+  qty doubles for front+rear), tweeter required only on 3-way, multi-amp/
+  wiring/integration-module recommended, DSP/head-unit optional. Added
+  `fullSystemSlots()`/`fullSystemConfig()` and two `FULL_SYSTEM_CONFIGS`
+  (`full_system_truck`: 2×8", `full_system_car`: 1×10") — a
+  purpose-built combined slot list (not a naive concatenation of the bass
+  and voice slot lists, which would have produced duplicate slot keys),
+  required on both the bass side (subwoofer/enclosure/mono_amp) and the
+  voice side (door_speaker) before `validatePackageSlots` reports
+  complete. `SHELL_INFO.door_speakers`/`full_system` flipped to
+  `active: true` with real labels ("Voice / speakers", "Complete
+  systems").
+- **`src/components/PackageBuilder.tsx`**: inserted a "Build type" shell
+  picker between the vehicle-type and configuration pickers (only shown
+  once a vehicle type is picked; only lists shells that actually have
+  configs for that vehicle type) — otherwise adding two more shells would
+  have doubled+ the number of undifferentiated configuration buttons
+  shown at once. Choosing a shell resets any in-progress `configId` and
+  selected slot.
+- **Wiring-kit gauge/material variants**: rather than fragmenting
+  `ProductCategory` into one entry per gauge/material combo, added a
+  documented convention on the existing schemaless `specs` JSONB —
+  `specs.gaugeAwg` (number) / `specs.wireMaterial` ('cca' | 'ofc'). New
+  `formatWiringKitSpec()` in `src/lib/format.ts` renders this as a compact
+  "0GA · OFC" badge, wired into both `SlotCard`'s assigned-item row and
+  `ProductTrayCard` in `PackageBuilder.tsx` so staff can tell the variants
+  apart at a glance when several wiring-kit products are on screen
+  together.
+- **Demo catalog**: added 3 more wiring-kit variants alongside the
+  existing 4-gauge CCA kit (4-gauge OFC, 0-gauge CCA, 0-gauge OFC, each
+  with `specs` set), plus a tweeter, a factory-integration harness
+  (`integration_module`), and an 8-channel DSP — enough catalog depth to
+  actually complete a voice or full-system build in the demo.
+  `DEMO_SEED_VERSION` bumped 9 → 10.
+- **`docs/CATALOG_AND_PACKAGES.md`**: documented the newly active shells,
+  the shell-picker UI addition, and the wiring-kit specs convention.
+- Tests: `audioConfigs.test.ts` gained a `door_speakers shell` block (4
+  tests: config ids present, tweeter requirement 2-way vs 3-way, min-qty
+  doubling front+rear, never requires bass-side categories) and a
+  `full_system shell` block (3 tests: combined required-slot set with no
+  duplicate keys, complete only once both sides filled, one config per
+  broad vehicle group); existing tests that assumed every config was
+  bass-shaped were scoped to `.shell === 'bass'`. `format.test.ts` gained
+  4 tests for `formatWiringKitSpec`.
+
+### Verification (this round)
+- `npx tsc -b --noEmit`, `npm run lint`, `npm run test -- --run`
+  (215/215 across 16 files), and `npm run build` all clean.
+- A Playwright smoke pass against `vite preview` confirmed: the shell
+  picker appears after choosing a vehicle type and offers all three
+  active shells; picking "Voice / speakers" → "2-Way Front Speakers"
+  shows door-speaker + tweeter slots and no subwoofer slot; switching to
+  "Complete systems" → "Complete System — Truck" shows bass slots
+  (subwoofer) and voice slots (door speaker) together; the wiring-kit
+  badges ("4GA · CCA", "0GA · OFC") render both in the product tray and
+  next to an item once it's assigned to a slot.

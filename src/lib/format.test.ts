@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatCurrency, parseDollarsToCents, formatVehicle, quoteValueCents, customerDisplayName } from './format'
+import { formatCurrency, formatWiringKitSpec, parseDollarsToCents, formatVehicle, quoteValueCents, customerDisplayName } from './format'
 
 describe('formatCurrency', () => {
   it('formats whole dollars without cents', () => {
@@ -31,6 +31,24 @@ describe('parseDollarsToCents', () => {
   })
   it('rounds fractional cents', () => {
     expect(parseDollarsToCents('10.999')).toBe(1100)
+  })
+})
+
+describe('formatWiringKitSpec', () => {
+  it('combines gauge and material', () => {
+    expect(formatWiringKitSpec({ gaugeAwg: 4, wireMaterial: 'cca' })).toBe('4GA · CCA')
+    expect(formatWiringKitSpec({ gaugeAwg: 0, wireMaterial: 'ofc' })).toBe('0GA · OFC')
+  })
+
+  it('handles just one of the two fields being present', () => {
+    expect(formatWiringKitSpec({ gaugeAwg: 8 })).toBe('8GA')
+    expect(formatWiringKitSpec({ wireMaterial: 'cca' })).toBe('CCA')
+  })
+
+  it('returns null for null/empty specs or unrecognized values', () => {
+    expect(formatWiringKitSpec(null)).toBeNull()
+    expect(formatWiringKitSpec({})).toBeNull()
+    expect(formatWiringKitSpec({ wireMaterial: 'copper-clad' })).toBeNull()
   })
 })
 

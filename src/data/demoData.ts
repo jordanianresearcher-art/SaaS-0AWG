@@ -33,7 +33,7 @@ export interface DemoDB {
   seedVersion: number
 }
 
-export const DEMO_SEED_VERSION = 9
+export const DEMO_SEED_VERSION = 10
 
 const SHOP_ID = 'demo-shop'
 
@@ -634,7 +634,19 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
     }),
     demoCatalogItem({
       brand: 'Rockford Fosgate', model: 'RFK4X', name: '4-gauge amp wiring kit', category: 'wiring_kit',
-      defaultPriceCents: 5900,
+      defaultPriceCents: 5900, specs: { gaugeAwg: 4, wireMaterial: 'cca' },
+    }),
+    demoCatalogItem({
+      brand: 'Rockford Fosgate', model: 'RFK4X-OFC', name: '4-gauge OFC amp wiring kit', category: 'wiring_kit',
+      defaultPriceCents: 8900, specs: { gaugeAwg: 4, wireMaterial: 'ofc' },
+    }),
+    demoCatalogItem({
+      brand: 'Rockford Fosgate', model: 'RFK0X', name: '0-gauge amp wiring kit', category: 'wiring_kit',
+      defaultPriceCents: 9900, specs: { gaugeAwg: 0, wireMaterial: 'cca' },
+    }),
+    demoCatalogItem({
+      brand: 'Rockford Fosgate', model: 'RFK0X-OFC', name: '0-gauge OFC amp wiring kit', category: 'wiring_kit',
+      defaultPriceCents: 14900, specs: { gaugeAwg: 0, wireMaterial: 'ofc' },
     }),
     demoCatalogItem({
       brand: 'Kicker', model: 'KEY200.4', name: '4-channel smart amp', category: 'multi_amp',
@@ -647,6 +659,18 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
     demoCatalogItem({
       brand: 'Pioneer', model: 'TS-A652F', name: 'Front + rear speakers', category: 'door_speaker',
       defaultPriceCents: 12900,
+    }),
+    demoCatalogItem({
+      brand: 'Focal', model: 'TN-52', name: '1" silk dome tweeters', category: 'tweeter',
+      defaultPriceCents: 8900,
+    }),
+    demoCatalogItem({
+      brand: 'PAC', model: 'RP5-GM31', name: 'Factory radio integration harness', category: 'integration_module',
+      defaultPriceCents: 6900,
+    }),
+    demoCatalogItem({
+      brand: 'Audio Control', model: 'DM-608', name: '8-channel DSP with app control', category: 'dsp',
+      defaultPriceCents: 39900, msrpCents: 44900,
     }),
     demoCatalogItem({
       brand: 'Alpine', model: 'iLX-W670', name: 'CarPlay receiver', category: 'radio',

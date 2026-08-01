@@ -20,28 +20,50 @@ hard-codes a brand, model, or price — each shop fills the slots with
 products it actually carries.
 
 - `AUDIO_CONFIGURATIONS`: the seeded truck (2×8, 4×8, 2×10, 2×12) and
-  car/sedan/hatchback/SUV (1×8 through 2×15) bass shells. This is
-  intentionally **code, not a database table** — these are universal,
-  platform-level definitions, not something an individual shop edits (a
-  platform admin changing them is a code change + deploy, matching the
-  spec's "editable platform data or well-structured seed data").
+  car/sedan/hatchback/SUV (1×8 through 2×15) **bass** shells, the
+  **door_speakers** shells (2-way/3-way × front-only/front+rear, offered
+  for every vehicle type — voice builds don't size by vehicle body the way
+  bass builds do), and the **full_system** shells (one per broad vehicle
+  group: truck, car/sedan/hatchback/SUV) that combine a bass build and a
+  voice build into a single package. This is intentionally **code, not a
+  database table** — these are universal, platform-level definitions, not
+  something an individual shop edits (a platform admin changing them is a
+  code change + deploy, matching the spec's "editable platform data or
+  well-structured seed data").
 - `ConfigSlot` / `SlotRequirement`: each configuration lists required,
   recommended, and optional slots by `ProductCategory` (subwoofer,
   enclosure, mono_amp, wiring_kit, integration, bass_control, battery,
   epicenter, integration_module, sound_treatment, ofc_wiring, door_speaker,
-  labor, and more — see `types.ts`).
+  tweeter, dsp, radio, labor, and more — see `types.ts`).
 - `validatePackageSlots(config, items)`: pure function comparing a
   configuration's slots against a set of `{category, quantity}` items and
   reporting which required/recommended/optional slots are filled. This is
   the one place "is this package complete?" logic lives — not scattered
-  across UI components.
-- Only the `bass` shell is populated today. `door_speakers`, `full_system`,
-  `radio`, `camera`, `marine` are declared in `ConfigShell` / `SHELL_INFO`
+  across UI components. For `full_system`, "complete" requires **both**
+  the bass side (subwoofer, enclosure, mono_amp) and the voice side
+  (door_speaker) filled — the slot list is purpose-built per shell rather
+  than concatenating the bass and voice slot lists, so slot keys never
+  collide.
+- `bass`, `door_speakers`, and `full_system` are populated today. `radio`,
+  `camera`, `marine`, `tint` are declared in `ConfigShell` / `SHELL_INFO`
   with `active: false` so the architecture supports them without new code
   — adding a shell later means adding data to this file, not restructuring
   it. Window tint intentionally keeps its own dedicated system
   (`src/lib/windowTint.ts`) — it predates this work and has its own,
   more detailed per-window model.
+- The package builder UI (see below) inserts a **shell picker** ("Build
+  type": Bass / Voice-speakers / Complete systems) between the vehicle-type
+  and configuration pickers, so adding shells doesn't clutter the
+  configuration list with too many undifferentiated buttons per vehicle
+  type.
+- **Wiring-kit gauge/material variants**: a shop typically stocks 0-gauge
+  and 4-gauge kits in both CCA and OFC wire, but this doesn't get its own
+  `ProductCategory` — it's encoded as a convention on the schemaless
+  `specs` JSONB: `specs.gaugeAwg` (a number, e.g. `0` or `4`) and
+  `specs.wireMaterial` (`'cca' | 'ofc'`). `formatWiringKitSpec()` in
+  `src/lib/format.ts` renders this as a compact "0GA · OFC" badge next to
+  the product name/price wherever a `wiring_kit` item is shown in the
+  builder, so staff can tell the variants apart at a glance.
 
 ## Catalog products (`catalog_items` table, `CatalogItem` type)
 

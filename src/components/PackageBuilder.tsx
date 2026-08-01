@@ -24,11 +24,13 @@ import {
 import { CircleAlert, GripVertical, Info, Package, Plus, Search, Star, Trash2, TriangleAlert } from 'lucide-react'
 import {
   PRODUCT_CATEGORY_INFO,
+  SHELL_INFO,
   VEHICLE_TYPE_INFO,
   VEHICLE_TYPES,
   configurationsForVehicleType,
   getConfiguration,
   validatePackageSlots,
+  type ConfigShell,
   type ConfigSlot,
 } from '../lib/audioConfigs'
 import {
@@ -44,7 +46,7 @@ import {
   type SlotAssignment,
   type SlotAssignments,
 } from '../lib/packageBuilder'
-import { formatCurrency, parseDollarsToCents } from '../lib/format'
+import { formatCurrency, formatWiringKitSpec, parseDollarsToCents } from '../lib/format'
 import { useToast } from './Toast'
 import { Button, Field, Input } from './ui'
 import type { CatalogItem, VehicleType } from '../types'
@@ -90,6 +92,11 @@ export default function PackageBuilder({ catalogItems, value, onChange }: Packag
   const toast = useToast()
   const [selectedSlotKey, setSelectedSlotKey] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  // Which shell (Bass / Voice / Complete System) is being browsed — reopening a builder
+  // that already has a configuration picked starts on that config's own shell.
+  const [selectedShell, setSelectedShell] = useState<ConfigShell | null>(() =>
+    value.configId ? (getConfiguration(value.configId)?.shell ?? null) : null,
+  )
 
   // A search typed while looking at one slot shouldn't linger (and silently keep
   // filtering) once staff has moved on to a different slot.
@@ -146,6 +153,7 @@ export default function PackageBuilder({ catalogItems, value, onChange }: Packag
               aria-pressed={value.vehicleType === vt}
               onClick={() => {
                 setSelectedSlotKey(null)
+                if (value.vehicleType !== vt) setSelectedShell(null)
                 onChange({ ...value, vehicleType: vt, configId: value.vehicleType === vt ? value.configId : null })
               }}
               className={`min-h-11 rounded-xl border-2 px-3.5 text-sm font-semibold transition-colors ${
@@ -160,24 +168,51 @@ export default function PackageBuilder({ catalogItems, value, onChange }: Packag
 
       {value.vehicleType ? (
         <div>
-          <p className="mb-1.5 text-sm font-semibold text-ink">Configuration</p>
+          <p className="mb-1.5 text-sm font-semibold text-ink">Build type</p>
           <div className="flex flex-wrap gap-2">
-            {configurationsForVehicleType(value.vehicleType).map((c) => (
+            {Array.from(new Set(configurationsForVehicleType(value.vehicleType).map((c) => c.shell))).map((shell) => (
               <button
-                key={c.id}
+                key={shell}
                 type="button"
-                aria-pressed={value.configId === c.id}
+                aria-pressed={selectedShell === shell}
                 onClick={() => {
                   setSelectedSlotKey(null)
-                  onChange({ ...value, configId: c.id })
+                  setSelectedShell(shell)
+                  onChange({ ...value, configId: null })
                 }}
                 className={`min-h-11 rounded-xl border-2 px-3.5 text-sm font-semibold transition-colors ${
-                  value.configId === c.id ? 'border-brand bg-blue-50 text-ink' : 'border-zinc-200 text-zinc-600 hover:border-zinc-300'
+                  selectedShell === shell ? 'border-brand bg-blue-50 text-ink' : 'border-zinc-200 text-zinc-600 hover:border-zinc-300'
                 }`}
               >
-                {c.label}
+                {SHELL_INFO[shell].label}
               </button>
             ))}
+          </div>
+        </div>
+      ) : null}
+
+      {value.vehicleType && selectedShell ? (
+        <div>
+          <p className="mb-1.5 text-sm font-semibold text-ink">Configuration</p>
+          <div className="flex flex-wrap gap-2">
+            {configurationsForVehicleType(value.vehicleType)
+              .filter((c) => c.shell === selectedShell)
+              .map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  aria-pressed={value.configId === c.id}
+                  onClick={() => {
+                    setSelectedSlotKey(null)
+                    onChange({ ...value, configId: c.id })
+                  }}
+                  className={`min-h-11 rounded-xl border-2 px-3.5 text-sm font-semibold transition-colors ${
+                    value.configId === c.id ? 'border-brand bg-blue-50 text-ink' : 'border-zinc-200 text-zinc-600 hover:border-zinc-300'
+                  }`}
+                >
+                  {c.label}
+                </button>
+              ))}
           </div>
         </div>
       ) : null}
@@ -424,7 +459,14 @@ function SlotCard({
             if (!item) return null
             return (
               <div key={a.catalogItemId} className="flex items-center gap-2 rounded-lg bg-white p-1.5 text-sm">
-                <span className="flex-1 truncate">{item.name}</span>
+                <span className="flex-1 truncate">
+                  {item.name}
+                  {formatWiringKitSpec(item.specs) ? (
+                    <span className="ml-1.5 shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-medium text-zinc-600">
+                      {formatWiringKitSpec(item.specs)}
+                    </span>
+                  ) : null}
+                </span>
                 <input
                   type="number"
                   min={1}
@@ -554,6 +596,11 @@ function ProductTrayCard({ item, onTapAdd }: { item: CatalogItem; onTapAdd: () =
         )}
       </div>
       <p className="line-clamp-2 text-xs font-semibold text-ink">{item.name}</p>
+      {formatWiringKitSpec(item.specs) ? (
+        <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium text-zinc-600">
+          {formatWiringKitSpec(item.specs)}
+        </span>
+      ) : null}
       <p className="text-xs text-zinc-500">{item.defaultPriceCents !== null ? formatCurrency(item.defaultPriceCents) : '—'}</p>
     </div>
   )

@@ -71,8 +71,8 @@ export const VEHICLE_TYPES = Object.keys(VEHICLE_TYPE_INFO) as VehicleType[]
  *  complete taxonomy. */
 export const SHELL_INFO: Record<ConfigShell, { label: string; active: boolean; hint: string }> = {
   bass: { label: 'Bass systems', active: true, hint: 'Subwoofers, enclosure, amp, wiring, labor' },
-  door_speakers: { label: 'Door speakers', active: false, hint: 'Component / coaxial speaker upgrades' },
-  full_system: { label: 'Full sound systems', active: false, hint: 'Front stage + bass + processing' },
+  door_speakers: { label: 'Voice / speakers', active: true, hint: 'Door speakers, tweeters, amp, DSP, integration' },
+  full_system: { label: 'Complete systems', active: true, hint: 'Bass + voice + processing in one build' },
   radio: { label: 'Radios', active: false, hint: 'Head units and integration' },
   camera: { label: 'Cameras', active: false, hint: 'Backup / dash cameras' },
   marine: { label: 'Marine / powersports', active: false, hint: 'Weatherproof audio' },
@@ -101,10 +101,10 @@ export interface AudioConfiguration {
   shell: ConfigShell
   label: string
   vehicleTypes: VehicleType[]
-  /** Number of subwoofers the label implies (e.g. 2 for "2×8"). */
-  subCount: number
-  /** Subwoofer size in inches the label implies (e.g. 8 for "2×8"). */
-  subSizeInches: number
+  /** Number of subwoofers the label implies (e.g. 2 for "2×8"). Bass-shell configs only. */
+  subCount?: number
+  /** Subwoofer size in inches the label implies (e.g. 8 for "2×8"). Bass-shell configs only. */
+  subSizeInches?: number
   slots: ConfigSlot[]
   /** Plain-language outcome for staff/customers, no jargon. */
   description: string
@@ -198,7 +198,194 @@ const CAR_BASS: AudioConfiguration[] = [
   bassConfig('car_2x15', 'Car 2×15', CAR_VEHICLE_TYPES, 2, 15),
 ]
 
-export const AUDIO_CONFIGURATIONS: AudioConfiguration[] = [...TRUCK_BASS, ...CAR_BASS]
+// ---------------------------------------------------------------------------
+// Door-speaker ("voice") shells — front stage upgrades, independent of bass.
+// Applies to every vehicle type equally, unlike bass sizing.
+// ---------------------------------------------------------------------------
+
+/** The shared voice-system slot ruleset. `includeTweeter` bumps tweeters from optional
+ *  to required (a 3-way front stage); `frontOnly` halves the door-speaker/tweeter counts. */
+function speakerSlots(includeTweeter: boolean, frontOnly: boolean): ConfigSlot[] {
+  const speakerCount = frontOnly ? 2 : 4
+  return [
+    {
+      key: 'door_speaker',
+      category: 'door_speaker',
+      label: `${speakerCount}× door / component speaker${speakerCount > 1 ? 's' : ''}`,
+      requirement: 'required',
+      minQuantity: speakerCount,
+    },
+    {
+      key: 'tweeter',
+      category: 'tweeter',
+      label: 'Tweeters',
+      requirement: includeTweeter ? 'required' : 'optional',
+      minQuantity: 2,
+      note: includeTweeter ? undefined : 'Add for a 3-way front stage.',
+    },
+    {
+      key: 'multi_amp',
+      category: 'multi_amp',
+      label: '4/5-channel amplifier',
+      requirement: 'recommended',
+      minQuantity: 1,
+      note: 'Powers the speakers — skip if running off the head unit.',
+    },
+    { key: 'wiring_kit', category: 'wiring_kit', label: 'Amp wiring kit', requirement: 'recommended', minQuantity: 1 },
+    {
+      key: 'integration_module',
+      category: 'integration_module',
+      label: 'Factory integration (T-harness / amp bypass)',
+      requirement: 'recommended',
+      minQuantity: 1,
+      note: 'Retains factory radio controls and wiring.',
+    },
+    { key: 'dsp', category: 'dsp', label: 'DSP', requirement: 'optional', minQuantity: 1, note: 'Time alignment and EQ tuning.' },
+    {
+      key: 'radio',
+      category: 'radio',
+      label: 'Head unit',
+      requirement: 'optional',
+      minQuantity: 1,
+      note: 'Only if replacing the factory radio.',
+    },
+    { key: 'labor', category: 'labor', label: 'Installation labor', requirement: 'required', minQuantity: 1 },
+  ]
+}
+
+function speakerConfig(id: string, label: string, includeTweeter: boolean, frontOnly: boolean): AudioConfiguration {
+  const stage = includeTweeter ? '3-way' : '2-way'
+  const coverage = frontOnly ? 'front speakers' : 'front and rear speakers'
+  return {
+    id,
+    shell: 'door_speakers',
+    label,
+    vehicleTypes: VEHICLE_TYPES,
+    slots: speakerSlots(includeTweeter, frontOnly),
+    description: `Upgrades the ${coverage} to a ${stage} setup for clearer mids and highs.`,
+  }
+}
+
+const DOOR_SPEAKER_CONFIGS: AudioConfiguration[] = [
+  speakerConfig('speakers_2way_front', '2-Way Front Speakers', false, true),
+  speakerConfig('speakers_2way_front_rear', '2-Way Front + Rear Speakers', false, false),
+  speakerConfig('speakers_3way_front', '3-Way Front Speakers', true, true),
+  speakerConfig('speakers_3way_front_rear', '3-Way Front + Rear Speakers', true, false),
+]
+
+// ---------------------------------------------------------------------------
+// Full-system shells — bass + voice + processing combined into one build.
+// A deliberately small starter set (one per broad vehicle group), not every
+// possible sub/speaker combination — staff can still add/swap components
+// freely once in the builder; this is a starting shape, not a hard limit.
+// ---------------------------------------------------------------------------
+
+function fullSystemSlots(subCount: number, subSizeInches: number, includeTweeter: boolean): ConfigSlot[] {
+  return [
+    {
+      key: 'subwoofer',
+      category: 'subwoofer',
+      label: `${subCount}× ${subSizeInches}" subwoofer${subCount > 1 ? 's' : ''}`,
+      requirement: 'required',
+      minQuantity: subCount,
+    },
+    { key: 'enclosure', category: 'enclosure', label: 'Compatible enclosure', requirement: 'required', minQuantity: 1 },
+    { key: 'mono_amp', category: 'mono_amp', label: 'Mono amplifier (bass)', requirement: 'required', minQuantity: 1 },
+    { key: 'door_speaker', category: 'door_speaker', label: '2× door / component speakers', requirement: 'required', minQuantity: 2 },
+    {
+      key: 'tweeter',
+      category: 'tweeter',
+      label: 'Tweeters',
+      requirement: includeTweeter ? 'required' : 'optional',
+      minQuantity: 2,
+      note: includeTweeter ? undefined : 'Add for a 3-way front stage.',
+    },
+    {
+      key: 'multi_amp',
+      category: 'multi_amp',
+      label: '4/5-channel amplifier (speakers)',
+      requirement: 'recommended',
+      minQuantity: 1,
+    },
+    {
+      key: 'wiring_kit',
+      category: 'wiring_kit',
+      label: 'Amp wiring kit(s)',
+      requirement: 'required',
+      minQuantity: 1,
+      note: 'One kit per amp — add quantity, or a couple of different wiring-kit products, as needed.',
+    },
+    {
+      key: 'integration',
+      category: 'integration',
+      label: 'Signal integration / line-output',
+      requirement: 'recommended',
+      minQuantity: 1,
+    },
+    {
+      key: 'integration_module',
+      category: 'integration_module',
+      label: 'Factory integration (T-harness / amp bypass)',
+      requirement: 'recommended',
+      minQuantity: 1,
+    },
+    {
+      key: 'bass_control',
+      category: 'bass_control',
+      label: 'Bass control',
+      requirement: 'recommended',
+      minQuantity: 1,
+      note: 'When the customer wants an in-dash bass knob.',
+    },
+    { key: 'dsp', category: 'dsp', label: 'DSP', requirement: 'optional', minQuantity: 1, note: 'Time alignment and EQ tuning.' },
+    {
+      key: 'radio',
+      category: 'radio',
+      label: 'Head unit',
+      requirement: 'optional',
+      minQuantity: 1,
+      note: 'Only if replacing the factory radio.',
+    },
+    { key: 'epicenter', category: 'epicenter', label: 'Bass restoration', requirement: 'optional', minQuantity: 1 },
+    { key: 'battery', category: 'battery', label: 'Battery / electrical support', requirement: 'optional', minQuantity: 1 },
+    { key: 'sound_treatment', category: 'sound_treatment', label: 'Sound treatment', requirement: 'optional', minQuantity: 1 },
+    { key: 'labor', category: 'labor', label: 'Installation labor', requirement: 'required', minQuantity: 1 },
+  ]
+}
+
+function fullSystemConfig(
+  id: string,
+  label: string,
+  vehicleTypes: VehicleType[],
+  subCount: number,
+  subSizeInches: number,
+  includeTweeter: boolean,
+): AudioConfiguration {
+  const subText = subCount > 1 ? `${subCount} ${subSizeInches}-inch subs` : `a ${subSizeInches}-inch sub`
+  const stage = includeTweeter ? '3-way front speakers' : '2-way front speakers'
+  return {
+    id,
+    shell: 'full_system',
+    label,
+    vehicleTypes,
+    subCount,
+    subSizeInches,
+    slots: fullSystemSlots(subCount, subSizeInches, includeTweeter),
+    description: `A complete build: ${subText} for real bass, plus ${stage} for clean mids and highs.`,
+  }
+}
+
+const FULL_SYSTEM_CONFIGS: AudioConfiguration[] = [
+  fullSystemConfig('full_system_truck', 'Complete System — Truck', ['truck'], 2, 8, false),
+  fullSystemConfig('full_system_car', 'Complete System — Car', CAR_VEHICLE_TYPES, 1, 10, false),
+]
+
+export const AUDIO_CONFIGURATIONS: AudioConfiguration[] = [
+  ...TRUCK_BASS,
+  ...CAR_BASS,
+  ...DOOR_SPEAKER_CONFIGS,
+  ...FULL_SYSTEM_CONFIGS,
+]
 
 // ---------------------------------------------------------------------------
 // Lookups

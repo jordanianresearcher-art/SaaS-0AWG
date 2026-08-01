@@ -36,7 +36,7 @@ describe('configuration catalog', () => {
   })
 
   it('marks sub, enclosure, mono amp, wiring, and labor as required on every bass config', () => {
-    for (const config of AUDIO_CONFIGURATIONS) {
+    for (const config of AUDIO_CONFIGURATIONS.filter((c) => c.shell === 'bass')) {
       const required = new Set(config.slots.filter((s) => s.requirement === 'required').map((s) => s.category))
       expect(required).toEqual(new Set(['subwoofer', 'enclosure', 'mono_amp', 'wiring_kit', 'labor']))
     }
@@ -60,20 +60,97 @@ describe('configuration catalog', () => {
 })
 
 describe('lookups', () => {
-  it('returns truck configs for trucks and car/suv configs for those bodies', () => {
-    expect(configurationsForVehicleType('truck').every((c) => c.id.startsWith('truck_'))).toBe(true)
-    const suv = configurationsForVehicleType('suv')
-    expect(suv.length).toBeGreaterThan(0)
-    expect(suv.every((c) => c.id.startsWith('car_'))).toBe(true)
+  it('returns truck bass configs for trucks and car bass configs for those bodies', () => {
+    const truckBass = configurationsForVehicleType('truck').filter((c) => c.shell === 'bass')
+    expect(truckBass.every((c) => c.id.startsWith('truck_'))).toBe(true)
+    const suvBass = configurationsForVehicleType('suv').filter((c) => c.shell === 'bass')
+    expect(suvBass.length).toBeGreaterThan(0)
+    expect(suvBass.every((c) => c.id.startsWith('car_'))).toBe(true)
   })
 
-  it('groups configurations by shell, with only the bass shell populated today', () => {
-    expect(configurationsForShell('bass').length).toBe(AUDIO_CONFIGURATIONS.length)
-    expect(configurationsForShell('radio')).toHaveLength(0)
+  it('offers door-speaker and full-system configs across every vehicle type, unlike bass sizing', () => {
+    for (const vt of ['truck', 'car', 'sedan', 'hatchback', 'suv'] as const) {
+      const forType = configurationsForVehicleType(vt)
+      expect(forType.some((c) => c.shell === 'door_speakers')).toBe(true)
+      expect(forType.some((c) => c.shell === 'full_system')).toBe(true)
+    }
+  })
+
+  it('groups configurations by shell — bass, door_speakers, and full_system are populated; the rest are not yet', () => {
+    expect(configurationsForShell('bass').length).toBeGreaterThan(0)
+    expect(configurationsForShell('door_speakers').length).toBeGreaterThan(0)
+    expect(configurationsForShell('full_system').length).toBeGreaterThan(0)
+    const populated = configurationsForShell('bass').length + configurationsForShell('door_speakers').length + configurationsForShell('full_system').length
+    expect(populated).toBe(AUDIO_CONFIGURATIONS.length)
+    for (const shell of ['radio', 'camera', 'marine', 'tint'] as const) {
+      expect(configurationsForShell(shell)).toHaveLength(0)
+    }
   })
 
   it('returns null for an unknown configuration id', () => {
     expect(getConfiguration('nope')).toBeNull()
+  })
+})
+
+describe('door_speakers shell', () => {
+  it('offers 2-way and 3-way, front-only and front+rear variants', () => {
+    const configs = configurationsForShell('door_speakers')
+    const ids = configs.map((c) => c.id)
+    expect(ids).toEqual(
+      expect.arrayContaining(['speakers_2way_front', 'speakers_2way_front_rear', 'speakers_3way_front', 'speakers_3way_front_rear']),
+    )
+  })
+
+  it('requires tweeters only on the 3-way variants', () => {
+    const twoWay = getConfiguration('speakers_2way_front')!
+    const threeWay = getConfiguration('speakers_3way_front')!
+    expect(twoWay.slots.find((s) => s.category === 'tweeter')!.requirement).toBe('optional')
+    expect(threeWay.slots.find((s) => s.category === 'tweeter')!.requirement).toBe('required')
+  })
+
+  it('doubles the door-speaker minimum quantity for front+rear vs front-only', () => {
+    const frontOnly = getConfiguration('speakers_2way_front')!
+    const frontRear = getConfiguration('speakers_2way_front_rear')!
+    expect(frontOnly.slots.find((s) => s.category === 'door_speaker')!.minQuantity).toBe(2)
+    expect(frontRear.slots.find((s) => s.category === 'door_speaker')!.minQuantity).toBe(4)
+  })
+
+  it('never requires a subwoofer, enclosure, or mono amp — this is a voice-only shell', () => {
+    for (const config of configurationsForShell('door_speakers')) {
+      const required = new Set(config.slots.filter((s) => s.requirement === 'required').map((s) => s.category))
+      expect(required.has('subwoofer')).toBe(false)
+      expect(required.has('enclosure')).toBe(false)
+      expect(required.has('mono_amp')).toBe(false)
+    }
+  })
+})
+
+describe('full_system shell', () => {
+  it('combines bass and voice required slots in one configuration, with no duplicate slot keys', () => {
+    const config = getConfiguration('full_system_truck')!
+    const required = new Set(config.slots.filter((s) => s.requirement === 'required').map((s) => s.category))
+    expect(required).toEqual(new Set(['subwoofer', 'enclosure', 'mono_amp', 'door_speaker', 'wiring_kit', 'labor']))
+    const keys = config.slots.map((s) => s.key)
+    expect(new Set(keys).size).toBe(keys.length)
+  })
+
+  it('is complete only once both the bass and voice sides are filled', () => {
+    const config = getConfiguration('full_system_truck')!
+    const bassOnly: SlottableItem[] = [
+      { category: 'subwoofer', quantity: 2 },
+      { category: 'enclosure', quantity: 1 },
+      { category: 'mono_amp', quantity: 1 },
+      { category: 'wiring_kit', quantity: 1 },
+      { category: 'labor', quantity: 1 },
+    ]
+    expect(validatePackageSlots(config, bassOnly).complete).toBe(false) // no door speakers yet
+    const both = [...bassOnly, { category: 'door_speaker' as const, quantity: 2 }]
+    expect(validatePackageSlots(config, both).complete).toBe(true)
+  })
+
+  it('offers one config per broad vehicle group', () => {
+    expect(getConfiguration('full_system_truck')!.vehicleTypes).toEqual(['truck'])
+    expect(getConfiguration('full_system_car')!.vehicleTypes).toEqual(['car', 'sedan', 'hatchback', 'suv'])
   })
 })
 

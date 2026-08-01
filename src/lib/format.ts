@@ -17,6 +17,26 @@ export function parseDollarsToCents(input: string): number | null {
   return Math.round(value * 100)
 }
 
+/**
+ * Compact "0GA · OFC" style label for a wiring-kit product, read from its
+ * schemaless `specs` (no dedicated columns/migration for this — specs.gaugeAwg
+ * / specs.wireMaterial is just a convention, same pattern as the rest of the
+ * catalog's category-varying spec data). Lets staff tell apart the handful of
+ * gauge/material variants a shop typically stocks (0/4-gauge, CCA/OFC) without
+ * fragmenting the category taxonomy into one category per variant. Returns
+ * null when neither field is present, rather than an empty label.
+ */
+export function formatWiringKitSpec(specs: Record<string, unknown> | null): string | null {
+  if (!specs) return null
+  const parts: string[] = []
+  const gauge = specs.gaugeAwg
+  if (typeof gauge === 'number') parts.push(gauge === 0 ? '0GA' : `${gauge}GA`)
+  const material = specs.wireMaterial
+  if (material === 'cca') parts.push('CCA')
+  else if (material === 'ofc') parts.push('OFC')
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 /** Returns null when no vehicle info is on file, rather than a string with blank/undefined parts. */
 export function formatVehicle(v: {
   vehicleYear: number | null
