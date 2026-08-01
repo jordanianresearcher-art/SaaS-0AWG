@@ -91,6 +91,12 @@ export default function PackageBuilder({ catalogItems, value, onChange }: Packag
   const [selectedSlotKey, setSelectedSlotKey] = useState<string | null>(null)
   const [search, setSearch] = useState('')
 
+  // A search typed while looking at one slot shouldn't linger (and silently keep
+  // filtering) once staff has moved on to a different slot.
+  useEffect(() => {
+    setSearch('')
+  }, [selectedSlotKey])
+
   const config = value.configId ? getConfiguration(value.configId) : null
   const laborPriceCents = value.laborPrice.trim() ? parseDollarsToCents(value.laborPrice) : null
   const { catalog: builderCatalog, assignments: builderAssignments } = resolveBuilderCatalog(
@@ -114,10 +120,10 @@ export default function PackageBuilder({ catalogItems, value, onChange }: Packag
     const dragData = active.data.current as { catalogItemId: string; category: string | null } | undefined
     const dropData = over.data.current as { slotKey: string; category: string } | undefined
     if (!dragData || !dropData) return
-    if (dragData.category !== dropData.category) {
-      toast('error', "That product doesn't match this slot's category.")
-      return
-    }
+    // No category-match gate here on purpose — tap-to-add never enforced one either
+    // (a category is a labeling convenience, sometimes wrong or missing entirely on
+    // an imported product), and staff dragging a product onto a slot is a deliberate
+    // choice the app shouldn't second-guess.
     onChange({ ...value, assignments: addToSlot(value.assignments, dropData.slotKey, dragData.catalogItemId) })
     setSelectedSlotKey(dropData.slotKey)
   }
@@ -505,7 +511,8 @@ function ProductTray({
       ) : null}
       {filtered.length === 0 ? (
         <p className="text-sm text-zinc-500">
-          {scoped ? `No ${PRODUCT_CATEGORY_INFO[selectedSlot!.category].label.toLowerCase()} in your catalog yet.` : 'No products found.'}
+          {scoped ? `No ${PRODUCT_CATEGORY_INFO[selectedSlot!.category].label.toLowerCase()} in your catalog yet.` : 'No products found.'}{' '}
+          Can&apos;t find it? Add it as an extra item below instead.
         </p>
       ) : (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-2">

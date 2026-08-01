@@ -122,45 +122,50 @@ fill it in:
 2. Drag a product card from the tray onto a slot, or tap a slot then tap a
    product (dnd-kit's `PointerSensor`/`KeyboardSensor` cover mouse, touch,
    and keyboard — plain HTML5 drag-and-drop doesn't work on phones/tablets,
-   this app's primary target). A slot only ever accepts its own category —
-   dropping a mismatched product shows a toast, not a silent no-op. On
-   `lg`+ screens the slot grid sits on the left and the product tray is a
-   sticky scrollable sidebar on the right, so dragging never means
-   scrolling up and down between the two; on phones/tablets it stacks
-   (tray below the slots) since there's no spare width to spend.
-3. Each product card's category-filtered tray can miss a product whose
-   Shopify `productType` wasn't recognized by `guessCategoryFromProductType`
-   (it imports with `category: null`, so it never matches a slot's exact
-   category) — or one that's just filed under a category staff wouldn't
-   expect. A **"Search all products"** checkbox appears once a slot is
-   selected, dropping the category filter entirely so every active/approved
-   product in the catalog is searchable and taggable to that slot; tap-to-add
-   doesn't enforce category anyway (only a *drag* onto the wrong slot gets
-   the mismatch toast), so this is a real escape hatch, not just a wider
-   search box.
-3. Set an **installation labor price** in its own field — labor isn't a
+   this app's primary target). **A drop is never rejected for a category
+   mismatch** — that check existed early on but got removed once real
+   catalog data showed how often a product's stored category is missing
+   or just wrong (an unrecognized Shopify `productType`, a manual entry
+   nobody categorized yet); rejecting the drop just punished staff for a
+   data-quality problem that isn't theirs to fix in the moment. Tap-to-add
+   never enforced this either, so drag now matches. On `lg`+ screens the
+   slot grid sits on the left and the product tray is a sticky scrollable
+   sidebar on the right, so dragging never means scrolling up and down
+   between the two; on phones/tablets it stacks (tray below the slots)
+   since there's no spare width to spend.
+3. Each slot's tray is filtered to that slot's category by default, which
+   can still miss a product with a missing/wrong category. A **"Search all
+   products"** checkbox appears once a slot is selected, dropping the
+   category filter entirely so every active/approved product in the
+   catalog is searchable and taggable to that slot — it resets to
+   unchecked (along with the search text itself) every time a different
+   slot is selected, so an override on one slot never silently carries
+   over to the next. If genuinely nothing in the catalog matches even with
+   that on, the empty-tray message points at the extra/custom items field
+   below instead of leaving staff stuck.
+4. Set an **installation labor price** in its own field — labor isn't a
    catalog product, so `resolveBuilderCatalog()` folds it into the same
    slot-assignment model as a synthetic, non-persisted `CatalogItem`
    (`id: '__labor_charge__'`) purely so every other calculation (subtotal,
    completeness) doesn't need a special case for it.
-4. The parts+labor subtotal is computed live; an **installed-price
+5. The parts+labor subtotal is computed live; an **installed-price
    override** field lets staff quote package pricing instead of a straight
    parts markup.
-5. A **"Compatibility not verified"** checkbox must be checked before
+6. A **"Compatibility not verified"** checkbox must be checked before
    applying. `requiresCompatibilityConfirmation()` always returns `true`
    today — nothing in this system holds a real, owner-vetted compatibility
    ruleset yet, so the builder never implies a compatibility check it can't
    back up.
-6. **"Apply to this option"** copies the filled slots into that option's
+7. **"Apply to this option"** copies the filled slots into that option's
    real `items`, sets its `price` to the computed (or overridden) total,
    and stamps its `configId` — then closes the builder so the now-populated
    manual list is there for a final look before saving. Under-filled
    required slots produce a warning, not a block — a shop might genuinely
    be quoting a partial job.
-7. **"Save as package"** (shown once a configuration is picked) names the
+8. **"Save as package"** (shown once a configuration is picked) names the
    current build and calls `createPackageTemplate` directly — independent
    of react-hook-form, so it works even before the quote itself is saved.
-8. **Extra / custom items** — a plain name + price + quantity list, kept
+9. **Extra / custom items** — a plain name + price + quantity list, kept
    deliberately outside the slot-assignment model entirely (`packageBuilder.ts`'s
    `CustomBuilderItem`, `customItemsSubtotalCents`, `customItemsToQuoteItems`/
    `customItemsToPackageItems`). For a one-off item that isn't worth adding

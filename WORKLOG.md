@@ -1162,3 +1162,44 @@ user wanted.
   bundle product via its name's "amp" mention — landing it in
   `multi_amp`, a reasonable if imperfect guess for a sub+amp bundle,
   exactly the kind of case staff can still correct by hand afterward).
+
+## Round 17 — Remove the drag category barrier; strengthen auto-categorize
+
+The user hit the "That product doesn't match this slot's category" toast
+during real use and asked for it gone entirely, for the search box to
+clear on slot switches (a gap left over from last round's searchAll-only
+fix), and for the categorization logic itself to be reviewed and
+improved. Can't literally browse this shop's live catalog from this
+session (no direct Supabase/Shopify access, same standing constraint as
+the deploy work) — instead improved the shared guessing logic using the
+real product names already visible earlier in this conversation.
+
+- **`src/components/PackageBuilder.tsx`**: `handleDragEnd` no longer
+  compares `dragData.category`/`dropData.category` at all — any drag onto
+  any slot succeeds, matching how tap-to-add already worked. The main
+  component now also clears `search` (not just `searchAll`, fixed last
+  round) via a `useEffect` keyed on `selectedSlotKey`. The tray's empty
+  state ("No X in your catalog yet") now also points at the extra/custom
+  items field below it.
+- **`src/lib/categorize.ts`**: substantially broadened
+  `NAME_CATEGORY_HINTS` — more wiring-kit phrasing ("installation kit",
+  "power kit", gauge-kit patterns), CAN-bus/steering-wheel-control
+  wording for `integration_module`, more `sound_treatment` terms (butyl,
+  MLV, jute pad), `full-range`/`coaxial` wording for `door_speaker`
+  (verified against this shop's actual Nemesis Audio product names shown
+  earlier in this conversation — "6x9-Inch ... Coaxial Speakers", "...
+  Full Range Speakers", "... Midrange Speaker" all now resolve correctly),
+  CarPlay/Android Auto/touchscreen for `radio`, and a new `accessory`
+  catch-all tier (capacitors, fuse holders, RCA cables, dash kits,
+  antennas) checked last since it's the least specific tier. 3 new test
+  cases, including the real Nemesis Audio names directly.
+
+### Verification (this round)
+- `npm run lint`, `npx tsc -b --noEmit`, `npm run test -- --run`
+  (204/204 across 16 files — 3 new in `categorize.test.ts`), and `npm run
+  build` all clean.
+- A Playwright smoke pass confirmed: search text now clears on slot
+  switch, a deliberately cross-category drag (an enclosure onto a
+  subwoofer slot, found via "Search all products") succeeds silently with
+  no rejection toast and the item actually lands in the slot, and the
+  empty-tray state shows the new pointer toward extra/custom items.

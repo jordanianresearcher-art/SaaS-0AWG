@@ -37,4 +37,24 @@ describe('guessCategoryFromName', () => {
     // "Sound" alone shouldn't trip sound_treatment; needs "deaden"/"dampen"/"treatment".
     expect(guessCategoryFromName('Sound System Bundle')).toBeNull()
   })
+
+  it('recognizes real product names seen from this shop\'s own catalog', () => {
+    // Real Nemesis Audio listings — every one of these is a coaxial/full-range/
+    // midrange speaker regardless of how the model number reads.
+    expect(guessCategoryFromName('Nemesis Audio NA-6.9HCX 6x9-Inch 120W RMS Hectic Coaxial Speakers')).toBe('door_speaker')
+    expect(guessCategoryFromName('Nemesis Audio NA-2.75 2.75-Inch 50W RMS 4-Ohm Full Range Speakers')).toBe('door_speaker')
+    expect(guessCategoryFromName('Nemesis Audio NA-6.5M 6.5-Inch 180W RMS Mystical Midrange Speaker')).toBe('door_speaker')
+    expect(guessCategoryFromName('Nemesis Audio NA-8SLM V.2')).toBeNull() // no category-bearing words in the name alone
+  })
+
+  it('recognizes more real-world accessory and kit naming', () => {
+    expect(guessCategoryFromName('4 Gauge Amp Installation Kit')).toBe('wiring_kit')
+    expect(guessCategoryFromName('1500 Watt Power Kit')).toBe('wiring_kit')
+    expect(guessCategoryFromName('CAN Bus Interface Module')).toBe('integration_module')
+    expect(guessCategoryFromName('Jute Sound Deadening Pad')).toBe('sound_treatment')
+    expect(guessCategoryFromName('1 Farad Capacitor')).toBe('accessory')
+    expect(guessCategoryFromName('ANL Fuse Holder')).toBe('accessory')
+    expect(guessCategoryFromName('Double DIN Dash Kit')).toBe('accessory')
+    expect(guessCategoryFromName('AM/FM Antenna')).toBe('accessory')
+  })
 })
