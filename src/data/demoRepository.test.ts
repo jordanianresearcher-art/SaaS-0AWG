@@ -169,6 +169,57 @@ describe('DemoRepository', () => {
     expect(updated.msrpCents).toBe(22900)
   })
 
+  it('seeds a realistic stock movement history matching a catalog item\'s quantityOnHand', async () => {
+    const items = await repo.listCatalogItems()
+    const sub = items.find((i) => i.model === 'CompR 12')!
+    expect(sub.quantityOnHand).toBe(6) // seeded: received 10, sold 4
+    const movements = await repo.listStockMovements(sub.id)
+    expect(movements.length).toBe(2)
+    expect(movements.reduce((sum, m) => sum + m.quantityDelta, 0)).toBe(6)
+    expect(movements.some((m) => m.movementType === 'receiving')).toBe(true)
+    expect(movements.some((m) => m.movementType === 'sale')).toBe(true)
+  })
+
+  it('recording a stock movement atomically updates quantityOnHand and appends to the ledger', async () => {
+    const created = await repo.createCatalogItem({ brand: 'JL Audio', model: '10W3', name: '10" subwoofer', defaultPriceCents: 19900 })
+    expect(created.quantityOnHand).toBe(0)
+
+    const { movement, catalogItem } = await repo.recordStockMovement({
+      catalogItemId: created.id,
+      movementType: 'receiving',
+      quantityDelta: 12,
+      counterpartyName: 'JL Audio distributor',
+    })
+    expect(catalogItem.quantityOnHand).toBe(12)
+    expect(movement.quantityDelta).toBe(12)
+    expect(movement.counterpartyName).toBe('JL Audio distributor')
+
+    const { catalogItem: afterSale } = await repo.recordStockMovement({
+      catalogItemId: created.id,
+      movementType: 'sale',
+      quantityDelta: -3,
+    })
+    expect(afterSale.quantityOnHand).toBe(9)
+
+    const history = await repo.listStockMovements(created.id)
+    expect(history).toHaveLength(2)
+    expect(history[0].movementType).toBe('sale') // newest first
+  })
+
+  it('recording a stock movement for an unknown catalog item throws rather than silently no-op-ing', async () => {
+    await expect(
+      repo.recordStockMovement({ catalogItemId: 'nope', movementType: 'adjustment', quantityDelta: 1 }),
+    ).rejects.toThrow('Catalog item not found')
+  })
+
+  it('listStockMovements with no filter returns the whole shop ledger, newest first', async () => {
+    const all = await repo.listStockMovements()
+    expect(all.length).toBeGreaterThanOrEqual(4) // the seeded demo history
+    for (let i = 1; i < all.length; i++) {
+      expect(all[i - 1].createdAt >= all[i].createdAt).toBe(true)
+    }
+  })
+
   it('seeds package templates covering approved, sourced-from-a-quote, and pending review states', async () => {
     const templates = await repo.listPackageTemplates()
     expect(templates.length).toBeGreaterThanOrEqual(3)

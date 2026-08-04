@@ -152,10 +152,15 @@ work in this area so effort isn't duplicated.
 
 ## Known limitations
 
-- No inventory/stock quantities are tracked or required anywhere in this
-  model, by design — this is a selling catalog. The Shopify importer maps
-  inventory quantity into a coarse `availability` bucket
-  (`available`/`low_stock`/`out_of_stock`/`not_tracked`) but never a real count.
+- ~~No inventory/stock quantities are tracked or required anywhere in this
+  model, by design — this is a selling catalog.~~ **No longer true** — a
+  real, ledger-backed `quantity_on_hand` landed in migration `0011`, opt-in
+  and additive (nothing about quoting requires it). See
+  `docs/INVENTORY_AND_SCANNING.md` for the full "scan-to-invoice" effort
+  this is the foundation of. The Shopify importer still only maps
+  inventory quantity into the coarse `availability` bucket
+  (`available`/`low_stock`/`out_of_stock`/`not_tracked`), not the new
+  `quantity_on_hand` count — nothing reconciles the two yet.
 - `specs` is schemaless JSONB; there's no validation today that, say, a
   `subwoofer`-category item actually has a `subwooferSizeInches` field.
   Fine for now (nothing reads `specs` yet); worth a light shape check once

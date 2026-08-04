@@ -10,6 +10,7 @@ import type {
   QuoteOption,
   QuoteResponse,
   Shop,
+  StockMovement,
   WindowTintConfig,
 } from '../types'
 import { computeDefaultDepositCents } from '../lib/paymentMethods'
@@ -29,11 +30,12 @@ export interface DemoDB {
   emails: EmailMessage[]
   catalogItems: CatalogItem[]
   packageTemplates: PackageTemplate[]
+  stockMovements: StockMovement[]
   /** Bumped when the seed shape changes so stale localStorage is discarded. */
   seedVersion: number
 }
 
-export const DEMO_SEED_VERSION = 10
+export const DEMO_SEED_VERSION = 11
 
 const SHOP_ID = 'demo-shop'
 
@@ -578,7 +580,7 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
   let catalogPosition = 0
   function demoCatalogItem(
     fields: Pick<CatalogItem, 'brand' | 'model' | 'name' | 'category' | 'defaultPriceCents'> &
-      Partial<Pick<CatalogItem, 'msrpCents' | 'specs'>>,
+      Partial<Pick<CatalogItem, 'msrpCents' | 'specs' | 'quantityOnHand'>>,
   ): CatalogItem {
     return {
       id: `demo-cat-${catalogPosition + 1}`,
@@ -610,6 +612,9 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
       identificationConfidence: null,
       approvalStatus: 'approved',
       position: catalogPosition++,
+      quantityOnHand: fields.quantityOnHand ?? 6,
+      upcIsGenerated: false,
+      labelPrintedAt: null,
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
     }
@@ -619,6 +624,8 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
     demoCatalogItem({
       brand: 'Kicker', model: 'CompR 12', name: '12" subwoofer', category: 'subwoofer',
       defaultPriceCents: 14900, msrpCents: 17900, specs: { subwooferSizeInches: 12, impedanceOhms: 2 },
+      // Matches the seeded stock movements below: received 10, sold 4.
+      quantityOnHand: 6,
     }),
     demoCatalogItem({
       brand: 'Kicker', model: 'CWRT8', name: '8" shallow subwoofer', category: 'subwoofer',
@@ -635,6 +642,8 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
     demoCatalogItem({
       brand: 'Rockford Fosgate', model: 'RFK4X', name: '4-gauge amp wiring kit', category: 'wiring_kit',
       defaultPriceCents: 5900, specs: { gaugeAwg: 4, wireMaterial: 'cca' },
+      // Matches the seeded stock movements below: received 8, sold 2.
+      quantityOnHand: 6,
     }),
     demoCatalogItem({
       brand: 'Rockford Fosgate', model: 'RFK4X-OFC', name: '4-gauge OFC amp wiring kit', category: 'wiring_kit',
@@ -808,8 +817,56 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
     }),
   ]
 
+  // A short, realistic ledger history for a couple of items so the
+  // inventory history view isn't empty in a fresh demo: received 10 subs
+  // from Kicker, sold 4 of them (net quantityOnHand of 6, matching the
+  // demoCatalogItem default above).
+  function stockMovement(fields: {
+    id: string
+    catalogItemId: string
+    movementType: StockMovement['movementType']
+    quantityDelta: number
+    counterpartyName?: string | null
+    daysAgoCount: number
+  }): StockMovement {
+    return {
+      id: fields.id,
+      shopId: SHOP_ID,
+      catalogItemId: fields.catalogItemId,
+      movementType: fields.movementType,
+      quantityDelta: fields.quantityDelta,
+      unitCostCents: null,
+      counterpartyName: fields.counterpartyName ?? null,
+      sourceInvoiceId: null,
+      sourceOutgoingOrderId: null,
+      note: null,
+      createdBy: 'demo-user-owner',
+      createdAt: daysAgo(now, fields.daysAgoCount),
+    }
+  }
+
+  const stockMovements: StockMovement[] = [
+    stockMovement({
+      id: 'demo-stock-1', catalogItemId: 'demo-cat-1', movementType: 'receiving',
+      quantityDelta: 10, counterpartyName: 'Kicker Direct (wholesale)', daysAgoCount: 30,
+    }),
+    stockMovement({
+      id: 'demo-stock-2', catalogItemId: 'demo-cat-1', movementType: 'sale',
+      quantityDelta: -4, daysAgoCount: 12,
+    }),
+    stockMovement({
+      id: 'demo-stock-3', catalogItemId: 'demo-cat-5', movementType: 'receiving',
+      quantityDelta: 8, counterpartyName: 'Rockford Fosgate distributor', daysAgoCount: 25,
+    }),
+    stockMovement({
+      id: 'demo-stock-4', catalogItemId: 'demo-cat-5', movementType: 'sale',
+      quantityDelta: -2, daysAgoCount: 5,
+    }),
+  ]
+
   return {
     shop, employees, customers, quotes, options, events, responses, emails, catalogItems, packageTemplates,
+    stockMovements,
     seedVersion: DEMO_SEED_VERSION,
   }
 }

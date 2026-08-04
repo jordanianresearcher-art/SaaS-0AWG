@@ -17,6 +17,7 @@ import type {
   QuoteStatus,
   ResponseType,
   Shop,
+  StockMovement,
   TemplateType,
 } from '../types'
 import type {
@@ -24,6 +25,7 @@ import type {
   NewCatalogItemInput,
   NewPackageTemplateInput,
   NewQuoteInput,
+  NewStockMovementInput,
   SendEmailResult,
   ShopifyImportOptions,
   ShopifyImportResult,
@@ -203,8 +205,28 @@ function mapCatalogItem(r: Row): CatalogItem {
     identificationConfidence: r.identification_confidence ?? null,
     approvalStatus: r.approval_status ?? 'approved',
     position: r.position,
+    quantityOnHand: r.quantity_on_hand ?? 0,
+    upcIsGenerated: r.upc_is_generated ?? false,
+    labelPrintedAt: r.label_printed_at ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+  }
+}
+
+function mapStockMovement(r: Row): StockMovement {
+  return {
+    id: r.id,
+    shopId: r.shop_id,
+    catalogItemId: r.catalog_item_id,
+    movementType: r.movement_type,
+    quantityDelta: r.quantity_delta,
+    unitCostCents: r.unit_cost_cents ?? null,
+    counterpartyName: r.counterparty_name ?? null,
+    sourceInvoiceId: r.source_invoice_id ?? null,
+    sourceOutgoingOrderId: r.source_outgoing_order_id ?? null,
+    note: r.note ?? null,
+    createdBy: r.created_by ?? null,
+    createdAt: r.created_at,
   }
 }
 
@@ -421,6 +443,40 @@ export class SupabaseRepository implements DataRepository {
       throw error
     }
     return data as ShopifyImportResult
+  }
+
+  async recordStockMovement(input: NewStockMovementInput): Promise<{ movement: StockMovement; catalogItem: CatalogItem }> {
+    // apply_stock_movement (migration 0011) inserts the ledger row and
+    // updates quantity_on_hand atomically in one transaction — the RPC
+    // response is the inserted stock_movements row itself.
+    const { data, error } = await this.supabase.rpc('apply_stock_movement', {
+      p_catalog_item_id: input.catalogItemId,
+      p_movement_type: input.movementType,
+      p_quantity_delta: input.quantityDelta,
+      p_unit_cost_cents: input.unitCostCents ?? null,
+      p_counterparty_name: input.counterpartyName ?? null,
+      p_source_invoice_id: input.sourceInvoiceId ?? null,
+      p_source_outgoing_order_id: input.sourceOutgoingOrderId ?? null,
+      p_note: input.note ?? null,
+    })
+    if (error) throw error
+    const movement = mapStockMovement(data as Row)
+
+    const { data: itemRow, error: itemError } = await this.supabase
+      .from('catalog_items')
+      .select('*')
+      .eq('id', input.catalogItemId)
+      .single()
+    if (itemError) throw itemError
+    return { movement, catalogItem: mapCatalogItem(itemRow as Row) }
+  }
+
+  async listStockMovements(catalogItemId?: string): Promise<StockMovement[]> {
+    let query = this.supabase.from('stock_movements').select('*').order('created_at', { ascending: false })
+    if (catalogItemId) query = query.eq('catalog_item_id', catalogItemId)
+    const { data, error } = await query
+    if (error) throw error
+    return (data as Row[]).map(mapStockMovement)
   }
 
   async listPackageTemplates(): Promise<PackageTemplate[]> {

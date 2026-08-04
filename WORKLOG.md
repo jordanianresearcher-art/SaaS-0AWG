@@ -1277,3 +1277,84 @@ new mechanism.
   (subwoofer) and voice slots (door speaker) together; the wiring-kit
   badges ("4GA · CCA", "0GA · OFC") render both in the product tray and
   next to an item once it's assigned to a slot.
+
+## Round 19 — Scan-to-Invoice, Phase 1: inventory ledger foundation
+
+The user asked to combine this quote estimator with a second app they have
+(`car-audio-inventory`, a Next.js barcode/photo inventory scanner) so
+scanning becomes the main daily workflow: scan a product → it shows up
+centered with image/name/brand/price looked up automatically, all fields
+editable → choose from a side panel whether this scan session becomes a
+quote, a printed/paid/tracked invoice, a vendor inventory receipt, or an
+outgoing order to another shop — plus AI photo lookup and generated codes
+with printable labels for products with no barcode, and voice input that
+parses a spoken order into matched-or-new catalog items. This is a large,
+multi-phase build (design plan: 5 phases, see `docs/INVENTORY_AND_SCANNING.md`).
+Confirmed with the user via AskUserQuestion before starting: this app
+(SaaS-0AWG) becomes the one app going forward (`car-audio-inventory`'s
+logic gets ported in, not kept as a second deployed app); voice input uses
+server-side transcription (not the browser's built-in speech API, so it
+works on iPhones too); no-UPC products get a real, checksum-valid UPC-A in
+GS1's reserved in-store prefix range (not a fake/ambiguous internal code);
+labels print as a grid on the shop's existing 4"×6" label printer.
+
+This round is Phase 1 only — the inventory ledger foundation. No scanning,
+no UI for any of the four document-type actions yet; see
+`docs/INVENTORY_AND_SCANNING.md` for the full phase breakdown.
+
+- **Migration `0011_inventory_and_documents.sql`**: `catalog_items` gains
+  `quantity_on_hand` (opt-in, default 0), `upc_is_generated`,
+  `label_printed_at`. New `stock_movements` append-only ledger
+  (`receiving`/`outgoing_order`/`sale`/`adjustment`, signed
+  `quantity_delta`, optional vendor/destination name and cost) — read-only
+  via RLS for shop members, every write goes through the new
+  `apply_stock_movement()` SECURITY DEFINER RPC so the ledger and the
+  derived `quantity_on_hand` can never drift apart (one function call = one
+  atomic transaction, which matters once multiple staff scan/sell
+  concurrently). New `invoices`/`invoice_items` (flat, unlike tiered
+  `quotes`/`quote_options` — by the time something's an invoice, staff
+  have already decided what's selling) and `outgoing_orders`/
+  `outgoing_order_items` tables, both with a trigger-assigned sequential
+  per-shop human-friendly number (`invoice_number`/`order_number`, an
+  advisory-lock-guarded `select max()+1` so concurrent inserts never
+  collide). Vendor receiving deliberately gets no header table of its own
+  — it's just catalog upserts + ledger rows with the vendor's name; the
+  ledger itself is the "what did we receive and when" record. Schema only
+  this round — `invoices`/`outgoing_orders` have no repository methods or
+  UI yet (Phase 2/3), landed early so the ledger's `source_invoice_id`/
+  `source_outgoing_order_id` FKs could reference real tables from day one.
+- **`src/types.ts`**: `StockMovement`, `Invoice`/`InvoiceItem`,
+  `OutgoingOrder`/`OutgoingOrderItem` types; `CatalogItem` gained
+  `quantityOnHand`/`upcIsGenerated`/`labelPrintedAt`.
+- **`src/data/repository.ts`**: `NewStockMovementInput`,
+  `recordStockMovement()`/`listStockMovements()` on `DataRepository`.
+  Implemented in `DemoRepository` (localStorage, mirrors the RPC's
+  atomicity in one method) and `SupabaseRepository` (calls
+  `apply_stock_movement`, then re-reads the item). `listStockMovements`
+  sorts newest-first with an insertion-order tiebreak for movements
+  recorded in the same millisecond (a real risk with rapid scan-to-invoice
+  usage, not just a test artifact — caught by a flaky test during this
+  round).
+- **Demo data**: seeded a short realistic ledger history (received 10,
+  sold 4, net 6 on hand) on the Kicker CompR 12 subwoofer and the RFK4X
+  wiring kit. `DEMO_SEED_VERSION` bumped 10 → 11.
+- **Docs**: new `docs/INVENTORY_AND_SCANNING.md` (the home for this whole
+  effort going forward — phase tracker, schema reference, required
+  credentials for later phases, known limitations). Updated
+  `docs/CATALOG_AND_PACKAGES.md` and `docs/IMPLEMENTATION_STATUS.md` to
+  retract their "no inventory quantities are tracked" framing and point
+  here.
+
+### Verification (this round)
+- `npx tsc -b --noEmit`, `npm run lint`, `npm run test -- --run`, `npm run
+  build` all clean.
+- New tests: 4 in `demoRepository.test.ts` covering the seeded ledger
+  history, atomic record-and-update, the unknown-item error path, and
+  shop-wide ledger ordering.
+- No new UI this round (schema/repository only) — nothing new for a
+  Playwright smoke pass to exercise yet; the existing full suite still
+  passes unchanged, confirming nothing else broke.
+- Migration `0011` is written and ready but **not applied to the live
+  Supabase project** — this session still has no Supabase CLI/personal
+  access token (a standing limitation, see `docs/CATALOG_AND_PACKAGES.md`).
+  The shop owner applies it themselves, same as every prior migration.

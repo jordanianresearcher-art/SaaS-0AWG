@@ -201,6 +201,9 @@ export function makeLaborCatalogItem(priceCents: number): CatalogItem {
     identificationConfidence: null,
     approvalStatus: 'approved',
     position: 0,
+    quantityOnHand: 0,
+    upcIsGenerated: false,
+    labelPrintedAt: null,
     createdAt: '',
     updatedAt: '',
   }

@@ -20,6 +20,8 @@ import type {
   QuoteStatus,
   ResponseType,
   Shop,
+  StockMovement,
+  StockMovementType,
   TemplateType,
   Tier,
   VehicleType,
@@ -150,6 +152,26 @@ export interface NewPackageTemplateInput {
   }>
 }
 
+/**
+ * Records one stock-quantity change (a scan-to-invoice sale, a vendor
+ * receipt, an outgoing order, or a manual adjustment) — see StockMovement.
+ * This is the only way quantityOnHand on a catalog item changes; both repo
+ * implementations must update it atomically alongside the ledger row (in
+ * production, via the apply_stock_movement RPC — see migration 0011).
+ */
+export interface NewStockMovementInput {
+  catalogItemId: string
+  movementType: StockMovementType
+  /** Signed: positive for receiving/adjustment-up, negative for sale/outgoing_order. */
+  quantityDelta: number
+  unitCostCents?: number | null
+  /** Vendor name (receiving) or destination shop name (outgoing_order), free text. */
+  counterpartyName?: string | null
+  sourceInvoiceId?: string | null
+  sourceOutgoingOrderId?: string | null
+  note?: string | null
+}
+
 export interface ShopifyImportOptions {
   /** Resume a prior run — pass back the nextCursor from its result. */
   afterCursor?: string | null
@@ -181,6 +203,11 @@ export interface DataRepository {
   deleteCatalogItem(itemId: string): Promise<void>
   /** Owner/manager only in production — imports one page of the shop's Shopify catalog. Never call in demo mode (see docs/CATALOG_AND_PACKAGES.md). */
   runShopifyImport(options?: ShopifyImportOptions): Promise<ShopifyImportResult>
+
+  /** Records a ledger entry and atomically updates the item's quantityOnHand. Returns the updated item alongside the recorded movement. */
+  recordStockMovement(input: NewStockMovementInput): Promise<{ movement: StockMovement; catalogItem: CatalogItem }>
+  /** Full shop history, or just one item's, newest first. */
+  listStockMovements(catalogItemId?: string): Promise<StockMovement[]>
 
   listPackageTemplates(): Promise<PackageTemplate[]>
   createPackageTemplate(input: NewPackageTemplateInput): Promise<PackageTemplate>
@@ -225,4 +252,5 @@ export type {
   EmailMessage,
   CatalogItem,
   PackageTemplate,
+  StockMovement,
 }

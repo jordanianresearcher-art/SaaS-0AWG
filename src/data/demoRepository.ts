@@ -12,6 +12,7 @@ import type {
   QuoteStatus,
   ResponseType,
   Shop,
+  StockMovement,
   TemplateType,
 } from '../types'
 import type {
@@ -19,6 +20,7 @@ import type {
   NewCatalogItemInput,
   NewPackageTemplateInput,
   NewQuoteInput,
+  NewStockMovementInput,
   SendEmailResult,
   ShopifyImportResult,
   ShopSettingsPatch,
@@ -167,6 +169,9 @@ export class DemoRepository implements DataRepository {
       identificationConfidence: input.identificationConfidence ?? null,
       approvalStatus: input.approvalStatus ?? 'approved',
       position: this.db.catalogItems.length,
+      quantityOnHand: 0,
+      upcIsGenerated: false,
+      labelPrintedAt: null,
       createdAt: now,
       updatedAt: now,
     }
@@ -225,6 +230,47 @@ export class DemoRepository implements DataRepository {
     // search) — this action only makes sense against a real Supabase
     // project with real Shopify credentials configured.
     throw new Error('Shopify import is only available in production mode.')
+  }
+
+  async recordStockMovement(input: NewStockMovementInput): Promise<{ movement: StockMovement; catalogItem: CatalogItem }> {
+    const item = this.db.catalogItems.find((i) => i.id === input.catalogItemId)
+    if (!item) throw new Error('Catalog item not found')
+
+    const movement: StockMovement = {
+      id: newId(),
+      shopId: this.db.shop.id,
+      catalogItemId: input.catalogItemId,
+      movementType: input.movementType,
+      quantityDelta: input.quantityDelta,
+      unitCostCents: input.unitCostCents ?? null,
+      counterpartyName: input.counterpartyName ?? null,
+      sourceInvoiceId: input.sourceInvoiceId ?? null,
+      sourceOutgoingOrderId: input.sourceOutgoingOrderId ?? null,
+      note: input.note ?? null,
+      createdBy: 'demo-user-owner',
+      createdAt: new Date().toISOString(),
+    }
+    this.db.stockMovements.push(movement)
+    // Same "one place updates the derived count" invariant the RPC enforces
+    // in production (see apply_stock_movement in migration 0011) — nothing
+    // else in this class touches quantityOnHand directly.
+    item.quantityOnHand += input.quantityDelta
+    item.updatedAt = new Date().toISOString()
+    this.persist()
+    return { movement, catalogItem: item }
+  }
+
+  async listStockMovements(catalogItemId?: string): Promise<StockMovement[]> {
+    const all = catalogItemId
+      ? this.db.stockMovements.filter((m) => m.catalogItemId === catalogItemId)
+      : this.db.stockMovements
+    // Newest first. Ties on createdAt (two movements recorded in the same
+    // millisecond — easy to hit with rapid scan-to-invoice usage) break by
+    // insertion order instead, since array push order is always chronological.
+    return all
+      .map((movement, insertionIndex) => ({ movement, insertionIndex }))
+      .sort((a, b) => b.movement.createdAt.localeCompare(a.movement.createdAt) || b.insertionIndex - a.insertionIndex)
+      .map(({ movement }) => movement)
   }
 
   async listPackageTemplates(): Promise<PackageTemplate[]> {

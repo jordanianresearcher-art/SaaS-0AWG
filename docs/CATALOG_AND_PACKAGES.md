@@ -7,8 +7,14 @@ follow-up if the customer doesn't buy on the spot. This document covers the
 catalog/package data model that supports that — see `docs/IMPLEMENTATION_STATUS.md`
 for what's actually wired up to a UI today versus what's schema-only.
 
-This is a **selling catalog, not a real-time inventory system**. Stock
-quantities are never required to quote a product.
+This catalog started as a **selling catalog, not a real-time inventory
+system** — stock quantities were never required to quote a product, and
+that's still true today. As of migration `0011`, catalog items also carry
+a real, ledger-backed `quantity_on_hand` (opt-in, additive — nothing here
+changed to require it), feeding the separate "scan-to-invoice" effort that
+fuses barcode/photo scanning and real inventory tracking into this app.
+See `docs/INVENTORY_AND_SCANNING.md` for that model; this doc still covers
+the catalog/package/configuration data quoting itself depends on.
 
 ## Universal configurations (`src/lib/audioConfigs.ts`)
 
