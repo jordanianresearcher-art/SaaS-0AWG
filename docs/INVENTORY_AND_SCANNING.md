@@ -85,7 +85,38 @@ have) — see each phase below for what's ported vs. built new.
   Function only in production — demo mode never makes the real network
   call, same rule as `runShopifyImport`. A successful external match is
   immediately saved into the shop's catalog (with the UPC set) so the next
-  scan of that exact barcode is an instant local hit.
+  scan of that exact barcode is an instant local hit. **Never throws** —
+  any failure reaching the Edge Function (not deployed yet, a network
+  hiccup, whatever) degrades to the same `{ source: 'not_found' }` result
+  a genuine miss produces, logged to the console for debugging but never
+  surfaced as a raw error mid-scan. (Real shops will hit this today: the
+  Edge Function isn't deployed to the live project until the shop owner
+  runs `supabase functions deploy lookup-product-upc` — until then, every
+  barcode not already in the local catalog just falls through to "add it
+  manually," which is the correct degraded behavior, not a bug.)
+- **Hardware (laser/CCD) barcode scanners are the primary input** — most
+  of these (USB on a PC, Bluetooth on a phone/tablet) need no camera, app,
+  or driver at all: to the browser they're just a keyboard that types a
+  barcode's characters in a couple of milliseconds each, then sends Enter.
+  `src/lib/hardwareScan.ts`'s `ScanBuffer` detects this shape (buffers
+  keystrokes, resets on any gap slow enough to be human typing, done
+  fully pure/timestamp-driven so it's unit-testable with no DOM) and
+  `src/lib/useHardwareScanner.ts` wires it to real `keydown` events. Two
+  complementary capture paths, both landing in the same
+  `handleBarcodeDetected`:
+  - A dedicated, always-focused "Scan here" input in `ScanWorkspacePage`
+    (auto-focuses on load, refocuses after every lookup and whenever a new
+    session starts) — the scanner's keystrokes land directly in it like
+    any real typing, so this is the reliable primary path.
+  - `useHardwareScanner`'s document-wide listener as a fallback for when
+    focus has drifted off that field (a button, the page background) —
+    it explicitly ignores any real `<input>`/`<textarea>`/`contentEditable`
+    target, so normal typing in the search box, custom-item fields, or the
+    payment form is completely unaffected; it only ever fires when nothing
+    editable has focus.
+  - The camera (`BarcodeScanner.tsx`) is now explicitly secondary — a
+    "Use camera instead" button, for shops without a hardware scanner or
+    for a one-off item the scanner can't read.
 - **Invoices, end to end**: `DataRepository.createInvoice()` (always
   `'draft'`, never touches stock) and `markInvoicePaid()` (idempotent —
   records one `'sale'` `stock_movements` row per line item that has a

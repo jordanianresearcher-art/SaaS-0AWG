@@ -551,25 +551,32 @@ export class SupabaseRepository implements DataRepository {
     const item = await this.findCatalogItemByCode(code)
     if (item) return { source: 'catalog', catalogItem: item }
 
-    const { data, error } = await this.supabase.functions.invoke('lookup-product-upc', { body: { code } })
-    if (error) {
-      if (error instanceof FunctionsHttpError) {
-        // The function returns 404 for a legitimate "nothing known about
-        // this code" — that's not a failure worth surfacing as an error,
-        // the caller just falls back to a photo lookup or manual entry.
-        if (error.context?.status === 404) return { source: 'not_found' }
-        const body = await error.context.json().catch(() => null)
-        throw new Error(typeof body?.message === 'string' ? body.message : error.message)
+    // Any failure reaching the external lookup — a real "nothing known
+    // about this code" 404, the function not deployed yet, a network
+    // hiccup, whatever — lands the caller in the same place: fall back to
+    // manual entry. From a cashier mid-scan, a hard-thrown error here is
+    // worse than "not found," so this never throws; it just logs for
+    // debugging and degrades gracefully like the rest of this lookup chain
+    // already does (see productLookup's local-first, external-optional shape).
+    try {
+      const { data, error } = await this.supabase.functions.invoke('lookup-product-upc', { body: { code } })
+      if (error) {
+        if (!(error instanceof FunctionsHttpError) || error.context?.status !== 404) {
+          console.error('lookup-product-upc failed', error)
+        }
+        return { source: 'not_found' }
       }
-      throw error
-    }
-    return {
-      source: 'external',
-      name: data.name ?? null,
-      brand: data.brand ?? null,
-      unitPriceCents: data.unitPriceCents ?? null,
-      imageUrl: data.imageUrl ?? null,
-      upc: data.upc ?? code,
+      return {
+        source: 'external',
+        name: data.name ?? null,
+        brand: data.brand ?? null,
+        unitPriceCents: data.unitPriceCents ?? null,
+        imageUrl: data.imageUrl ?? null,
+        upc: data.upc ?? code,
+      }
+    } catch (err) {
+      console.error('lookup-product-upc failed', err)
+      return { source: 'not_found' }
     }
   }
 

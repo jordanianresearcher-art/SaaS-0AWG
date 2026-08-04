@@ -1438,3 +1438,59 @@ scanning screen and the first working document type (invoice) end to end.
   and ready but **not yet applied/deployed to the live Supabase project**
   — same standing limitation as every prior round (no Supabase CLI/token
   in this session). The shop owner applies/deploys them when ready.
+
+## Round 21 — Hardware scanner as primary input; fix a real scan failure
+
+The user hit a real bug on their live deployment: scanning an item threw
+a raw "failed to do edge function"-style error instead of degrading
+gracefully. Root cause — `lookup-product-upc` isn't deployed to their live
+Supabase project yet (a known, documented gap from last round), and
+`lookupProductByUpc()`'s error handling only gracefully handled a
+well-formed 404 from the function; any other failure to reach it (which is
+exactly what "not deployed yet" produces) fell through to a bare `throw`.
+Separately, the user clarified their actual hardware: a laser/CCD barcode
+scanner (PC or phone), not the phone camera — camera should be a fallback,
+not the primary input.
+
+- **`src/data/supabaseRepository.ts`**: `lookupProductByUpc()` now never
+  throws — any failure reaching the Edge Function (not deployed, network
+  error, malformed response) degrades to the same `{ source: 'not_found'
+  }` a genuine miss produces, logged to the console rather than surfaced
+  as an error mid-scan. This is the actual fix for the reported bug; it
+  also means the whole scan flow already works end-to-end in production
+  today even before the shop owner deploys the Edge Function — barcodes
+  just fall through to manual entry until then, which is the correct
+  degraded behavior.
+- **`src/lib/hardwareScan.ts`** (new): `ScanBuffer` — detects a hardware
+  scanner's keyboard-wedge output (a barcode's characters typed a few
+  milliseconds apart, then Enter) by buffering keystrokes and timing the
+  gaps between them, resetting on any gap slow enough to be a human
+  typing. Pure, timestamp-driven, no DOM — 8 tests covering fast/slow
+  bursts, too-short buffers, stray modifier keys, and back-to-back scans.
+- **`src/lib/useHardwareScanner.ts`** (new): wires `ScanBuffer` to real
+  `document`-level `keydown` events, explicitly ignoring any event whose
+  target is a real `<input>`/`<textarea>`/`contentEditable` element — so
+  it only ever fires when focus isn't already in a field the user is
+  legitimately typing into.
+- **`ScanWorkspacePage.tsx`**: added a dedicated, always-focused "Scanner
+  ready — scan here" input as the primary capture path (a scanner's
+  keystrokes land directly in it like any real typing; auto-focuses on
+  load, refocuses after every lookup and whenever a new session starts).
+  `useHardwareScanner` is wired as a fallback for when focus has drifted
+  off that field. The old large "Scan barcode" camera button is now a
+  smaller, secondary "Use camera instead."
+
+### Verification (this round)
+- `npx tsc -b --noEmit`, `npm run lint`, `npm run test -- --run`
+  (243/243 across 18 files — 8 new in `hardwareScan.test.ts`), and `npm
+  run build` all clean.
+- A Playwright smoke pass simulated real hardware-scanner input (fast
+  per-character `keyboard.press` calls + Enter, the same shape a real
+  scanner produces) and confirmed: the scan input auto-focuses on load; a
+  fast burst there triggers a lookup with no thrown error (exercises the
+  exact not-found path the reported bug hit); focus returns to the scan
+  input afterward; the same fast-burst pattern is also caught by the
+  document-wide fallback when focus is on a heading instead of the input;
+  slow (120ms/keystroke) typing into the manual search field is never
+  mistaken for a scan; manual search still works normally; "Use camera
+  instead" still opens the secondary camera modal.

@@ -5,13 +5,14 @@
 // type end to end — Quote/Receive inventory/Outgoing order are shown as
 // upcoming, not yet functional (see docs/INVENTORY_AND_SCANNING.md).
 
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
-import { Barcode, Loader2, Minus, Package, Pencil, Plus, Printer, Search, Trash2 } from 'lucide-react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Barcode, Camera, Loader2, Minus, Package, Pencil, Plus, Printer, Search, Trash2 } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
 import { Button, Card, EmptyState, Field, Input, LoadingBlock, Modal, Select } from '../../components/ui'
 import { formatCurrency, formatDateTime, parseDollarsToCents } from '../../lib/format'
 import { newId } from '../../lib/ids'
+import { useHardwareScanner } from '../../lib/useHardwareScanner'
 import {
   addOrIncrementCartItem,
   cartSubtotalCents,
@@ -70,6 +71,8 @@ export default function ScanWorkspacePage() {
   const [scannerOpen, setScannerOpen] = useState(false)
   const [lookupBusy, setLookupBusy] = useState(false)
   const [manualQuery, setManualQuery] = useState('')
+  const [scanInputValue, setScanInputValue] = useState('')
+  const scanInputRef = useRef<HTMLInputElement>(null)
   const [editingRowId, setEditingRowId] = useState<string | null>(null)
   const [customName, setCustomName] = useState('')
   const [customPrice, setCustomPrice] = useState('')
@@ -80,6 +83,14 @@ export default function ScanWorkspacePage() {
 
   const building = invoice === null
   const subtotalCents = building ? cartSubtotalCents(cart) : invoice.subtotalCents
+
+  // Auto-focus the dedicated scan input on mount, and again whenever we
+  // return to "building" after starting a new session — a hardware
+  // scanner's keystrokes land directly in whatever has focus, so this is
+  // what makes "just walk up and start scanning" work with zero clicks.
+  useEffect(() => {
+    if (building) scanInputRef.current?.focus()
+  }, [building])
 
   const addCatalogItem = useCallback((item: CatalogItem) => {
     setCart((prev) => addOrIncrementCartItem(prev, catalogItemToCartItem(item)))
@@ -114,8 +125,17 @@ export default function ScanWorkspacePage() {
       toast('error', err instanceof Error ? err.message : 'Barcode lookup failed.')
     } finally {
       setLookupBusy(false)
+      // Return focus to the scan field either way, so the very next scan —
+      // via the scanner, no click needed — just works.
+      scanInputRef.current?.focus()
     }
   }
+
+  // Fallback for when focus has drifted off the dedicated scan input (a
+  // button, the page background) — see useHardwareScanner.ts. Only active
+  // while still building the cart; nothing to scan into once the invoice
+  // is locked in.
+  useHardwareScanner(handleBarcodeDetected, building)
 
   function handlePhotoCaptured() {
     setScannerOpen(false)
@@ -199,7 +219,7 @@ export default function ScanWorkspacePage() {
     <div className="space-y-4">
       <div className="no-print">
         <h1 className="text-2xl font-bold text-ink">Scan</h1>
-        <p className="text-sm text-zinc-500">Scan a barcode, or search/add items below — then choose what this becomes on the right.</p>
+        <p className="text-sm text-zinc-500">Point a barcode scanner at this page and pull the trigger — or search/add items below. Choose what this becomes on the right.</p>
       </div>
 
       <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start lg:gap-4">
@@ -208,19 +228,44 @@ export default function ScanWorkspacePage() {
           {building ? (
             <>
               <Card className="no-print space-y-3">
+                <div>
+                  <label htmlFor="hardware-scan-input" className="mb-1.5 flex items-center gap-2 text-sm font-semibold text-ink">
+                    <Barcode className="h-4 w-4 text-brand" aria-hidden="true" />
+                    Scanner ready — scan here
+                  </label>
+                  <Input
+                    id="hardware-scan-input"
+                    ref={scanInputRef}
+                    value={scanInputValue}
+                    onChange={(e) => setScanInputValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter') return
+                      e.preventDefault()
+                      const code = scanInputValue.trim()
+                      setScanInputValue('')
+                      if (code) void handleBarcodeDetected(code)
+                    }}
+                    placeholder="Works with a USB or Bluetooth laser scanner — no camera needed"
+                    autoComplete="off"
+                    className="text-lg"
+                  />
+                  <p className="mt-1 text-xs text-zinc-500">
+                    Click elsewhere to use another field — scanning still works from anywhere on this page.
+                  </p>
+                </div>
                 <div className="flex flex-wrap items-center gap-3">
-                  <Button onClick={() => setScannerOpen(true)}>
-                    <Barcode className="h-5 w-5" aria-hidden="true" />
-                    Scan barcode
-                  </Button>
                   {lookupBusy ? (
                     <span className="inline-flex items-center gap-2 text-sm font-medium text-zinc-500">
                       <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                       Looking it up…
                     </span>
                   ) : null}
+                  <Button variant="secondary" onClick={() => setScannerOpen(true)} className="ml-auto">
+                    <Camera className="h-4 w-4" aria-hidden="true" />
+                    Use camera instead
+                  </Button>
                 </div>
-                <div className="relative">
+                <div className="relative border-t border-zinc-100 pt-3">
                   <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-zinc-400" aria-hidden="true" />
                   <Input
                     value={manualQuery}
