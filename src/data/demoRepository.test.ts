@@ -292,6 +292,20 @@ describe('DemoRepository', () => {
     await expect(repo.markInvoicePaid('nope', 'cash', 100)).rejects.toThrow('Invoice not found')
   })
 
+  it('sendInvoiceEmail never makes a real send in demo mode — reports demo_sent instead', async () => {
+    const invoices = await repo.listInvoices()
+    const result = await repo.sendInvoiceEmail(invoices[0].id, 'customer@example.com')
+    expect(result.ok).toBe(true)
+    expect(result.status).toBe('demo_sent')
+    expect(result.message).toContain('customer@example.com')
+  })
+
+  it('sendInvoiceEmail reports failure for an unknown invoice rather than throwing', async () => {
+    const result = await repo.sendInvoiceEmail('nope', 'customer@example.com')
+    expect(result.ok).toBe(false)
+    expect(result.status).toBe('failed')
+  })
+
   it('seeds package templates covering approved, sourced-from-a-quote, and pending review states', async () => {
     const templates = await repo.listPackageTemplates()
     expect(templates.length).toBeGreaterThanOrEqual(3)

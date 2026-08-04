@@ -1532,3 +1532,62 @@ customer record either" (it doesn't need to).
   pre-filled option is named "Scanned items," carries the scanned item's
   name, and its price is pre-filled from the cart subtotal; filling in
   customer info and saving completes a real quote end to end.
+
+## Round 23 — Invoice as a real document: polished layout, PDF, email
+
+The user asked to "make a good html/PDF so we can print it out or email
+it" for the invoice. The previous invoice view was a plain card — this
+round rebuilds it as an actual letterhead-style invoice document and adds
+sending a copy by email.
+
+- **`ScanWorkspacePage.tsx`**: `InvoiceSummary` rebuilt into
+  `InvoiceDocument` — shop logo-or-name + address/phone with a
+  `primaryColor` accent bar (matching `PublicQuotePage`'s branding
+  convention), "INVOICE #N" + date + a PAID/UNPAID status badge, an
+  optional "Bill to" block, a proper itemized table (item/brand-model,
+  qty, unit price, line total), subtotal/total, a paid-amount line once
+  paid, and a shop footer. This is both the on-screen view and — via the
+  existing `.no-print` convention already used by `QuoteDetailPage` — the
+  print/Save-as-PDF output; confirmed with a print-media-emulated
+  screenshot that only the invoice remains once the nav/side panel are
+  hidden. Added optional "Customer name"/"Customer email" fields once an
+  invoice exists, typed at send time rather than a persisted `Customer`
+  record (this flow is walk-in/fast by design — a real customer record is
+  what `NewQuotePage`'s fuller intake is for) — they populate the Bill To
+  block and are the email recipient.
+- **`src/lib/invoiceEmailTemplate.ts`** (new): renders the emailed copy.
+  Unlike quote emails, which stay short and link out to a public quote
+  page, there's no public invoice page — the itemized invoice rides
+  directly in the email body, like a real receipt. 7 tests, including an
+  HTML-injection check on a customer-typed item name.
+- **`send-invoice-email` Edge Function** (new): mirrors `send-quote-email`'s
+  auth pattern (verify signed-in user, verify shop membership) but is
+  simpler — no template types, no eligibility/follow-up scheduling
+  (invoices aren't part of the quote-recovery follow-up sequence), and no
+  `email_messages` logging (that table exists specifically to drive/rate-
+  limit the quote follow-up sequence, not a general send log). **Reuses
+  the already-configured `RESEND_API_KEY`/`EMAIL_FROM` secrets** — unlike
+  the AI/voice phases still ahead, this needs no new secret, only
+  deploying. Typechecked standalone via the project's Deno-shim workflow.
+- **`DataRepository.sendInvoiceEmail()`**: demo mode fakes it
+  (`demo_sent`, matching `sendEmail`'s existing demo rule — never a real
+  network call); production invokes the Edge Function and unwraps its
+  real error message the same way `lookupProductByUpc` and
+  `runShopifyImport` already do.
+
+### Verification (this round)
+- `npx tsc -b --noEmit`, `npm run lint`, `npm run test -- --run`
+  (252/252 across 19 files — 7 new in `invoiceEmailTemplate.test.ts`, 2
+  more in `demoRepository.test.ts`), and `npm run build` all clean.
+- A Playwright smoke pass confirmed: the polished document renders with
+  the INVOICE heading and UNPAID badge, the itemized table shows the
+  scanned item, the Email button is disabled until a customer email is
+  typed, sending in demo mode reports the fake recipient correctly,
+  marking paid flips the badge to "PAID — Cash," and the Bill To section
+  reflects the typed customer info. A second pass with print media
+  emulated confirmed the nav/side panel disappear entirely and only the
+  invoice document remains — what Save-as-PDF would actually produce.
+- `send-invoice-email` is written and typechecked but **not yet deployed**
+  to the live Supabase project — same standing limitation as every prior
+  round's new Edge Functions. No new secret is needed for it, though —
+  only `supabase functions deploy send-invoice-email`.

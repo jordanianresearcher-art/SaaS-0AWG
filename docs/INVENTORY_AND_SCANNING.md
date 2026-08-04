@@ -135,11 +135,31 @@ have) — see each phase below for what's ported vs. built new.
   running cart (image/name/brand/price, quantity stepper, pencil-to-edit,
   remove) while building; the side panel has the four document-type tiles
   (**Invoice** and **Quote** are active — Receive inventory/Outgoing order
-  still show a "Soon" badge) plus the create/pay/print flow. Once
-  an invoice is created the center area swaps to a read-only invoice
-  summary (this doubles as the printed view — `window.print()` with the
-  existing `.no-print` convention hiding the side panel/nav chrome, same
-  pattern as `QuoteDetailPage`).
+  still show a "Soon" badge) plus the create/pay/print/email flow. Once an
+  invoice is created the center area swaps to `InvoiceDocument` — a real
+  letterhead-style invoice (shop logo-or-name + address/phone with a
+  `primaryColor` accent bar, INVOICE # + date + a PAID/UNPAID badge, an
+  optional "Bill to" block, an itemized table, subtotal/total) that's both
+  the on-screen view and, via `window.print()` + the existing `.no-print`
+  convention hiding the side panel/nav chrome (same pattern as
+  `QuoteDetailPage`), the print/Save-as-PDF output — confirmed with a
+  print-media-emulated screenshot that only the invoice remains once
+  everything else is hidden.
+- **Email a copy of the invoice**: a "Customer name"/"Customer email"
+  pair appears once the invoice exists — typed at send time, not a
+  persisted `Customer` record (this flow is walk-in/fast by design; a
+  real customer record is what `NewQuotePage`'s fuller intake is for).
+  "Email invoice" (enabled once an email is typed) calls the new
+  `send-invoice-email` Edge Function, which mirrors `send-quote-email`'s
+  auth pattern but is simpler — no template types, no eligibility/follow-
+  up scheduling (invoices aren't part of the quote-recovery sequence), and
+  no `email_messages` logging (that table exists specifically to drive/
+  rate-limit the quote follow-up sequence). Reuses the already-configured
+  `RESEND_API_KEY`/`EMAIL_FROM` secrets — no new secret needed, unlike the
+  AI/voice phases below. `src/lib/invoiceEmailTemplate.ts` renders the
+  email (itemized invoice directly in the body, since unlike quotes there's
+  no public invoice page to link out to); the Edge Function keeps a
+  mirrored copy server-side, same convention as the quote email templates.
 - **Quote-from-scan**: tapping "Quote" (enabled once the cart has at least
   one item) hands the cart off to the existing `NewQuotePage` flow rather
   than trying to build a full quote on the scan screen — a quote needs
@@ -183,7 +203,8 @@ have) — see each phase below for what's ported vs. built new.
 | `ANTHROPIC_API_KEY` (photo lookup, voice-order parsing) | Not yet set. Not used server-side anywhere in this project today (Shopify import and email use their own separate credentials) — the shop owner will need to set this as a new Supabase Edge Function secret, same self-serve mechanism as `RESEND_API_KEY`/`SHOPIFY_ADMIN_ACCESS_TOKEN`. |
 | `OPENAI_API_KEY` (voice transcription) | Not yet set — new secret, same mechanism. |
 | UPCitemdb (barcode lookup) | **Live this phase** — no key needed on the free trial tier (~100 lookups/day/IP), same as `car-audio-inventory` already uses it. Worth watching for rate-limit errors at real shop volume; a paid key is a drop-in swap in `lookup-product-upc/index.ts` if needed later. |
-| Supabase deploy/migration access | This session still has no Supabase personal access token/CLI (a standing limitation — see `docs/CATALOG_AND_PACKAGES.md`). Migration `0011` (and the two new Edge Functions) are written and ready; the shop owner applies/deploys them themselves via the CLI/SQL editor, same as prior migrations this project has shipped. |
+| `RESEND_API_KEY` / `EMAIL_FROM` (invoice emailing) | **Already configured** — `send-invoice-email` reuses the exact secrets `send-quote-email` already uses. No new secret needed; only the new function itself needs deploying (`supabase functions deploy send-invoice-email`). |
+| Supabase deploy/migration access | This session still has no Supabase personal access token/CLI (a standing limitation — see `docs/CATALOG_AND_PACKAGES.md`). Migration `0011` and the new Edge Functions (`lookup-product-upc`, `send-invoice-email`) are written and ready; the shop owner applies/deploys them themselves via the CLI/SQL editor, same as prior migrations this project has shipped. |
 
 ## Known limitations (through this phase)
 
@@ -193,6 +214,12 @@ have) — see each phase below for what's ported vs. built new.
 - The camera-photo fallback in `BarcodeScanner` captures a frame but
   currently just tells staff photo lookup isn't available yet — the AI
   vision pipeline is Phase 4.
+- Invoice emails have no send-history log (unlike quote emails, which
+  write an `email_messages` row) — deliberate, see above, but it does mean
+  there's no in-app record of who an invoice was emailed to or when.
+- The customer name/email typed for an invoice's "Bill to"/email-recipient
+  isn't persisted anywhere — reload the page mid-session and it's gone
+  (the invoice itself is safe; only those two typed fields are ephemeral).
 - **Invoice** and **Quote** are working document types. Receive inventory/
   Outgoing order are visible in the side panel (so the eventual four-way
   choice is discoverable) but disabled — Phase 3 remainder.

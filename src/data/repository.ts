@@ -256,6 +256,8 @@ export interface DataRepository {
   createInvoice(input: NewInvoiceInput): Promise<Invoice>
   /** Marks paid and records one 'sale' stock movement per line item that has a catalogItemId. */
   markInvoicePaid(invoiceId: string, paymentMethod: InvoicePaymentMethod, paymentAmountCents: number): Promise<Invoice>
+  /** Emails a rendered copy of the invoice (recipientEmail is typed at send time — see ScanWorkspacePage — not a persisted Customer record). Never fakes real delivery in demo mode. */
+  sendInvoiceEmail(invoiceId: string, recipientEmail: string, recipientName?: string): Promise<SendEmailResult>
 
   listPackageTemplates(): Promise<PackageTemplate[]>
   createPackageTemplate(input: NewPackageTemplateInput): Promise<PackageTemplate>

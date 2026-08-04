@@ -676,6 +676,23 @@ export class SupabaseRepository implements DataRepository {
     return mapInvoice(data as Row)
   }
 
+  async sendInvoiceEmail(invoiceId: string, recipientEmail: string, recipientName?: string): Promise<SendEmailResult> {
+    const { data, error } = await this.supabase.functions.invoke('send-invoice-email', {
+      body: { invoiceId, recipientEmail, recipientName },
+    })
+    if (error) {
+      if (error instanceof FunctionsHttpError) {
+        const body = await error.context.json().catch(() => null)
+        return { ok: false, status: 'failed', message: typeof body?.message === 'string' ? body.message : 'The email could not be sent.' }
+      }
+      return { ok: false, status: 'failed', message: 'The email could not be sent. Check your connection and try again.' }
+    }
+    const result = data as { ok: boolean; message?: string }
+    return result.ok
+      ? { ok: true, status: 'sent', message: 'Email accepted by the email provider.' }
+      : { ok: false, status: 'failed', message: result.message ?? 'The email could not be sent.' }
+  }
+
   async listPackageTemplates(): Promise<PackageTemplate[]> {
     const { data, error } = await this.supabase
       .from('package_templates')

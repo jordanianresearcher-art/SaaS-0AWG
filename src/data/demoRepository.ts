@@ -366,6 +366,14 @@ export class DemoRepository implements DataRepository {
     return invoice
   }
 
+  async sendInvoiceEmail(invoiceId: string, recipientEmail: string): Promise<SendEmailResult> {
+    // Demo mode must never make a real send — same rule as sendEmail's
+    // demo_sent path for quotes.
+    const invoice = this.db.invoices.find((inv) => inv.id === invoiceId)
+    if (!invoice) return { ok: false, status: 'failed', message: 'Invoice not found.' }
+    return { ok: true, status: 'demo_sent', message: `Demo mode — would have emailed invoice #${invoice.invoiceNumber} to ${recipientEmail}.` }
+  }
+
   async listPackageTemplates(): Promise<PackageTemplate[]> {
     return this.db.packageTemplates.slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   }

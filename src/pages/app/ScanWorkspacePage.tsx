@@ -7,7 +7,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Barcode, Camera, Loader2, Minus, Package, Pencil, Plus, Printer, Search, Trash2 } from 'lucide-react'
+import { Barcode, Camera, Loader2, Mail, MapPin, Minus, Package, Pencil, Phone, Plus, Printer, Search, Trash2 } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
 import { Button, Card, EmptyState, Field, Input, LoadingBlock, Modal, Select } from '../../components/ui'
@@ -24,7 +24,7 @@ import {
   updateCartItem,
   type ScannedCartItem,
 } from '../../lib/scanCart'
-import type { CatalogItem, Invoice, InvoicePaymentMethod } from '../../types'
+import type { CatalogItem, Invoice, InvoicePaymentMethod, Shop } from '../../types'
 import type { ScanQuotePrefill } from './NewQuotePage'
 
 // @zxing/browser (~470kb) only matters once someone actually opens the
@@ -84,6 +84,13 @@ export default function ScanWorkspacePage() {
   const [paymentMethod, setPaymentMethod] = useState<InvoicePaymentMethod>('cash')
   const [paymentAmount, setPaymentAmount] = useState('')
   const [markingPaid, setMarkingPaid] = useState(false)
+  // Typed after the invoice exists, purely for the printed "Bill to" line
+  // and as the email recipient — deliberately not persisted to the
+  // invoice record itself (this flow is walk-in/fast by design; a real
+  // Customer record is what NewQuotePage's fuller intake is for).
+  const [customerName, setCustomerName] = useState('')
+  const [customerEmail, setCustomerEmail] = useState('')
+  const [sendingEmail, setSendingEmail] = useState(false)
 
   const building = invoice === null
   const subtotalCents = building ? cartSubtotalCents(cart) : invoice.subtotalCents
@@ -203,12 +210,27 @@ export default function ScanWorkspacePage() {
     }
   }
 
+  async function handleEmailInvoice() {
+    if (!invoice || !customerEmail.trim()) return
+    setSendingEmail(true)
+    try {
+      const result = await repo.sendInvoiceEmail(invoice.id, customerEmail.trim(), customerName.trim() || undefined)
+      toast(result.ok ? 'success' : 'error', result.message)
+    } catch {
+      toast('error', 'Could not email the invoice. Please try again.')
+    } finally {
+      setSendingEmail(false)
+    }
+  }
+
   function startNewSession() {
     setCart([])
     setInvoice(null)
     setPaymentAmount('')
     setPaymentMethod('cash')
     setManualQuery('')
+    setCustomerName('')
+    setCustomerEmail('')
   }
 
   // Hands the scan cart off to the existing quote-creation flow rather
@@ -339,7 +361,7 @@ export default function ScanWorkspacePage() {
               </Card>
             </>
           ) : (
-            <InvoiceSummary invoice={invoice} shopName={shop?.name ?? ''} />
+            <InvoiceDocument invoice={invoice} shop={shop} customerName={customerName} customerEmail={customerEmail} />
           )}
         </div>
 
@@ -384,34 +406,57 @@ export default function ScanWorkspacePage() {
                 {creatingInvoice ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" /> : null}
                 Create invoice
               </Button>
-            ) : invoice.status === 'draft' ? (
-              <div className="space-y-2">
-                <Field label="Payment method" htmlFor="pay-method">
-                  <Select id="pay-method" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as InvoicePaymentMethod)}>
-                    {(Object.keys(PAYMENT_METHOD_LABELS) as InvoicePaymentMethod[]).map((m) => (
-                      <option key={m} value={m}>
-                        {PAYMENT_METHOD_LABELS[m]}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Amount received" htmlFor="pay-amount">
-                  <Input id="pay-amount" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} inputMode="decimal" />
-                </Field>
-                <Button className="w-full" variant="success" onClick={handleMarkPaid} disabled={markingPaid}>
-                  {markingPaid ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" /> : null}
-                  Mark paid
-                </Button>
-              </div>
             ) : (
-              <div className="space-y-2">
-                <Button className="w-full" variant="secondary" onClick={() => window.print()}>
-                  <Printer className="h-5 w-5" aria-hidden="true" />
-                  Print invoice
-                </Button>
-                <Button className="w-full" variant="ghost" onClick={startNewSession}>
-                  Start a new scan
-                </Button>
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <Field label="Customer name" htmlFor="cust-name" hint="Optional — shown on the printed invoice.">
+                    <Input id="cust-name" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Walk-in customer" />
+                  </Field>
+                  <Field label="Customer email" htmlFor="cust-email" hint="Optional — needed to email a copy.">
+                    <Input id="cust-email" type="email" value={customerEmail} onChange={(e) => setCustomerEmail(e.target.value)} placeholder="name@example.com" />
+                  </Field>
+                </div>
+
+                {invoice.status === 'draft' ? (
+                  <div className="space-y-2 border-t border-zinc-100 pt-3">
+                    <Field label="Payment method" htmlFor="pay-method">
+                      <Select id="pay-method" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as InvoicePaymentMethod)}>
+                        {(Object.keys(PAYMENT_METHOD_LABELS) as InvoicePaymentMethod[]).map((m) => (
+                          <option key={m} value={m}>
+                            {PAYMENT_METHOD_LABELS[m]}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                    <Field label="Amount received" htmlFor="pay-amount">
+                      <Input id="pay-amount" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} inputMode="decimal" />
+                    </Field>
+                    <Button className="w-full" variant="success" onClick={handleMarkPaid} disabled={markingPaid}>
+                      {markingPaid ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" /> : null}
+                      Mark paid
+                    </Button>
+                  </div>
+                ) : null}
+
+                <div className="space-y-2 border-t border-zinc-100 pt-3">
+                  <Button className="w-full" variant="secondary" onClick={() => window.print()}>
+                    <Printer className="h-5 w-5" aria-hidden="true" />
+                    Print invoice
+                  </Button>
+                  <Button
+                    className="w-full"
+                    variant="secondary"
+                    onClick={handleEmailInvoice}
+                    disabled={!customerEmail.trim() || sendingEmail}
+                    title={!customerEmail.trim() ? 'Enter a customer email above first' : undefined}
+                  >
+                    {sendingEmail ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" /> : <Mail className="h-5 w-5" aria-hidden="true" />}
+                    Email invoice
+                  </Button>
+                  <Button className="w-full" variant="ghost" onClick={startNewSession}>
+                    Start a new scan
+                  </Button>
+                </div>
               </div>
             )}
           </Card>
@@ -540,39 +585,119 @@ function CartRowCard({
   )
 }
 
-function InvoiceSummary({ invoice, shopName }: { invoice: Invoice; shopName: string }) {
+/**
+ * The invoice, laid out like an actual invoice — this is both what's shown
+ * on screen and (via the existing .no-print convention hiding everything
+ * else on the page) what prints/Saves-as-PDF, and mirrors what
+ * invoiceEmailTemplate.ts renders for the emailed copy. Letterhead style
+ * matches PublicQuotePage's shop-branding convention (logo-or-name, a
+ * primaryColor accent bar, phone/address).
+ */
+function InvoiceDocument({
+  invoice,
+  shop,
+  customerName,
+  customerEmail,
+}: {
+  invoice: Invoice
+  shop: Shop | null
+  customerName: string
+  customerEmail: string
+}) {
+  const color = shop?.primaryColor || '#1d4ed8'
   return (
-    <Card className="space-y-4">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-xs font-semibold tracking-wide text-zinc-500 uppercase">{shopName}</p>
-          <h2 className="text-xl font-bold text-ink">Invoice #{invoice.invoiceNumber}</h2>
-        </div>
-        <div className="text-right text-sm text-zinc-500">
-          <p>{formatDateTime(invoice.createdAt)}</p>
-          {invoice.status === 'paid' ? (
-            <p className="mt-1 font-semibold text-green-700">Paid{invoice.paymentMethod ? ` — ${PAYMENT_METHOD_LABELS[invoice.paymentMethod]}` : ''}</p>
-          ) : (
-            <p className="mt-1 font-semibold text-amber-600">Unpaid</p>
-          )}
-        </div>
-      </div>
-      <div className="divide-y divide-zinc-100 border-y border-zinc-100">
-        {invoice.items.map((item) => (
-          <div key={item.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-            <div className="min-w-0">
-              <p className="truncate font-medium text-ink">{item.name}</p>
-              <p className="text-xs text-zinc-500">{[item.brand, item.model].filter(Boolean).join(' · ')}</p>
+    <Card className="overflow-hidden space-y-0 p-0">
+      <div className="p-6" style={{ borderTop: `6px solid ${color}` }}>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            {shop?.logoUrl ? (
+              <img src={shop.logoUrl} alt={shop.name} className="max-h-12" />
+            ) : (
+              <p className="text-xl font-black text-ink">{shop?.name ?? 'Your Shop'}</p>
+            )}
+            <div className="mt-2 space-y-0.5 text-sm text-zinc-500">
+              {shop?.address ? (
+                <p className="flex items-center gap-1.5">
+                  <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> {shop.address}
+                </p>
+              ) : null}
+              {shop?.phone ? (
+                <p className="flex items-center gap-1.5">
+                  <Phone className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> {shop.phone}
+                </p>
+              ) : null}
             </div>
-            <span className="shrink-0 text-zinc-500">×{item.quantity}</span>
-            <span className="shrink-0 font-semibold text-ink">{formatCurrency(item.unitPriceCents * item.quantity)}</span>
           </div>
-        ))}
+          <div className="text-right">
+            <p className="text-2xl font-black tracking-tight text-ink">INVOICE</p>
+            <p className="text-sm font-semibold text-zinc-500">#{invoice.invoiceNumber}</p>
+            <p className="mt-1 text-sm text-zinc-500">{formatDateTime(invoice.createdAt)}</p>
+            {invoice.status === 'paid' ? (
+              <span className="mt-2 inline-block rounded-full bg-green-100 px-3 py-1 text-xs font-bold text-green-800">
+                PAID{invoice.paymentMethod ? ` — ${PAYMENT_METHOD_LABELS[invoice.paymentMethod]}` : ''}
+              </span>
+            ) : (
+              <span className="mt-2 inline-block rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800">UNPAID</span>
+            )}
+          </div>
+        </div>
+
+        {customerName.trim() || customerEmail.trim() ? (
+          <div className="mt-5 border-t border-zinc-100 pt-4">
+            <p className="text-xs font-semibold tracking-wide text-zinc-400 uppercase">Bill to</p>
+            {customerName.trim() ? <p className="text-sm font-semibold text-ink">{customerName.trim()}</p> : null}
+            {customerEmail.trim() ? <p className="text-sm text-zinc-500">{customerEmail.trim()}</p> : null}
+          </div>
+        ) : null}
       </div>
-      <div className="flex items-center justify-between text-base font-bold text-ink">
-        <span>Total</span>
-        <span>{formatCurrency(invoice.totalCents)}</span>
+
+      <table className="w-full border-t border-zinc-100 text-sm">
+        <thead>
+          <tr className="border-b border-zinc-100 text-left text-xs font-semibold tracking-wide text-zinc-400 uppercase">
+            <th className="px-6 py-2 font-semibold">Item</th>
+            <th className="px-3 py-2 text-right font-semibold">Qty</th>
+            <th className="px-3 py-2 text-right font-semibold">Price</th>
+            <th className="px-6 py-2 text-right font-semibold">Total</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-zinc-100">
+          {invoice.items.map((item) => (
+            <tr key={item.id}>
+              <td className="px-6 py-3">
+                <p className="font-medium text-ink">{item.name}</p>
+                {item.brand || item.model ? <p className="text-xs text-zinc-500">{[item.brand, item.model].filter(Boolean).join(' · ')}</p> : null}
+              </td>
+              <td className="px-3 py-3 text-right text-zinc-500">{item.quantity}</td>
+              <td className="px-3 py-3 text-right text-zinc-500">{formatCurrency(item.unitPriceCents)}</td>
+              <td className="px-6 py-3 text-right font-semibold text-ink">{formatCurrency(item.unitPriceCents * item.quantity)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <div className="flex justify-end p-6 pt-4">
+        <div className="w-full max-w-56 space-y-1.5">
+          <div className="flex items-center justify-between text-sm text-zinc-500">
+            <span>Subtotal</span>
+            <span>{formatCurrency(invoice.subtotalCents)}</span>
+          </div>
+          <div className="flex items-center justify-between border-t border-zinc-200 pt-1.5 text-base font-bold text-ink">
+            <span>Total</span>
+            <span>{formatCurrency(invoice.totalCents)}</span>
+          </div>
+          {invoice.status === 'paid' && invoice.paymentAmountCents !== null ? (
+            <div className="flex items-center justify-between text-sm text-green-700">
+              <span>Paid</span>
+              <span>{formatCurrency(invoice.paymentAmountCents)}</span>
+            </div>
+          ) : null}
+        </div>
       </div>
+
+      <p className="border-t border-zinc-100 px-6 py-4 text-center text-xs text-zinc-400">
+        Thank you for your business{shop?.name ? ` — ${shop.name}` : ''}
+        {shop?.phone ? ` · ${shop.phone}` : ''}
+      </p>
     </Card>
   )
 }
