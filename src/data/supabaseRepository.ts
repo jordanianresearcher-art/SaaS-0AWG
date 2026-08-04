@@ -30,6 +30,7 @@ import type {
   NewPackageTemplateInput,
   NewQuoteInput,
   NewStockMovementInput,
+  ProductSuggestion,
   SendEmailResult,
   ShopifyImportOptions,
   ShopifyImportResult,
@@ -577,6 +578,35 @@ export class SupabaseRepository implements DataRepository {
     } catch (err) {
       console.error('lookup-product-upc failed', err)
       return { source: 'not_found' }
+    }
+  }
+
+  async lookupProductSuggestions(query: string): Promise<ProductSuggestion[]> {
+    const trimmed = query.trim()
+    if (trimmed.length < 2) return []
+
+    // Same never-throw rule as lookupProductByUpc: this powers an
+    // autocomplete dropdown, not a blocking step, so any failure (function
+    // not deployed yet, missing ANTHROPIC_API_KEY, a network hiccup, a rate
+    // limit) just means no suggestions — never interrupts manual entry.
+    try {
+      const { data, error } = await this.supabase.functions.invoke('lookup-product-suggestions', { body: { query: trimmed } })
+      if (error) {
+        console.error('lookup-product-suggestions failed', error)
+        return []
+      }
+      const suggestions = Array.isArray(data?.suggestions) ? data.suggestions : []
+      return suggestions.map((s: Partial<ProductSuggestion>) => ({
+        name: typeof s.name === 'string' ? s.name : '',
+        brand: s.brand ?? null,
+        model: s.model ?? null,
+        unitPriceCents: s.unitPriceCents ?? null,
+        imageUrl: s.imageUrl ?? null,
+        sourceUrl: s.sourceUrl ?? null,
+      }))
+    } catch (err) {
+      console.error('lookup-product-suggestions failed', err)
+      return []
     }
   }
 

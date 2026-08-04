@@ -173,6 +173,45 @@ have) — see each phase below for what's ported vs. built new.
   a starting point staff can adjust), leaving customer/vehicle fields
   blank to fill in normally.
 
+## Completed (Product suggestions — AI+web-search autocomplete for manual entry)
+
+- **`lookup-product-suggestions` Edge Function**: given a partially-typed
+  SKU/model/name (e.g. "NA-12F"), calls Claude with the `web_search` tool
+  and a structured (`output_config`/`json_schema`) response — up to 5
+  candidate real products ranked most-likely-match first, each with
+  brand/model/name, an MSRP if found, a photo URL if found, and a source
+  URL. Called directly over HTTPS (no `@anthropic-ai/sdk` — this project's
+  Edge Functions stay dependency-light, matching `send-quote-email`'s raw
+  Resend fetch) rather than porting `car-audio-inventory`'s
+  `/api/lookup/vision` route wholesale — same underlying technique (Claude +
+  `web_search` + structured output), just text-query-driven instead of
+  photo-driven, and without that route's Shopify cross-check or official-
+  photo-scrape steps (out of scope for a lightweight autocomplete). Same
+  "any signed-in user" auth rule as `lookup-product-upc` — a pure lookup
+  that touches no shop-specific rows.
+- **`DataRepository.lookupProductSuggestions()`**: demo mode always
+  resolves `[]` (no real AI/web-search call, ever — same rule as
+  `runShopifyImport`/`lookupProductByUpc`). Production never throws either
+  — any failure (function not deployed yet, missing `ANTHROPIC_API_KEY`, a
+  rate limit, a network hiccup) degrades to `[]`, since this powers an
+  autocomplete dropdown, not a blocking step.
+- **`src/components/ProductSuggestField.tsx`**: a reusable text input that
+  debounce-searches (600ms, 3-char minimum) and shows results in a
+  dropdown (photo/brand+model/name/price) — picking one hands the full
+  `ProductSuggestion` back to the caller, which decides what to fill in.
+  Deliberately renders the dropdown in normal document flow (not
+  `position: absolute`) so it pushes sibling fields down instead of
+  overlaying (and silently swallowing clicks on) them — found via a real
+  layout bug during this round's own smoke test, where an absolutely-
+  positioned dropdown was covering the price field directly below it in
+  the scan workspace's one-off-item row. Wired into two places: the
+  Settings catalog add/edit modal's "Model" field (selecting a suggestion
+  also fills brand/name/price) and the scan workspace's "Add a one-off
+  item" name field (selecting a suggestion also carries brand/model/image
+  into the cart row, tracked via a `customSuggestion` state that clears
+  the moment the name is hand-edited again so a stale match never rides
+  along silently).
+
 ## Not yet built (Phases 3-5)
 
 - **Phase 3 remainder**: vendor receiving and outgoing orders (quote-from-
@@ -196,15 +235,15 @@ have) — see each phase below for what's ported vs. built new.
   `AUDIO_CONFIGURATIONS` shell vocabulary) → fuzzy-match parsed components
   against the catalog, confirm-or-create-new for anything ambiguous.
 
-## Required credentials / access (Phases 4-5, not needed yet)
+## Required credentials / access
 
 | For | Status |
 | --- | --- |
-| `ANTHROPIC_API_KEY` (photo lookup, voice-order parsing) | Not yet set. Not used server-side anywhere in this project today (Shopify import and email use their own separate credentials) — the shop owner will need to set this as a new Supabase Edge Function secret, same self-serve mechanism as `RESEND_API_KEY`/`SHOPIFY_ADMIN_ACCESS_TOKEN`. |
-| `OPENAI_API_KEY` (voice transcription) | Not yet set — new secret, same mechanism. |
+| `ANTHROPIC_API_KEY` (product-suggestion autocomplete now; photo lookup and voice-order parsing later) | **Needed now** — `lookup-product-suggestions` is written and ready but not yet deployed/callable until this secret exists. Not used server-side anywhere else in this project (Shopify import and email use their own separate credentials) — the shop owner sets it as a new Supabase Edge Function secret, same self-serve mechanism as `RESEND_API_KEY`/`SHOPIFY_ADMIN_ACCESS_TOKEN`. Until it's set, the autocomplete quietly shows no suggestions rather than erroring (see `lookupProductSuggestions`'s never-throw contract above) — same graceful-degradation shape as `lookupProductByUpc` before `lookup-product-upc` is deployed. |
+| `OPENAI_API_KEY` (voice transcription, Phase 5) | Not yet set — new secret, same mechanism. |
 | UPCitemdb (barcode lookup) | **Live this phase** — no key needed on the free trial tier (~100 lookups/day/IP), same as `car-audio-inventory` already uses it. Worth watching for rate-limit errors at real shop volume; a paid key is a drop-in swap in `lookup-product-upc/index.ts` if needed later. |
 | `RESEND_API_KEY` / `EMAIL_FROM` (invoice emailing) | **Already configured** — `send-invoice-email` reuses the exact secrets `send-quote-email` already uses. No new secret needed; only the new function itself needs deploying (`supabase functions deploy send-invoice-email`). |
-| Supabase deploy/migration access | This session still has no Supabase personal access token/CLI (a standing limitation — see `docs/CATALOG_AND_PACKAGES.md`). Migration `0011` and the new Edge Functions (`lookup-product-upc`, `send-invoice-email`) are written and ready; the shop owner applies/deploys them themselves via the CLI/SQL editor, same as prior migrations this project has shipped. |
+| Supabase deploy/migration access | This session still has no Supabase personal access token/CLI (a standing limitation — see `docs/CATALOG_AND_PACKAGES.md`). Migration `0011` and the new Edge Functions (`lookup-product-upc`, `send-invoice-email`, `lookup-product-suggestions`) are written and ready; the shop owner applies/deploys them themselves via the CLI/SQL editor, same as prior migrations this project has shipped. |
 
 ## Known limitations (through this phase)
 
@@ -230,3 +269,13 @@ have) — see each phase below for what's ported vs. built new.
   paid, the stock movements it recorded are permanent (an `'adjustment'`
   movement is the manual undo, same ledger mechanism, just not wired to a
   UI button yet).
+- Product suggestions return no `category` — the AI schema deliberately
+  sticks to name/brand/model/price/photo/source (see `ProductSuggestion`);
+  selecting a suggestion doesn't auto-set a catalog item's category, staff
+  still pick that manually (or via the existing name-based heuristic in
+  `src/lib/categorize.ts`).
+- Until `ANTHROPIC_API_KEY` is set and `lookup-product-suggestions` is
+  deployed, `ProductSuggestField` never shows a dropdown of real results —
+  it silently reports "No matches found." after every search, same
+  graceful-degradation shape as the barcode lookup before its own Edge
+  Function is deployed.

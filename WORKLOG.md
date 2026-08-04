@@ -1591,3 +1591,68 @@ sending a copy by email.
   to the live Supabase project — same standing limitation as every prior
   round's new Edge Functions. No new secret is needed for it, though —
   only `supabase functions deploy send-invoice-email`.
+
+## Round 24 — Product-suggestion autocomplete for manual entry
+
+The user's earlier ask — "I need to be able to type in like 'NA-12F' and
+have the software lookup options from the web and show me auto-complete
+suggestions" — was the one piece of that message not yet built. This
+round closes it out.
+
+- **`lookup-product-suggestions` Edge Function** (new): given a
+  partially-typed SKU/model/name, calls Claude with the `web_search` tool
+  and a structured (`output_config`/`json_schema`) response — up to 5
+  candidate real products, ranked most-likely-match first, each with
+  brand/model/name, MSRP if found, a photo URL if found, and a source
+  URL. Same underlying technique as `car-audio-inventory`'s
+  `/api/lookup/vision` route (Claude + `web_search` + structured output),
+  ported for a text query instead of a photo, and called directly over
+  HTTPS rather than pulling in `@anthropic-ai/sdk` — this project's Edge
+  Functions stay dependency-light (raw `fetch`, same as `send-quote-
+  email`'s Resend call), and one call site doesn't justify Deno's npm
+  interop. Same "any signed-in user" auth rule as `lookup-product-upc`.
+  Typechecked standalone via the project's Deno-shim workflow — clean.
+- **`DataRepository.lookupProductSuggestions()`**: demo mode always
+  resolves `[]` — no real AI/web-search call, ever, same rule as
+  `runShopifyImport`/`lookupProductByUpc`. Production never throws either:
+  any failure (function not deployed, missing `ANTHROPIC_API_KEY`, a rate
+  limit, a network hiccup) degrades to `[]`, since this powers an
+  autocomplete dropdown, not a blocking step in a form.
+- **`src/components/ProductSuggestField.tsx`** (new): a reusable text
+  input that debounce-searches (600ms, 3-char minimum) and lists results
+  in a dropdown (photo, brand/model, name, price) — picking one hands the
+  full `ProductSuggestion` back to the caller to fill in. Caught a real
+  layout bug writing this round's own smoke test: an absolutely-
+  positioned dropdown doesn't push page content down, so it was silently
+  overlaying (and swallowing clicks on) the price field sitting directly
+  below the name field in the scan workspace's "Add a one-off item" row.
+  Fixed by rendering the dropdown in normal document flow instead — it
+  now pushes sibling fields down rather than covering them, which is
+  correct everywhere this component gets used, not just that one row.
+  Wired into two places: the Settings catalog add/edit modal's "Model"
+  field (a selection also fills brand/name/price) and the scan
+  workspace's one-off-item name field (a selection also carries
+  brand/model/image into the cart row via a `customSuggestion` state that
+  clears the instant the name is hand-edited again, so a stale match
+  never rides along silently).
+
+### Verification (this round)
+- `npx tsc -b --noEmit`, `npm run lint`, `npm run test -- --run`
+  (255/255 across 19 files — 1 new in `demoRepository.test.ts`), and
+  `npm run build` all clean.
+- A Playwright smoke pass confirmed: the Settings "Add product" modal's
+  Model field is a working `ProductSuggestField` that preserves typed
+  text and shows "No matches found." after the debounce settles in demo
+  mode (never a real web call, never crashes); a product saved through it
+  lists normally; the scan workspace's one-off-item field behaves the
+  same way and a one-off item added through it lands in the cart
+  correctly — including after the dropdown-overlap layout fix, confirmed
+  by the Price field and Add button being reachable and clickable
+  immediately below it.
+- `lookup-product-suggestions` is written and typechecked but **not yet
+  deployed** to the live Supabase project, and needs a secret this
+  session cannot set — `ANTHROPIC_API_KEY` is not yet configured anywhere
+  in this project. Until both are done, the autocomplete quietly shows
+  "No matches found." rather than erroring — the same graceful-
+  degradation shape as the barcode lookup before `lookup-product-upc` was
+  deployed.

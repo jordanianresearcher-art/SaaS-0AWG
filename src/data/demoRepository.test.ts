@@ -241,6 +241,10 @@ describe('DemoRepository', () => {
     expect(missing).toEqual({ source: 'not_found' })
   })
 
+  it('lookupProductSuggestions never makes a real AI/web-search call in demo mode', async () => {
+    expect(await repo.lookupProductSuggestions('NA-12F')).toEqual([])
+  })
+
   it('seeds one paid demo invoice, linked to its stock movement', async () => {
     const invoices = await repo.listInvoices()
     expect(invoices).toHaveLength(1)

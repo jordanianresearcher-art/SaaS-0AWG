@@ -7,6 +7,7 @@ import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
 import { Button, Card, EmptyState, Field, Input, LoadingBlock, Modal, Select, Textarea } from '../../components/ui'
 import CatalogOrganizer from '../../components/CatalogOrganizer'
+import { ProductSuggestField } from '../../components/ProductSuggestField'
 import { formatCurrency, parseDollarsToCents } from '../../lib/format'
 import { PAYMENT_METHOD_INFO } from '../../lib/paymentMethods'
 import { PRODUCT_CATEGORIES, PRODUCT_CATEGORY_INFO } from '../../lib/audioConfigs'
@@ -363,6 +364,8 @@ function CatalogSection({ reloadSignal }: { reloadSignal: number }) {
     register,
     handleSubmit,
     reset,
+    watch,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<CatalogFormValues>({ resolver: zodResolver(catalogSchema) })
 
@@ -490,8 +493,21 @@ function CatalogSection({ reloadSignal }: { reloadSignal: number }) {
             <Field label="Brand" htmlFor="cat-brand">
               <Input id="cat-brand" {...register('brand')} placeholder="Kicker" />
             </Field>
-            <Field label="Model" htmlFor="cat-model">
-              <Input id="cat-model" {...register('model')} placeholder="KEY200.4" />
+            <Field label="Model" htmlFor="cat-model" hint="Start typing a model number to search the web for it.">
+              <ProductSuggestField
+                id="cat-model"
+                value={watch('model')}
+                onChange={(v) => setValue('model', v, { shouldDirty: true })}
+                onSelect={(s) => {
+                  if (s.brand) setValue('brand', s.brand, { shouldDirty: true })
+                  setValue('model', s.model ?? watch('model'), { shouldDirty: true })
+                  setValue('name', s.name, { shouldDirty: true, shouldValidate: true })
+                  if (s.unitPriceCents !== null) {
+                    setValue('price', (s.unitPriceCents / 100).toString(), { shouldDirty: true, shouldValidate: true })
+                  }
+                }}
+                placeholder="KEY200.4"
+              />
             </Field>
           </div>
           <Field label="What is it?" htmlFor="cat-name" error={errors.name?.message} required>

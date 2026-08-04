@@ -208,6 +208,22 @@ export type UpcLookupResult =
   | { source: 'external'; name: string | null; brand: string | null; unitPriceCents: number | null; imageUrl: string | null; upc: string }
   | { source: 'not_found' }
 
+/**
+ * One AI+web-search candidate for a partially-typed SKU/model/name (e.g.
+ * "NA-12F") when staff are adding a new catalog product — see
+ * ProductSuggestField. Deliberately loose/optional-feeling even though every
+ * field is present: the model is told to prefer returning fewer results (or
+ * none) over guessing, so any field can come back null.
+ */
+export interface ProductSuggestion {
+  name: string
+  brand: string | null
+  model: string | null
+  unitPriceCents: number | null
+  imageUrl: string | null
+  sourceUrl: string | null
+}
+
 export interface ShopifyImportOptions {
   /** Resume a prior run — pass back the nextCursor from its result. */
   afterCursor?: string | null
@@ -249,6 +265,8 @@ export interface DataRepository {
   findCatalogItemByCode(code: string): Promise<CatalogItem | null>
   /** Local catalog first, then (production only) an external UPC database. A future phase adds a photo-lookup fallback for codes nothing recognizes. */
   lookupProductByUpc(code: string): Promise<UpcLookupResult>
+  /** AI+web-search autocomplete for a partially-typed SKU/model/name when adding a new catalog product. Demo mode never makes a real call — always resolves []. Production degrades to [] on any failure rather than throwing, same pattern as lookupProductByUpc. */
+  lookupProductSuggestions(query: string): Promise<ProductSuggestion[]>
 
   listInvoices(): Promise<Invoice[]>
   getInvoice(invoiceId: string): Promise<Invoice | null>

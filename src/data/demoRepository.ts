@@ -24,6 +24,7 @@ import type {
   NewPackageTemplateInput,
   NewQuoteInput,
   NewStockMovementInput,
+  ProductSuggestion,
   SendEmailResult,
   ShopifyImportResult,
   ShopSettingsPatch,
@@ -288,6 +289,14 @@ export class DemoRepository implements DataRepository {
     // runShopifyImport) — a local miss is just a miss here.
     const item = await this.findCatalogItemByCode(code)
     return item ? { source: 'catalog', catalogItem: item } : { source: 'not_found' }
+  }
+
+  async lookupProductSuggestions(query: string): Promise<ProductSuggestion[]> {
+    // Demo mode must never make a real external (AI/web-search) call — no
+    // local catalog fallback makes sense for free-text autocomplete either,
+    // so this is always an empty list, regardless of what was typed.
+    void query
+    return []
   }
 
   async listInvoices(): Promise<Invoice[]> {

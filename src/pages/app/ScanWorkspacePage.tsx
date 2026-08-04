@@ -11,6 +11,7 @@ import { Barcode, Camera, Loader2, Mail, MapPin, Minus, Package, Pencil, Phone, 
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
 import { Button, Card, EmptyState, Field, Input, LoadingBlock, Modal, Select } from '../../components/ui'
+import { ProductSuggestField } from '../../components/ProductSuggestField'
 import { formatCurrency, formatDateTime, parseDollarsToCents } from '../../lib/format'
 import { newId } from '../../lib/ids'
 import { useHardwareScanner } from '../../lib/useHardwareScanner'
@@ -25,6 +26,7 @@ import {
   type ScannedCartItem,
 } from '../../lib/scanCart'
 import type { CatalogItem, Invoice, InvoicePaymentMethod, Shop } from '../../types'
+import type { ProductSuggestion } from '../../data/repository'
 import type { ScanQuotePrefill } from './NewQuotePage'
 
 // @zxing/browser (~470kb) only matters once someone actually opens the
@@ -80,6 +82,10 @@ export default function ScanWorkspacePage() {
   const [editingRowId, setEditingRowId] = useState<string | null>(null)
   const [customName, setCustomName] = useState('')
   const [customPrice, setCustomPrice] = useState('')
+  // Set only by picking a ProductSuggestField dropdown result — carries the
+  // brand/model/image that plain text typing can't. Cleared the moment the
+  // name is hand-edited again so a stale match never rides along silently.
+  const [customSuggestion, setCustomSuggestion] = useState<ProductSuggestion | null>(null)
   const [creatingInvoice, setCreatingInvoice] = useState(false)
   const [paymentMethod, setPaymentMethod] = useState<InvoicePaymentMethod>('cash')
   const [paymentAmount, setPaymentAmount] = useState('')
@@ -166,9 +172,9 @@ export default function ScanWorkspacePage() {
         id: newId(),
         catalogItemId: null,
         name: customName.trim(),
-        brand: null,
-        model: null,
-        imageUrl: null,
+        brand: customSuggestion?.brand ?? null,
+        model: customSuggestion?.model ?? null,
+        imageUrl: customSuggestion?.imageUrl ?? null,
         unitPriceCents: parseDollarsToCents(customPrice) ?? 0,
         quantity: 1,
         category: null,
@@ -176,6 +182,7 @@ export default function ScanWorkspacePage() {
     ])
     setCustomName('')
     setCustomPrice('')
+    setCustomSuggestion(null)
   }
 
   async function handleCreateInvoice() {
@@ -350,8 +357,22 @@ export default function ScanWorkspacePage() {
 
               <Card className="no-print space-y-2">
                 <p className="text-sm font-semibold text-ink">Add a one-off item</p>
-                <div className="flex flex-wrap gap-2">
-                  <Input value={customName} onChange={(e) => setCustomName(e.target.value)} placeholder="Item name" className="min-w-40 flex-1" />
+                <div className="flex flex-wrap items-start gap-2">
+                  <div className="min-w-40 flex-1">
+                    <ProductSuggestField
+                      value={customName}
+                      onChange={(v) => {
+                        setCustomName(v)
+                        setCustomSuggestion(null)
+                      }}
+                      onSelect={(s) => {
+                        setCustomName(s.name)
+                        setCustomSuggestion(s)
+                        if (s.unitPriceCents !== null) setCustomPrice((s.unitPriceCents / 100).toString())
+                      }}
+                      placeholder="Item name — try typing a model number"
+                    />
+                  </div>
                   <Input value={customPrice} onChange={(e) => setCustomPrice(e.target.value)} placeholder="Price" inputMode="decimal" className="w-28" />
                   <Button variant="secondary" onClick={addCustomItem} disabled={!customName.trim()}>
                     <Plus className="h-4 w-4" aria-hidden="true" />
