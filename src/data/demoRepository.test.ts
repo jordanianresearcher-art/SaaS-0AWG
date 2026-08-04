@@ -220,6 +220,78 @@ describe('DemoRepository', () => {
     }
   })
 
+  it('finds a catalog item by UPC or SKU, and returns null for no match', async () => {
+    const created = await repo.createCatalogItem({
+      brand: 'JL Audio', model: '10W3', name: '10" subwoofer', defaultPriceCents: 19900,
+      upc: '012345678905', sku: 'JL-10W3',
+    })
+    expect((await repo.findCatalogItemByCode('012345678905'))?.id).toBe(created.id)
+    expect((await repo.findCatalogItemByCode('JL-10W3'))?.id).toBe(created.id)
+    expect(await repo.findCatalogItemByCode('nope-not-a-real-code')).toBeNull()
+  })
+
+  it('lookupProductByUpc matches the local catalog and never makes a real external call in demo mode', async () => {
+    const created = await repo.createCatalogItem({
+      brand: 'JL Audio', model: '10W3', name: '10" subwoofer', defaultPriceCents: 19900, upc: '012345678905',
+    })
+    const found = await repo.lookupProductByUpc('012345678905')
+    expect(found).toEqual({ source: 'catalog', catalogItem: created })
+
+    const missing = await repo.lookupProductByUpc('000000000000')
+    expect(missing).toEqual({ source: 'not_found' })
+  })
+
+  it('seeds one paid demo invoice, linked to its stock movement', async () => {
+    const invoices = await repo.listInvoices()
+    expect(invoices).toHaveLength(1)
+    const [invoice] = invoices
+    expect(invoice.status).toBe('paid')
+    expect(invoice.invoiceNumber).toBe(1)
+    expect(invoice.items).toHaveLength(1)
+
+    const movements = await repo.listStockMovements(invoice.items[0].catalogItemId!)
+    const linked = movements.find((m) => m.sourceInvoiceId === invoice.id)
+    expect(linked?.movementType).toBe('sale')
+    expect(linked?.quantityDelta).toBe(-invoice.items[0].quantity)
+  })
+
+  it('creates an invoice as a draft with no stock movement yet, then marks it paid and decrements stock', async () => {
+    const catalogItems = await repo.listCatalogItems()
+    const sub = catalogItems.find((i) => i.model === 'CompR 12')!
+    const quantityBefore = sub.quantityOnHand
+
+    const invoice = await repo.createInvoice({
+      items: [
+        { catalogItemId: sub.id, brand: sub.brand, model: sub.model, name: sub.name, quantity: 2, unitPriceCents: sub.defaultPriceCents!, category: sub.category },
+        { catalogItemId: null, brand: null, model: null, name: 'Shop supplies fee', quantity: 1, unitPriceCents: 500 },
+      ],
+    })
+    expect(invoice.status).toBe('draft')
+    expect(invoice.subtotalCents).toBe(sub.defaultPriceCents! * 2 + 500)
+    expect(invoice.invoiceNumber).toBeGreaterThan(0)
+
+    // Draft — creating it must never touch inventory.
+    const stillBefore = (await repo.listCatalogItems()).find((i) => i.id === sub.id)!
+    expect(stillBefore.quantityOnHand).toBe(quantityBefore)
+
+    const paid = await repo.markInvoicePaid(invoice.id, 'cash', invoice.subtotalCents)
+    expect(paid.status).toBe('paid')
+    expect(paid.paymentMethod).toBe('cash')
+    expect(paid.paidAt).not.toBeNull()
+
+    const afterPaid = (await repo.listCatalogItems()).find((i) => i.id === sub.id)!
+    expect(afterPaid.quantityOnHand).toBe(quantityBefore - 2) // the custom fee line never touches stock
+
+    // Idempotent — calling it again must not double-decrement.
+    await repo.markInvoicePaid(invoice.id, 'cash', invoice.subtotalCents)
+    const afterSecondCall = (await repo.listCatalogItems()).find((i) => i.id === sub.id)!
+    expect(afterSecondCall.quantityOnHand).toBe(quantityBefore - 2)
+  })
+
+  it('throws marking an unknown invoice paid', async () => {
+    await expect(repo.markInvoicePaid('nope', 'cash', 100)).rejects.toThrow('Invoice not found')
+  })
+
   it('seeds package templates covering approved, sourced-from-a-quote, and pending review states', async () => {
     const templates = await repo.listPackageTemplates()
     expect(templates.length).toBeGreaterThanOrEqual(3)

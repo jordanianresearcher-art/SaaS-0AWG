@@ -67,31 +67,67 @@ have) — see each phase below for what's ported vs. built new.
   short realistic history (received 10, sold 4) on two catalog items so
   the ledger isn't empty in a fresh demo. `DEMO_SEED_VERSION` bumped to 11.
 
-## Not yet built (Phases 2-5)
+## Completed (Phase 2 — Scan workspace + barcode lookup + invoices)
 
-- **Phase 2 — Scan workspace + barcode lookup**: `BarcodeScanner.tsx`
-  (ported from `car-audio-inventory`'s `CameraCapture.tsx`, `@zxing/browser`),
-  a `lookup-product-upc` Edge Function (ported from that app's
-  `/api/lookup/upc` route, UPCitemdb, no API key needed on the free trial
-  tier), and the actual `ScanWorkspacePage` — the center work-area cart of
-  scanned items (image/name/brand/price, pencil-to-edit) with the side
-  panel of document-type actions. Wired first to just **invoices** end to
-  end (create, print, mark paid, decrement stock via `recordStockMovement`).
+- **`src/components/BarcodeScanner.tsx`**: ported from `car-audio-inventory`'s
+  `CameraCapture.tsx` — `@zxing/browser` live camera decode, a "Take photo
+  instead" fallback for products with no barcode (the photo capture itself
+  is wired to a "not available yet" message this phase; AI identification
+  is Phase 4). Code-split via `React.lazy`/`Suspense` in `ScanWorkspacePage`
+  — the ~470kb zxing bundle only downloads once someone actually opens the
+  scanner, not on every page load.
+- **`lookup-product-upc` Edge Function**: ported from that app's
+  `/api/lookup/upc` route (UPCitemdb's free trial endpoint, no API key
+  needed). Requires just a signed-in user — no shop-membership check, since
+  it's a pure external lookup that touches no shop-specific rows.
+- **`DataRepository.lookupProductByUpc()`**: local `catalog_items` match by
+  UPC/SKU first (`findCatalogItemByCode`), falling back to the Edge
+  Function only in production — demo mode never makes the real network
+  call, same rule as `runShopifyImport`. A successful external match is
+  immediately saved into the shop's catalog (with the UPC set) so the next
+  scan of that exact barcode is an instant local hit.
+- **Invoices, end to end**: `DataRepository.createInvoice()` (always
+  `'draft'`, never touches stock) and `markInvoicePaid()` (idempotent —
+  records one `'sale'` `stock_movements` row per line item that has a
+  `catalogItemId`, skipping custom/one-off lines, via the same
+  `recordStockMovement`/`apply_stock_movement` path Phase 1 built).
+  `invoice_number` is assigned by the DB trigger in production; demo mode
+  computes the equivalent locally.
+- **`src/lib/scanCart.ts`**: the pure cart model backing the workspace —
+  scanning/tapping the same catalog item twice bumps quantity instead of
+  duplicating the row (custom items never merge, since two one-off entries
+  aren't guaranteed to be "the same thing"), plus the edit/remove/subtotal/
+  invoice-item-conversion helpers. Fully unit tested before any UI wiring.
+- **`ScanWorkspacePage.tsx`** (`/app/scan`, the new primary nav
+  destination — see `AppLayout.tsx`, the mobile bottom nav's center button
+  now opens Scan instead of "New quote"): center work area holds the
+  running cart (image/name/brand/price, quantity stepper, pencil-to-edit,
+  remove) while building; the side panel has the four document-type tiles
+  (only **Invoice** is active — Quote/Receive inventory/Outgoing order
+  show a "Soon" badge, not yet wired) plus the create/pay/print flow. Once
+  an invoice is created the center area swaps to a read-only invoice
+  summary (this doubles as the printed view — `window.print()` with the
+  existing `.no-print` convention hiding the side panel/nav chrome, same
+  pattern as `QuoteDetailPage`).
+
+## Not yet built (Phases 3-5)
+
 - **Phase 3 — Remaining document types**: quote-from-scan (hands off into
   the existing `NewQuotePage` flow, pre-filled), vendor receiving, and
-  outgoing orders, all using the `invoices`/`outgoing_orders` tables
-  already landed in Phase 1's migration.
+  outgoing orders, all using the `outgoing_orders` table already landed in
+  Phase 1's migration.
 - **Phase 4 — AI photo lookup + generated codes + label printing**: a
   `lookup-product-vision` Edge Function (ported from that app's
   `/api/lookup/vision` route — Claude + `web_search`, Shopify cross-check,
-  official product-photo scraping) for products with no findable barcode.
-  For products with no UPC anywhere, `src/lib/upc.ts` generates a real,
-  checksum-valid **UPC-A number in GS1's reserved in-store/restricted-
-  circulation prefix (`02`)** — guaranteed never to collide with an actual
-  retail product's barcode, while still being a genuine, scannable GTIN
-  (not a fake/ambiguous internal code). `LabelSheetPage` prints these as a
-  grid of labels (name, code, barcode) sized for the shop's 4"×6" label
-  printer.
+  official product-photo scraping) for products with no findable barcode —
+  the scanner's "Take photo instead" button already exists and is wired to
+  a placeholder message pending this. For products with no UPC anywhere,
+  `src/lib/upc.ts` generates a real, checksum-valid **UPC-A number in
+  GS1's reserved in-store/restricted-circulation prefix (`02`)** —
+  guaranteed never to collide with an actual retail product's barcode,
+  while still being a genuine, scannable GTIN (not a fake/ambiguous
+  internal code). `LabelSheetPage` prints these as a grid of labels (name,
+  code, barcode) sized for the shop's 4"×6" label printer.
 - **Phase 5 — Voice ordering**: record → `transcribe-voice-order` Edge
   Function (OpenAI Whisper) → `parse-voice-order` Edge Function (Claude
   structured output against this app's own `ProductCategory` taxonomy and
@@ -104,19 +140,24 @@ have) — see each phase below for what's ported vs. built new.
 | --- | --- |
 | `ANTHROPIC_API_KEY` (photo lookup, voice-order parsing) | Not yet set. Not used server-side anywhere in this project today (Shopify import and email use their own separate credentials) — the shop owner will need to set this as a new Supabase Edge Function secret, same self-serve mechanism as `RESEND_API_KEY`/`SHOPIFY_ADMIN_ACCESS_TOKEN`. |
 | `OPENAI_API_KEY` (voice transcription) | Not yet set — new secret, same mechanism. |
-| UPCitemdb (barcode lookup) | No key needed on the free trial tier (~100 lookups/day/IP) — same as `car-audio-inventory` already uses it. |
-| Supabase deploy/migration access | This session still has no Supabase personal access token/CLI (a standing limitation — see `docs/CATALOG_AND_PACKAGES.md`). Migration `0011` is written and ready; the shop owner applies it themselves via the CLI/SQL editor, same as prior migrations this project has shipped. |
+| UPCitemdb (barcode lookup) | **Live this phase** — no key needed on the free trial tier (~100 lookups/day/IP), same as `car-audio-inventory` already uses it. Worth watching for rate-limit errors at real shop volume; a paid key is a drop-in swap in `lookup-product-upc/index.ts` if needed later. |
+| Supabase deploy/migration access | This session still has no Supabase personal access token/CLI (a standing limitation — see `docs/CATALOG_AND_PACKAGES.md`). Migration `0011` (and the two new Edge Functions) are written and ready; the shop owner applies/deploys them themselves via the CLI/SQL editor, same as prior migrations this project has shipped. |
 
-## Known limitations (this phase)
+## Known limitations (through this phase)
 
-- `quantity_on_hand` is real but nothing decrements it yet outside of the
-  demo seed and direct `recordStockMovement` calls — no UI writes to it
-  until Phase 2's invoice flow lands ("sale" movements) and Phase 3's
-  receiving/outgoing-order flows.
-- `invoices`/`outgoing_orders` tables exist in the schema but have no
-  repository methods or UI yet — deliberately landed early (Phase 1) so
-  `stock_movements.source_invoice_id`/`source_outgoing_order_id` could
-  reference real tables from the start, rather than being added as
-  dangling nullable FKs later.
-- No barcode scanning, photo lookup, or voice input exists yet in this
-  app — this phase is schema/ledger only. See "Not yet built" above.
+- Catalog items created from an external UPC lookup land `importSource:
+  'manual'` — there's no dedicated `'upc_lookup'` value in that enum. A
+  minor categorization nuance, not worth a migration on its own this round.
+- The camera-photo fallback in `BarcodeScanner` captures a frame but
+  currently just tells staff photo lookup isn't available yet — the AI
+  vision pipeline is Phase 4.
+- Only **Invoice** is a working document type. Quote/Receive inventory/
+  Outgoing order are visible in the side panel (so the eventual four-way
+  choice is discoverable) but disabled — Phase 3.
+- No generated codes or label printing yet — items with no findable UPC
+  just fail the lookup and staff add them manually; nothing queues a label
+  to print. Phase 4.
+- `markInvoicePaid` has no compensating "void a paid invoice" path — once
+  paid, the stock movements it recorded are permanent (an `'adjustment'`
+  movement is the manual undo, same ledger mechanism, just not wired to a
+  UI button yet).

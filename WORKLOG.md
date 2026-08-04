@@ -1358,3 +1358,83 @@ no UI for any of the four document-type actions yet; see
   Supabase project** — this session still has no Supabase CLI/personal
   access token (a standing limitation, see `docs/CATALOG_AND_PACKAGES.md`).
   The shop owner applies it themselves, same as every prior migration.
+
+## Round 20 — Scan-to-Invoice, Phase 2: scan workspace, barcode lookup, invoices
+
+Continuing straight from Round 19's ledger foundation into the actual
+scanning screen and the first working document type (invoice) end to end.
+
+- **`@zxing/browser`** added (same dependency `car-audio-inventory` uses).
+- **`src/components/BarcodeScanner.tsx`**: ported from that app's
+  `CameraCapture.tsx` — live camera barcode decode plus a "Take photo
+  instead" fallback for products with no barcode (photo capture wired to a
+  placeholder message this round; AI identification is Phase 4). Adapted
+  to this app's UI kit and no-dark-mode styling (the source app supports
+  dark mode; this one doesn't).
+- **`lookup-product-upc` Edge Function**: ported from that app's
+  `/api/lookup/upc` route — UPCitemdb's free trial endpoint, no API key
+  needed. Requires only a signed-in user (no shop-membership check — it's
+  a pure external lookup, touches no shop-specific rows). Typechecked
+  standalone via the project's established Deno-shim workflow.
+- **`src/lib/scanCart.ts`**: the pure cart model — scanning/tapping the
+  same catalog item twice bumps quantity instead of duplicating the row;
+  custom items never merge (two one-off entries aren't guaranteed to be
+  "the same thing"). 11 tests, written and passing before any UI wiring.
+- **`DataRepository.lookupProductByUpc()`**: local catalog match by UPC/SKU
+  first, external Edge Function fallback in production only (demo mode
+  never makes the real call, same rule as `runShopifyImport`). A
+  successful external match is auto-saved into the catalog with its UPC
+  set, so the next scan of that exact barcode is an instant local hit next
+  time.
+- **Invoices, end to end**: `createInvoice()` (always `'draft'`, never
+  touches stock — a draft can be freely abandoned) and `markInvoicePaid()`
+  (idempotent; records one `'sale'` stock movement per line item that has
+  a real `catalogItemId`, custom lines skipped, reusing Round 19's
+  `recordStockMovement`/`apply_stock_movement` path rather than
+  duplicating the atomicity logic). Implemented in both `DemoRepository`
+  and `SupabaseRepository`.
+- **`ScanWorkspacePage.tsx`** (`/app/scan`): the actual scan-to-invoice
+  screen — center work area holds the running cart (image/name/brand/
+  price, quantity stepper, pencil-to-edit with a draft-string pattern so
+  the price input doesn't snap mid-keystroke, remove) while building; side
+  panel has the four document-type tiles (only **Invoice** active —
+  Quote/Receive inventory/Outgoing order show a "Soon" badge so the
+  eventual four-way choice is discoverable without being functional yet).
+  Once an invoice is created, the center area swaps to a read-only invoice
+  summary that doubles as the print view (`window.print()`, same
+  `.no-print` chrome-hiding convention as `QuoteDetailPage`).
+- **Navigation**: Scan added to `AppLayout.tsx`'s top nav (positioned right
+  after Home) and became the mobile bottom nav's prominent center button
+  (previously "New quote," which stays reachable from the Quotes and
+  Dashboard pages' own buttons) — matches the user's framing of scanning
+  as the app's primary daily workflow. The bottom nav's flanking Home/
+  Quotes/Follow-ups/Reports slots were made explicit
+  (`bottomFlankItems`, filtered out of `NAV`) rather than relying on
+  `slice()` indices that would've silently dropped Reports off mobile
+  once Scan was inserted into the main nav array.
+- **Bundle size**: `@zxing/browser` alone added ~470kb to the production
+  bundle. Fixed by code-splitting `BarcodeScanner` via `React.lazy`/
+  `Suspense` inside the Scan page (only loads once the scanner modal
+  actually opens) — confirmed via a real build that it lands in its own
+  chunk rather than bloating the bundle every page load pays for.
+
+### Verification (this round)
+- `npx tsc -b --noEmit`, `npm run lint`, `npm run test -- --run`
+  (235/235 across 17 files — 11 new in `scanCart.test.ts`, several more
+  invoice/lookup tests in `demoRepository.test.ts`), and `npm run build`
+  all clean.
+- A Playwright smoke pass against `vite preview` confirmed: Scan is
+  reachable from the top nav; manual catalog search adds an item to the
+  cart; the quantity stepper works; pencil-editing renames a row; a custom
+  one-off item can be added; the document-type panel shows exactly Invoice
+  active and the other three "Soon"; creating an invoice locks the cart
+  into a read-only Unpaid summary with the payment amount prefilled from
+  the total; marking paid flips it to "Paid — Cash"; the print button
+  appears once paid; "Start a new scan" resets everything. A separate
+  mobile-viewport screenshot confirmed the bottom nav's Scan FAB and that
+  Reports/Follow-ups are still reachable (the exact regression risk the
+  `bottomFlankItems` refactor above was written to avoid).
+- Migration `0011` and the new `lookup-product-upc` function are written
+  and ready but **not yet applied/deployed to the live Supabase project**
+  — same standing limitation as every prior round (no Supabase CLI/token
+  in this session). The shop owner applies/deploys them when ready.

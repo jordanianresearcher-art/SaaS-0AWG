@@ -3,6 +3,7 @@ import type {
   Customer,
   EmailMessage,
   Employee,
+  Invoice,
   PackageTemplate,
   PackageTemplateItem,
   Quote,
@@ -31,11 +32,12 @@ export interface DemoDB {
   catalogItems: CatalogItem[]
   packageTemplates: PackageTemplate[]
   stockMovements: StockMovement[]
+  invoices: Invoice[]
   /** Bumped when the seed shape changes so stale localStorage is discarded. */
   seedVersion: number
 }
 
-export const DEMO_SEED_VERSION = 11
+export const DEMO_SEED_VERSION = 12
 
 const SHOP_ID = 'demo-shop'
 
@@ -638,6 +640,8 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
     demoCatalogItem({
       brand: 'Rockford Fosgate', model: 'R500X1D', name: 'Mono amplifier', category: 'mono_amp',
       defaultPriceCents: 19900, msrpCents: 22900, specs: { rmsWatts: 500 },
+      // Matches the seeded stock movements below: received 6, sold 1 (via demo-invoice-1).
+      quantityOnHand: 5,
     }),
     demoCatalogItem({
       brand: 'Rockford Fosgate', model: 'RFK4X', name: '4-gauge amp wiring kit', category: 'wiring_kit',
@@ -827,6 +831,7 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
     movementType: StockMovement['movementType']
     quantityDelta: number
     counterpartyName?: string | null
+    sourceInvoiceId?: string | null
     daysAgoCount: number
   }): StockMovement {
     return {
@@ -837,13 +842,50 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
       quantityDelta: fields.quantityDelta,
       unitCostCents: null,
       counterpartyName: fields.counterpartyName ?? null,
-      sourceInvoiceId: null,
+      sourceInvoiceId: fields.sourceInvoiceId ?? null,
       sourceOutgoingOrderId: null,
       note: null,
       createdBy: 'demo-user-owner',
       createdAt: daysAgo(now, fields.daysAgoCount),
     }
   }
+
+  // A walk-in scan-to-invoice sale: one mono amp, paid cash, printed on the
+  // spot — showcases the invoice document type end to end (its 'sale' stock
+  // movement is linked back via sourceInvoiceId, unlike the two legacy sales
+  // below which predate invoice tracking).
+  const demoInvoices: Invoice[] = [
+    {
+      id: 'demo-invoice-1',
+      shopId: SHOP_ID,
+      customerId: null,
+      invoiceNumber: 1,
+      status: 'paid',
+      paymentMethod: 'cash',
+      paymentAmountCents: 19900,
+      paidAt: daysAgo(now, 3),
+      subtotalCents: 19900,
+      totalCents: 19900,
+      notes: null,
+      createdBy: 'demo-user-owner',
+      createdAt: daysAgo(now, 3),
+      updatedAt: daysAgo(now, 3),
+      items: [
+        {
+          id: 'demo-invoice-item-1',
+          invoiceId: 'demo-invoice-1',
+          catalogItemId: 'demo-cat-4',
+          brand: 'Rockford Fosgate',
+          model: 'R500X1D',
+          name: 'Mono amplifier',
+          quantity: 1,
+          unitPriceCents: 19900,
+          category: 'mono_amp',
+          position: 0,
+        },
+      ],
+    },
+  ]
 
   const stockMovements: StockMovement[] = [
     stockMovement({
@@ -862,11 +904,20 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
       id: 'demo-stock-4', catalogItemId: 'demo-cat-5', movementType: 'sale',
       quantityDelta: -2, daysAgoCount: 5,
     }),
+    stockMovement({
+      id: 'demo-stock-5', catalogItemId: 'demo-cat-4', movementType: 'receiving',
+      quantityDelta: 6, counterpartyName: 'Rockford Fosgate distributor', daysAgoCount: 20,
+    }),
+    stockMovement({
+      id: 'demo-stock-6', catalogItemId: 'demo-cat-4', movementType: 'sale',
+      quantityDelta: -1, sourceInvoiceId: 'demo-invoice-1', daysAgoCount: 3,
+    }),
   ]
 
   return {
     shop, employees, customers, quotes, options, events, responses, emails, catalogItems, packageTemplates,
     stockMovements,
+    invoices: demoInvoices,
     seedVersion: DEMO_SEED_VERSION,
   }
 }

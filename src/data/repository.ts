@@ -4,6 +4,8 @@ import type {
   EmailMessage,
   Employee,
   ImportSource,
+  Invoice,
+  InvoicePaymentMethod,
   PackageTemplate,
   PackageTemplateSource,
   PaymentMethod,
@@ -172,6 +174,40 @@ export interface NewStockMovementInput {
   note?: string | null
 }
 
+/**
+ * A single finalized, itemized sale — the scan workspace's "invoice"
+ * document type. Created as 'draft'; markInvoicePaid() is what actually
+ * moves stock (a 'sale' movement per line item with a catalogItemId) —
+ * creating the invoice alone never touches quantityOnHand, so a draft can
+ * still be freely edited or abandoned before anything's really sold.
+ */
+export interface NewInvoiceInput {
+  customerId?: string | null
+  notes?: string | null
+  items: Array<{
+    /** Null for a one-off/custom line item with no catalog product behind it. */
+    catalogItemId: string | null
+    brand: string | null
+    model: string | null
+    name: string
+    quantity: number
+    unitPriceCents: number
+    category?: ProductCategory | null
+  }>
+}
+
+/**
+ * Result of scanning/typing a barcode: either it matches something already
+ * in this shop's catalog (the common case once a shop has scanned a
+ * product once before), an external UPC database has it (production only —
+ * demo mode never makes the real network call), or nothing knows about it
+ * (caller falls back to a photo lookup or manual entry — later phases).
+ */
+export type UpcLookupResult =
+  | { source: 'catalog'; catalogItem: CatalogItem }
+  | { source: 'external'; name: string | null; brand: string | null; unitPriceCents: number | null; imageUrl: string | null; upc: string }
+  | { source: 'not_found' }
+
 export interface ShopifyImportOptions {
   /** Resume a prior run — pass back the nextCursor from its result. */
   afterCursor?: string | null
@@ -208,6 +244,18 @@ export interface DataRepository {
   recordStockMovement(input: NewStockMovementInput): Promise<{ movement: StockMovement; catalogItem: CatalogItem }>
   /** Full shop history, or just one item's, newest first. */
   listStockMovements(catalogItemId?: string): Promise<StockMovement[]>
+
+  /** Local catalog match by UPC/SKU only — lookupProductByUpc below wraps this with an external-lookup fallback. */
+  findCatalogItemByCode(code: string): Promise<CatalogItem | null>
+  /** Local catalog first, then (production only) an external UPC database. A future phase adds a photo-lookup fallback for codes nothing recognizes. */
+  lookupProductByUpc(code: string): Promise<UpcLookupResult>
+
+  listInvoices(): Promise<Invoice[]>
+  getInvoice(invoiceId: string): Promise<Invoice | null>
+  /** Always created as 'draft' — never touches stock. */
+  createInvoice(input: NewInvoiceInput): Promise<Invoice>
+  /** Marks paid and records one 'sale' stock movement per line item that has a catalogItemId. */
+  markInvoicePaid(invoiceId: string, paymentMethod: InvoicePaymentMethod, paymentAmountCents: number): Promise<Invoice>
 
   listPackageTemplates(): Promise<PackageTemplate[]>
   createPackageTemplate(input: NewPackageTemplateInput): Promise<PackageTemplate>
@@ -253,4 +301,5 @@ export type {
   CatalogItem,
   PackageTemplate,
   StockMovement,
+  Invoice,
 }

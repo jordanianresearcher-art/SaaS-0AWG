@@ -4,6 +4,9 @@ import type {
   Customer,
   EmailMessage,
   Employee,
+  Invoice,
+  InvoiceItem,
+  InvoicePaymentMethod,
   PackageTemplate,
   PackageTemplateItem,
   ProductApprovalStatus,
@@ -23,6 +26,7 @@ import type {
 import type {
   DataRepository,
   NewCatalogItemInput,
+  NewInvoiceInput,
   NewPackageTemplateInput,
   NewQuoteInput,
   NewStockMovementInput,
@@ -30,6 +34,7 @@ import type {
   ShopifyImportOptions,
   ShopifyImportResult,
   ShopSettingsPatch,
+  UpcLookupResult,
 } from './repository'
 
 // Production repository. Row-level security scopes every query to shops the
@@ -227,6 +232,43 @@ function mapStockMovement(r: Row): StockMovement {
     note: r.note ?? null,
     createdBy: r.created_by ?? null,
     createdAt: r.created_at,
+  }
+}
+
+function mapInvoiceItem(r: Row): InvoiceItem {
+  return {
+    id: r.id,
+    invoiceId: r.invoice_id,
+    catalogItemId: r.catalog_item_id ?? null,
+    brand: r.brand ?? null,
+    model: r.model ?? null,
+    name: r.name,
+    quantity: r.quantity,
+    unitPriceCents: r.unit_price_cents,
+    category: r.category ?? null,
+    position: r.position,
+  }
+}
+
+const INVOICE_SELECT = '*, invoice_items(*)'
+
+function mapInvoice(r: Row): Invoice {
+  return {
+    id: r.id,
+    shopId: r.shop_id,
+    customerId: r.customer_id ?? null,
+    invoiceNumber: r.invoice_number,
+    status: r.status,
+    paymentMethod: r.payment_method ?? null,
+    paymentAmountCents: r.payment_amount_cents ?? null,
+    paidAt: r.paid_at ?? null,
+    subtotalCents: r.subtotal_cents,
+    totalCents: r.total_cents,
+    notes: r.notes ?? null,
+    createdBy: r.created_by ?? null,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+    items: ((r.invoice_items as Row[]) ?? []).map(mapInvoiceItem).sort((a, b) => a.position - b.position),
   }
 }
 
@@ -477,6 +519,154 @@ export class SupabaseRepository implements DataRepository {
     const { data, error } = await query
     if (error) throw error
     return (data as Row[]).map(mapStockMovement)
+  }
+
+  async findCatalogItemByCode(code: string): Promise<CatalogItem | null> {
+    const trimmed = code.trim()
+    if (!trimmed) return null
+    // Two plain .eq() queries rather than a single .or() — a scanned/typed
+    // code lands directly in a PostgREST filter string, and .or()'s syntax
+    // treats commas/parens specially, so this avoids ever needing to escape
+    // untrusted input into that mini-language at all.
+    const { data: byUpc, error: upcError } = await this.supabase
+      .from('catalog_items')
+      .select('*')
+      .eq('shop_id', this.shopId)
+      .eq('upc', trimmed)
+      .maybeSingle()
+    if (upcError) throw upcError
+    if (byUpc) return mapCatalogItem(byUpc as Row)
+
+    const { data: bySku, error: skuError } = await this.supabase
+      .from('catalog_items')
+      .select('*')
+      .eq('shop_id', this.shopId)
+      .eq('sku', trimmed)
+      .maybeSingle()
+    if (skuError) throw skuError
+    return bySku ? mapCatalogItem(bySku as Row) : null
+  }
+
+  async lookupProductByUpc(code: string): Promise<UpcLookupResult> {
+    const item = await this.findCatalogItemByCode(code)
+    if (item) return { source: 'catalog', catalogItem: item }
+
+    const { data, error } = await this.supabase.functions.invoke('lookup-product-upc', { body: { code } })
+    if (error) {
+      if (error instanceof FunctionsHttpError) {
+        // The function returns 404 for a legitimate "nothing known about
+        // this code" — that's not a failure worth surfacing as an error,
+        // the caller just falls back to a photo lookup or manual entry.
+        if (error.context?.status === 404) return { source: 'not_found' }
+        const body = await error.context.json().catch(() => null)
+        throw new Error(typeof body?.message === 'string' ? body.message : error.message)
+      }
+      throw error
+    }
+    return {
+      source: 'external',
+      name: data.name ?? null,
+      brand: data.brand ?? null,
+      unitPriceCents: data.unitPriceCents ?? null,
+      imageUrl: data.imageUrl ?? null,
+      upc: data.upc ?? code,
+    }
+  }
+
+  async listInvoices(): Promise<Invoice[]> {
+    const { data, error } = await this.supabase
+      .from('invoices')
+      .select(INVOICE_SELECT)
+      .eq('shop_id', this.shopId)
+      .order('invoice_number', { ascending: false })
+    if (error) throw error
+    return (data as Row[]).map(mapInvoice)
+  }
+
+  async getInvoice(invoiceId: string): Promise<Invoice | null> {
+    const { data, error } = await this.supabase.from('invoices').select(INVOICE_SELECT).eq('id', invoiceId).maybeSingle()
+    if (error) throw error
+    return data ? mapInvoice(data as Row) : null
+  }
+
+  async createInvoice(input: NewInvoiceInput): Promise<Invoice> {
+    const subtotalCents = input.items.reduce((sum, item) => sum + item.unitPriceCents * item.quantity, 0)
+    // invoice_number is assigned by the assign_invoice_number trigger
+    // (migration 0011) — never set client-side.
+    const { data: invoice, error: invoiceError } = await this.supabase
+      .from('invoices')
+      .insert({
+        shop_id: this.shopId,
+        customer_id: input.customerId ?? null,
+        status: 'draft',
+        subtotal_cents: subtotalCents,
+        total_cents: subtotalCents,
+        notes: input.notes ?? null,
+      })
+      .select('id')
+      .single()
+    if (invoiceError) throw invoiceError
+
+    if (input.items.length > 0) {
+      const { error: itemsError } = await this.supabase.from('invoice_items').insert(
+        input.items.map((item, i) => ({
+          invoice_id: invoice.id,
+          catalog_item_id: item.catalogItemId,
+          brand: item.brand,
+          model: item.model,
+          name: item.name,
+          quantity: item.quantity,
+          unit_price_cents: item.unitPriceCents,
+          category: item.category ?? null,
+          position: i,
+        })),
+      )
+      if (itemsError) throw itemsError
+    }
+
+    const { data, error } = await this.supabase.from('invoices').select(INVOICE_SELECT).eq('id', invoice.id).single()
+    if (error) throw error
+    return mapInvoice(data as Row)
+  }
+
+  async markInvoicePaid(invoiceId: string, paymentMethod: InvoicePaymentMethod, paymentAmountCents: number): Promise<Invoice> {
+    const { data: existing, error: existingError } = await this.supabase
+      .from('invoices')
+      .select(INVOICE_SELECT)
+      .eq('id', invoiceId)
+      .single()
+    if (existingError) throw existingError
+    if (existing.status === 'paid') return mapInvoice(existing as Row) // idempotent — never double-record the stock movements below
+
+    const { error: updateError } = await this.supabase
+      .from('invoices')
+      .update({
+        status: 'paid',
+        payment_method: paymentMethod,
+        payment_amount_cents: paymentAmountCents,
+        paid_at: new Date().toISOString(),
+      })
+      .eq('id', invoiceId)
+    if (updateError) throw updateError
+
+    // One 'sale' movement per line item that's actually a real catalog
+    // product — a custom/one-off line (catalogItemId null) has no stock to
+    // decrement. Sequential (not parallel) round trips, matching this
+    // codebase's general caution around concurrent Edge Function/RPC calls.
+    for (const item of (existing.invoice_items as Row[]) ?? []) {
+      if (!item.catalog_item_id) continue
+      const { error: movementError } = await this.supabase.rpc('apply_stock_movement', {
+        p_catalog_item_id: item.catalog_item_id,
+        p_movement_type: 'sale',
+        p_quantity_delta: -item.quantity,
+        p_source_invoice_id: invoiceId,
+      })
+      if (movementError) throw movementError
+    }
+
+    const { data, error } = await this.supabase.from('invoices').select(INVOICE_SELECT).eq('id', invoiceId).single()
+    if (error) throw error
+    return mapInvoice(data as Row)
   }
 
   async listPackageTemplates(): Promise<PackageTemplate[]> {

@@ -1,16 +1,25 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, FileText, BellRing, BarChart3, Settings, LogOut, Plus } from 'lucide-react'
+import { LayoutDashboard, Barcode, FileText, BellRing, BarChart3, Settings, LogOut } from 'lucide-react'
 import { useAppData } from '../data/AppDataContext'
 import { Logo } from '../components/ui'
 import type { ReactNode } from 'react'
 
 const NAV = [
   { to: '/app', label: 'Home', icon: LayoutDashboard, end: true },
+  // Scanning is the primary daily workflow — first after Home in the
+  // desktop nav, and the prominent center button on the mobile bottom nav
+  // below (not one of the flanking slots, see bottomFlankItems).
+  { to: '/app/scan', label: 'Scan', icon: Barcode, end: false },
   { to: '/app/quotes', label: 'Quotes', icon: FileText, end: false },
   { to: '/app/follow-ups', label: 'Follow-ups', icon: BellRing, end: false },
   { to: '/app/reports', label: 'Reports', icon: BarChart3, end: false },
   { to: '/app/settings', label: 'Settings', icon: Settings, end: false },
 ]
+
+// Mobile bottom nav shows two items flanking the center Scan button —
+// Home/Quotes and Follow-ups/Reports, same set as before Scan existed.
+// Settings stays reachable via the header icon (below) like it already was.
+const bottomFlankItems = NAV.filter((item) => item.to !== '/app/scan' && item.to !== '/app/settings')
 
 function NavItem({ to, label, icon: Icon, end, bottom }: (typeof NAV)[number] & { bottom?: boolean }) {
   return (
@@ -102,19 +111,19 @@ export function AppLayout() {
         aria-label="Main"
         className="no-print fixed inset-x-0 bottom-0 z-40 flex border-t border-zinc-200 bg-white pb-[env(safe-area-inset-bottom)] md:hidden"
       >
-        {NAV.slice(0, 2).map((item) => (
+        {bottomFlankItems.slice(0, 2).map((item) => (
           <NavItem key={item.to} {...item} bottom />
         ))}
         <NavLink
-          to="/app/quotes/new"
-          aria-label="Create quote"
+          to="/app/scan"
+          aria-label="Scan"
           className="flex min-h-14 flex-1 flex-col items-center justify-center"
         >
           <span className="flex h-12 w-12 items-center justify-center rounded-full bg-brand text-white shadow-md">
-            <Plus className="h-7 w-7" aria-hidden="true" />
+            <Barcode className="h-7 w-7" aria-hidden="true" />
           </span>
         </NavLink>
-        {NAV.slice(2, 4).map((item) => (
+        {bottomFlankItems.slice(2, 4).map((item) => (
           <NavItem key={item.to} {...item} bottom />
         ))}
       </nav>

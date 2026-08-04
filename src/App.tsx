@@ -8,6 +8,7 @@ import DemoEntryPage from './pages/DemoEntryPage'
 import PublicQuotePage from './pages/PublicQuotePage'
 import OnboardingPage from './pages/OnboardingPage'
 import DashboardPage from './pages/app/DashboardPage'
+import ScanWorkspacePage from './pages/app/ScanWorkspacePage'
 import QuotesPage from './pages/app/QuotesPage'
 import NewQuotePage from './pages/app/NewQuotePage'
 import QuoteDetailPage from './pages/app/QuoteDetailPage'
@@ -51,6 +52,7 @@ export default function App() {
         }
       >
         <Route index element={<DashboardPage />} />
+        <Route path="scan" element={<ScanWorkspacePage />} />
         <Route path="quotes" element={<QuotesPage />} />
         <Route path="quotes/new" element={<NewQuotePage />} />
         <Route path="quotes/:quoteId" element={<QuoteDetailPage />} />

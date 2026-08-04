@@ -2,6 +2,8 @@ import type {
   CatalogItem,
   Customer,
   Employee,
+  Invoice,
+  InvoicePaymentMethod,
   PackageTemplate,
   ProductApprovalStatus,
   PublicQuote,
@@ -18,12 +20,14 @@ import type {
 import type {
   DataRepository,
   NewCatalogItemInput,
+  NewInvoiceInput,
   NewPackageTemplateInput,
   NewQuoteInput,
   NewStockMovementInput,
   SendEmailResult,
   ShopifyImportResult,
   ShopSettingsPatch,
+  UpcLookupResult,
 } from './repository'
 import { buildDemoData, DEMO_SEED_VERSION, type DemoDB } from './demoData'
 import { advanceStatus, applyStaffStatus, VALID_RESPONSE_TYPES } from '../lib/status'
@@ -271,6 +275,95 @@ export class DemoRepository implements DataRepository {
       .map((movement, insertionIndex) => ({ movement, insertionIndex }))
       .sort((a, b) => b.movement.createdAt.localeCompare(a.movement.createdAt) || b.insertionIndex - a.insertionIndex)
       .map(({ movement }) => movement)
+  }
+
+  async findCatalogItemByCode(code: string): Promise<CatalogItem | null> {
+    const trimmed = code.trim()
+    if (!trimmed) return null
+    return this.db.catalogItems.find((i) => i.upc === trimmed || i.sku === trimmed) ?? null
+  }
+
+  async lookupProductByUpc(code: string): Promise<UpcLookupResult> {
+    // Demo mode must never make a real external call (same rule as
+    // runShopifyImport) — a local miss is just a miss here.
+    const item = await this.findCatalogItemByCode(code)
+    return item ? { source: 'catalog', catalogItem: item } : { source: 'not_found' }
+  }
+
+  async listInvoices(): Promise<Invoice[]> {
+    return this.db.invoices.slice().sort((a, b) => b.invoiceNumber - a.invoiceNumber)
+  }
+
+  async getInvoice(invoiceId: string): Promise<Invoice | null> {
+    return this.db.invoices.find((inv) => inv.id === invoiceId) ?? null
+  }
+
+  async createInvoice(input: NewInvoiceInput): Promise<Invoice> {
+    const now = new Date().toISOString()
+    const invoiceId = newId()
+    const subtotalCents = input.items.reduce((sum, item) => sum + item.unitPriceCents * item.quantity, 0)
+    const nextNumber = this.db.invoices.reduce((max, inv) => Math.max(max, inv.invoiceNumber), 0) + 1
+    const invoice: Invoice = {
+      id: invoiceId,
+      shopId: this.db.shop.id,
+      customerId: input.customerId ?? null,
+      invoiceNumber: nextNumber,
+      status: 'draft',
+      paymentMethod: null,
+      paymentAmountCents: null,
+      paidAt: null,
+      subtotalCents,
+      totalCents: subtotalCents,
+      notes: input.notes ?? null,
+      createdBy: 'demo-user-owner',
+      createdAt: now,
+      updatedAt: now,
+      items: input.items.map((item, i) => ({
+        id: newId(),
+        invoiceId,
+        catalogItemId: item.catalogItemId,
+        brand: item.brand,
+        model: item.model,
+        name: item.name,
+        quantity: item.quantity,
+        unitPriceCents: item.unitPriceCents,
+        category: item.category ?? null,
+        position: i,
+      })),
+    }
+    this.db.invoices.push(invoice)
+    this.persist()
+    return invoice
+  }
+
+  async markInvoicePaid(invoiceId: string, paymentMethod: InvoicePaymentMethod, paymentAmountCents: number): Promise<Invoice> {
+    const invoice = this.db.invoices.find((inv) => inv.id === invoiceId)
+    if (!invoice) throw new Error('Invoice not found')
+    if (invoice.status === 'paid') return invoice // idempotent — never double-record the stock movements below
+
+    const now = new Date().toISOString()
+    invoice.status = 'paid'
+    invoice.paymentMethod = paymentMethod
+    invoice.paymentAmountCents = paymentAmountCents
+    invoice.paidAt = now
+    invoice.updatedAt = now
+
+    // One 'sale' movement per line item that's actually a real catalog
+    // product — a custom/one-off line (catalogItemId null) has no stock to
+    // decrement. Calls the same recordStockMovement this class already
+    // exposes so the atomicity/bookkeeping logic lives in exactly one place.
+    for (const item of invoice.items) {
+      if (!item.catalogItemId) continue
+      await this.recordStockMovement({
+        catalogItemId: item.catalogItemId,
+        movementType: 'sale',
+        quantityDelta: -item.quantity,
+        sourceInvoiceId: invoice.id,
+      })
+    }
+
+    this.persist()
+    return invoice
   }
 
   async listPackageTemplates(): Promise<PackageTemplate[]> {
