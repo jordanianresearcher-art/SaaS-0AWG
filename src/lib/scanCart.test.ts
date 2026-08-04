@@ -3,6 +3,7 @@ import {
   addOrIncrementCartItem,
   cartSubtotalCents,
   cartToInvoiceItemInputs,
+  cartToQuoteItemInputs,
   removeCartItem,
   setCartItemQuantity,
   updateCartItem,
@@ -104,5 +105,28 @@ describe('cartToInvoiceItemInputs', () => {
       category: 'subwoofer',
     })
     expect(input).not.toHaveProperty('id')
+  })
+})
+
+describe('cartToQuoteItemInputs', () => {
+  it('drops id, catalogItemId, and per-item price — a quote option prices as one lump sum', () => {
+    const [input] = cartToQuoteItemInputs([makeItem()])
+    expect(input).toEqual({
+      brand: 'Kicker',
+      model: 'CompR 12',
+      name: '12" subwoofer',
+      quantity: 1,
+      category: 'subwoofer',
+    })
+    expect(input).not.toHaveProperty('id')
+    expect(input).not.toHaveProperty('catalogItemId')
+    expect(input).not.toHaveProperty('unitPriceCents')
+  })
+
+  it('preserves item order and every row, including custom (catalogItemId null) lines', () => {
+    const cart = [makeItem(), makeItem({ id: 'row-2', catalogItemId: null, name: 'Shop supplies fee', brand: null, model: null, category: null })]
+    const inputs = cartToQuoteItemInputs(cart)
+    expect(inputs).toHaveLength(2)
+    expect(inputs[1].name).toBe('Shop supplies fee')
   })
 })

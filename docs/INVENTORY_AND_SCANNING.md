@@ -134,19 +134,30 @@ have) — see each phase below for what's ported vs. built new.
   now opens Scan instead of "New quote"): center work area holds the
   running cart (image/name/brand/price, quantity stepper, pencil-to-edit,
   remove) while building; the side panel has the four document-type tiles
-  (only **Invoice** is active — Quote/Receive inventory/Outgoing order
-  show a "Soon" badge, not yet wired) plus the create/pay/print flow. Once
+  (**Invoice** and **Quote** are active — Receive inventory/Outgoing order
+  still show a "Soon" badge) plus the create/pay/print flow. Once
   an invoice is created the center area swaps to a read-only invoice
   summary (this doubles as the printed view — `window.print()` with the
   existing `.no-print` convention hiding the side panel/nav chrome, same
   pattern as `QuoteDetailPage`).
+- **Quote-from-scan**: tapping "Quote" (enabled once the cart has at least
+  one item) hands the cart off to the existing `NewQuotePage` flow rather
+  than trying to build a full quote on the scan screen — a quote needs
+  customer info and tier/deposit config that already has a good UI
+  elsewhere, so this reuses it instead of duplicating it. Mirrors the
+  "Duplicate quote" pre-fill pattern (`location.state.duplicateFrom`) with
+  a parallel `location.state.fromScan: ScanQuotePrefill` key: the cart
+  becomes one "Scanned items" option (`src/lib/scanCart.ts`'s
+  `cartToQuoteItemInputs` drops per-item pricing — a quote option prices
+  as one lump sum, not per line — the cart's subtotal seeds that price as
+  a starting point staff can adjust), leaving customer/vehicle fields
+  blank to fill in normally.
 
 ## Not yet built (Phases 3-5)
 
-- **Phase 3 — Remaining document types**: quote-from-scan (hands off into
-  the existing `NewQuotePage` flow, pre-filled), vendor receiving, and
-  outgoing orders, all using the `outgoing_orders` table already landed in
-  Phase 1's migration.
+- **Phase 3 remainder**: vendor receiving and outgoing orders (quote-from-
+  scan is done — see above), both using the `outgoing_orders` table
+  already landed in Phase 1's migration.
 - **Phase 4 — AI photo lookup + generated codes + label printing**: a
   `lookup-product-vision` Edge Function (ported from that app's
   `/api/lookup/vision` route — Claude + `web_search`, Shopify cross-check,
@@ -182,9 +193,9 @@ have) — see each phase below for what's ported vs. built new.
 - The camera-photo fallback in `BarcodeScanner` captures a frame but
   currently just tells staff photo lookup isn't available yet — the AI
   vision pipeline is Phase 4.
-- Only **Invoice** is a working document type. Quote/Receive inventory/
+- **Invoice** and **Quote** are working document types. Receive inventory/
   Outgoing order are visible in the side panel (so the eventual four-way
-  choice is discoverable) but disabled — Phase 3.
+  choice is discoverable) but disabled — Phase 3 remainder.
 - No generated codes or label printing yet — items with no findable UPC
   just fail the lookup and staff add them manually; nothing queues a label
   to print. Phase 4.

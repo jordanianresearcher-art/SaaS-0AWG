@@ -7,6 +7,15 @@
 
 import type { InvoiceItem, ProductCategory } from '../types'
 
+/** The subset of a quote option's item shape a scan cart can actually fill — no per-item price (quote options price at the option level, not per line). */
+export interface ScanCartQuoteItemInput {
+  brand: string | null
+  model: string | null
+  name: string
+  quantity: number
+  category: ProductCategory | null
+}
+
 /** One row in the scan cart. Mirrors the shape an invoice_item ultimately needs. */
 export interface ScannedCartItem {
   /** Local cart-row id (not a catalog item id — see addOrIncrementCartItem for why a catalog item can only ever have one row). */
@@ -70,6 +79,17 @@ export function cartToInvoiceItemInputs(
     name: item.name,
     quantity: item.quantity,
     unitPriceCents: item.unitPriceCents,
+    category: item.category,
+  }))
+}
+
+/** Flattens the cart into a quote option's item list — used when handing a scan session off to "Quote" (see NewQuotePage's fromScan pre-fill). Drops per-item pricing since a quote option prices as one lump sum, not per line. */
+export function cartToQuoteItemInputs(cart: ScannedCartItem[]): ScanCartQuoteItemInput[] {
+  return cart.map((item) => ({
+    brand: item.brand,
+    model: item.model,
+    name: item.name,
+    quantity: item.quantity,
     category: item.category,
   }))
 }

@@ -6,6 +6,7 @@
 // upcoming, not yet functional (see docs/INVENTORY_AND_SCANNING.md).
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Barcode, Camera, Loader2, Minus, Package, Pencil, Plus, Printer, Search, Trash2 } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
@@ -17,12 +18,14 @@ import {
   addOrIncrementCartItem,
   cartSubtotalCents,
   cartToInvoiceItemInputs,
+  cartToQuoteItemInputs,
   removeCartItem,
   setCartItemQuantity,
   updateCartItem,
   type ScannedCartItem,
 } from '../../lib/scanCart'
 import type { CatalogItem, Invoice, InvoicePaymentMethod } from '../../types'
+import type { ScanQuotePrefill } from './NewQuotePage'
 
 // @zxing/browser (~470kb) only matters once someone actually opens the
 // scanner — code-split it into its own chunk instead of bloating the main
@@ -60,6 +63,7 @@ export default function ScanWorkspacePage() {
   const repo = useRepo()
   const { shop } = useAppData()
   const toast = useToast()
+  const navigate = useNavigate()
 
   const [catalogItems, setCatalogItems] = useState<CatalogItem[] | null>(null)
   useEffect(() => {
@@ -207,6 +211,16 @@ export default function ScanWorkspacePage() {
     setManualQuery('')
   }
 
+  // Hands the scan cart off to the existing quote-creation flow rather
+  // than trying to build a full quote (customer info, tiers, deposit
+  // config) here — NewQuotePage already does that well. Mirrors the
+  // "Duplicate quote" pre-fill pattern (see location.state.duplicateFrom
+  // there) with a parallel state key instead of overloading that one.
+  function sendCartToQuote() {
+    const prefill: ScanQuotePrefill = { items: cartToQuoteItemInputs(cart), priceCents: cartSubtotalCents(cart) }
+    navigate('/app/quotes/new', { state: { fromScan: prefill } })
+  }
+
   const filteredCatalog = useMemo(() => {
     if (!catalogItems || !manualQuery.trim()) return []
     const q = manualQuery.trim().toLowerCase()
@@ -332,20 +346,33 @@ export default function ScanWorkspacePage() {
         {/* Side panel */}
         <div className="no-print mt-4 space-y-4 lg:sticky lg:top-4 lg:mt-0">
           <Card className="space-y-3">
-            <p className="text-sm font-semibold text-ink">Turn this into…</p>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="rounded-xl border-2 border-brand bg-blue-50 px-3 py-2.5 text-center text-sm font-semibold text-brand">Invoice</div>
-              {['Quote', 'Receive inventory', 'Outgoing order'].map((label) => (
-                <div
-                  key={label}
-                  title="Coming in a later phase"
-                  className="relative rounded-xl border-2 border-zinc-200 px-3 py-2.5 text-center text-sm font-semibold text-zinc-400"
-                >
-                  {label}
-                  <span className="absolute -top-1.5 -right-1.5 rounded-full bg-zinc-200 px-1.5 py-0.5 text-[10px] font-bold text-zinc-500">Soon</span>
+            {building ? (
+              <>
+                <p className="text-sm font-semibold text-ink">Turn this into…</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-xl border-2 border-brand bg-blue-50 px-3 py-2.5 text-center text-sm font-semibold text-brand">Invoice</div>
+                  <button
+                    type="button"
+                    onClick={sendCartToQuote}
+                    disabled={cart.length === 0}
+                    title={cart.length === 0 ? 'Scan or add an item first' : 'Send these items to a new quote'}
+                    className="rounded-xl border-2 border-zinc-200 px-3 py-2.5 text-center text-sm font-semibold text-charcoal transition-colors hover:border-brand hover:text-brand disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-zinc-200 disabled:hover:text-charcoal"
+                  >
+                    Quote
+                  </button>
+                  {['Receive inventory', 'Outgoing order'].map((label) => (
+                    <div
+                      key={label}
+                      title="Coming in a later phase"
+                      className="relative rounded-xl border-2 border-zinc-200 px-3 py-2.5 text-center text-sm font-semibold text-zinc-400"
+                    >
+                      {label}
+                      <span className="absolute -top-1.5 -right-1.5 rounded-full bg-zinc-200 px-1.5 py-0.5 text-[10px] font-bold text-zinc-500">Soon</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </>
+            ) : null}
 
             <div className="flex items-center justify-between border-t border-zinc-100 pt-3 text-sm">
               <span className="text-zinc-500">Subtotal</span>

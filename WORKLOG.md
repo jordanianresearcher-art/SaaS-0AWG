@@ -1494,3 +1494,41 @@ not the primary input.
   slow (120ms/keystroke) typing into the manual search field is never
   mistaken for a scan; manual search still works normally; "Use camera
   instead" still opens the secondary camera modal.
+
+## Round 22 — Quote-from-scan
+
+The user asked to "complete the quote functionality from the scan page" —
+the Quote tile in the side panel's document-type grid had been disabled
+("Soon") since Phase 2. Rather than trying to build a full quote (customer
+info, tiers, deposit config) on the scan screen itself, this hands the
+cart off to the existing, already-good `NewQuotePage` flow — the same
+choice already made for "why doesn't invoice creation collect a full
+customer record either" (it doesn't need to).
+
+- **`src/lib/scanCart.ts`**: `cartToQuoteItemInputs()` — flattens the cart
+  into a quote option's item shape, dropping `catalogItemId`/
+  `unitPriceCents`/the local row id (a quote option prices as one lump sum
+  at the option level, not per line item — confirmed against `NewQuotePage`'s
+  existing item schema before writing this). 2 new tests.
+- **`ScanWorkspacePage.tsx`**: the "Quote" tile (previously a static
+  disabled div) is now a real button — enabled once the cart has an item,
+  calling `navigate('/app/quotes/new', { state: { fromScan: {...} } })`.
+  The whole "Turn this into…" tile row now only renders while still
+  building (hidden once an invoice exists — the cart's already spoken for).
+- **`NewQuotePage.tsx`**: reads `location.state.fromScan`, mirroring the
+  existing `duplicateFrom` pre-fill pattern exactly (a second, parallel
+  state key rather than overloading that one) — defaults `options` to one
+  "Scanned items" option with the cart's items and its subtotal as the
+  starting price, customer/vehicle fields left blank for staff to fill in
+  normally. A blue banner mirrors the existing "Duplicated from…" one so
+  staff know why an option showed up already filled in.
+
+### Verification (this round)
+- `npx tsc -b --noEmit`, `npm run lint`, `npm run test -- --run`
+  (245/245 across 18 files), and `npm run build` all clean.
+- A Playwright smoke pass confirmed: the Quote tile is disabled with an
+  empty cart and enables once an item is added; clicking it navigates to
+  New Quote with the pre-fill banner showing the right item count; the
+  pre-filled option is named "Scanned items," carries the scanned item's
+  name, and its price is pre-filled from the cart subtotal; filling in
+  customer info and saving completes a real quote end to end.

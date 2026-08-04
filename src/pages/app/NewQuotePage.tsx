@@ -216,13 +216,40 @@ function optionsFromBundle(bundle: QuoteBundle): FormValues['options'] {
   }))
 }
 
+/** Router state shape the scan workspace hands off when staff turn a scan session into a quote instead of an invoice — see ScanWorkspacePage's sendCartToQuote. */
+export interface ScanQuotePrefill {
+  items: Array<{ brand: string | null; model: string | null; name: string; quantity: number; category: ProductCategory | null }>
+  /** The cart's subtotal, seeded into the option's price field as a starting point — staff can still adjust it before saving. */
+  priceCents: number
+}
+
+function optionsFromScan(prefill: ScanQuotePrefill): FormValues['options'] {
+  const base = emptyOption(0)
+  return [
+    {
+      ...base,
+      name: 'Scanned items',
+      price: (prefill.priceCents / 100).toString(),
+      items:
+        prefill.items.length > 0
+          ? prefill.items.map((i) => ({ brand: i.brand ?? '', model: i.model ?? '', name: i.name, quantity: i.quantity, category: i.category }))
+          : base.items,
+    },
+  ]
+}
+
 export default function NewQuotePage() {
   const repo = useRepo()
   const { shop, bundles, refresh } = useAppData()
   const toast = useToast()
   const navigate = useNavigate()
   const location = useLocation()
-  const duplicateFrom = (location.state as { duplicateFrom?: QuoteBundle } | null)?.duplicateFrom
+  const navState = location.state as { duplicateFrom?: QuoteBundle; fromScan?: ScanQuotePrefill } | null
+  const duplicateFrom = navState?.duplicateFrom
+  // Only reads on the initial render (react-hook-form's defaultValues, and
+  // the customMake/vehicleOpen initializers below, all only run once) — a
+  // deliberate one-shot pre-fill, same as duplicateFrom.
+  const fromScan = navState?.fromScan
 
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([])
   useEffect(() => {
@@ -293,7 +320,7 @@ export default function NewQuotePage() {
           expirationDate: defaultExpiration,
           internalNotes: '',
           nextFollowUpAt: '',
-          options: [],
+          options: fromScan ? optionsFromScan(fromScan) : [],
           recommendedIndex: 0,
           windowTints: [],
         },
@@ -391,6 +418,13 @@ export default function NewQuotePage() {
       {duplicateFrom ? (
         <div className="rounded-xl bg-blue-50 p-4 text-base font-medium text-ink">
           Duplicated from {duplicateFrom.customer.firstName}&apos;s quote — update the customer info below.
+        </div>
+      ) : null}
+
+      {fromScan ? (
+        <div className="rounded-xl bg-blue-50 p-4 text-base font-medium text-ink">
+          Brought over {fromScan.items.length} scanned item{fromScan.items.length === 1 ? '' : 's'} into the "Scanned
+          items" option below — add the customer's info to finish.
         </div>
       ) : null}
 
