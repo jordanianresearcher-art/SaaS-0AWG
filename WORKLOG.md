@@ -1656,3 +1656,150 @@ round closes it out.
   "No matches found." rather than erroring — the same graceful-
   degradation shape as the barcode lookup before `lookup-product-upc` was
   deployed.
+
+## Round 25 — Universal product resolver, a real quote-tracking bug fix, financing as a CRM signal
+
+A large, explicit "inspect the real repo, then implement" instruction
+covering three areas from the product brief: a universal product
+resolver (the app's stated main AI priority), correct customer-vs-staff
+quote-open tracking (a strict requirement), and financing as a tracked
+high-intent signal (the thing that produced this product's first real
+$3,245 sale). Landed as three independently verified, committed slices.
+Two real, previously-unnoticed bugs were found and fixed along the way —
+not hypothesized, confirmed by reading the actual code and reproducing
+them.
+
+### Slice 1 — Never-dead-end universal product resolver
+
+- **`resolve-product` Edge Function** (new) replaces the separate
+  `lookup-product-upc` and `lookup-product-suggestions` functions (both
+  deleted) with one shared, typed resolver: `{kind:'barcode', code}` or
+  `{kind:'text', query}` in, ranked `ProductResolutionCandidate[]` out.
+  Barcode resolution order: shop's `product_resolution_cache` (migration
+  `0012`, new table, shop-scoped) → UPCitemdb → Claude + `web_search`
+  using the code as a search hint, with confidence explicitly capped
+  unless a source confirms the exact barcode → cache the result either
+  way (30-day TTL for barcodes, 7-day for text). Text queries: cache →
+  Claude + `web_search`, same technique as before, now shared.
+- **`src/lib/productResolver.ts`** (new, pure, unit-tested): barcode/query
+  normalization (leading zeros never dropped), `rankCandidates` (exact
+  model-token match outranks a higher-confidence generic result),
+  `dedupeCandidates` (conservative — exact UPC or exact brand+model only,
+  never on name similarity). 11 tests.
+- `lookupProductByUpc()`/`lookupProductSuggestions()` keep their exact
+  prior return shapes (zero breakage to what shipped in earlier rounds —
+  `ProductSuggestField`, `ScanWorkspacePage`'s confident-match path) but
+  now delegate to `resolveProduct()` underneath.
+- **`ScanWorkspacePage`**: a barcode that misses the local catalog and
+  isn't a single confident external match now automatically continues
+  into the resolver instead of dead-ending on a toast. Candidates (up to
+  what the resolver returns) show in a confirmation modal — image,
+  confidence badge, reference price + source, warnings — with separate
+  "Add to cart" (fast default) and "Save to catalog & add" (explicit)
+  actions. A genuine miss retains the scanned code as a visible hint next
+  to "Add a one-off item" instead of discarding it.
+- **Real bug found and fixed along the way**: `Input`'s hardcoded base
+  `w-full` Tailwind class silently wins over a narrower width passed via
+  `className` (a stylesheet-order specificity tie, not a markup-order
+  one), which had already made the "Add a one-off item" row's three
+  fields stack instead of sitting side by side. This round's own
+  Playwright smoke test caught the real consequence: closing the
+  suggestion dropdown on an outside click shifted the layout mid-click
+  and ate a real click on the "Add" button. Fixed the same way the name
+  field was already fixed last round — wrap in a width-constrained div
+  instead of trusting the class override.
+- Demo mode: a fixed constant (`DEMO_UNRESOLVED_BARCODE`) deterministically
+  returns two canned candidates; every other unknown barcode genuinely
+  resolves to none — zero network calls either way.
+- Docs: `docs/PRODUCT_RESOLVER.md` (new).
+
+### Slice 2 — Fixed a real bug: staff previews were faking customer opens
+
+Confirmed by reading the code, not assumed: `quotes.public_token` was the
+*only* token in the system, used both for the actual emailed link and for
+`QuoteDetailPage`'s own "Open quote"/"Copy link" staff buttons — same
+route, same token. `PublicQuotePage` called `record_public_quote_view()`
+unconditionally on first load. A staff member glancing at a quote before
+sending it silently flipped it from `emailed` to `viewed` and logged a
+fake "customer opened the quote" event, with no way to tell the two
+apart.
+
+- `email_messages` (already one row per sent email — no new parallel
+  table) gains `delivery_token`, `first_viewed_at`, `view_count`
+  (migration `0013`).
+- New RPC `record_quote_delivery_view(public_token, delivery_token)` is
+  the only thing that can ever record a real view or advance status: must
+  match both tokens against one specific *sent* email, skips authenticated
+  members of the quote's own shop, idempotent (first view fires one event
+  + advances status, repeats just bump the count).
+- `send-quote-email` now inserts its `email_messages` row before building
+  the link (the subject line never depended on the URL, so this reorder
+  was free), reads back the row's real `delivery_token`, and embeds it in
+  the actual emailed link. The opt-out link deliberately does not carry
+  one.
+- `QuoteDetailPage`'s staff links are unchanged — still the bare,
+  untokened `publicQuoteUrl()` — structurally incapable of recording a
+  view now, not just conventionally discouraged from it.
+- The old `record_public_quote_view` RPC is neutered (still callable,
+  now a true no-op) rather than deleted; historical `quote_events` rows
+  it already wrote are untouched — no retroactive reclassification.
+- `QuoteDetailPage`'s email history now shows "Opened {time}" once a real
+  view lands.
+- Docs: `docs/QUOTE_TRACKING.md` (new).
+
+### Slice 3 — Financing as a real, prominent, tracked CRM signal
+
+`need_financing` already existed as a response type flowing into
+`quote_responses`/`quote_events`/`ReportsPage` metrics — the gap was that
+it was buried in a 6-choice generic grid, not idempotent server-side, and
+invisible to staff until they opened the quote.
+
+- `PublicQuotePage`: `need_financing` pulled out of the generic response
+  grid into its own large, one-tap, shop-colored CTA right under the
+  priced options. A real "Choose this option" action per option card
+  (didn't exist before) feeds the option ID into whichever response gets
+  submitted. Confirmation renders right where the customer tapped.
+- `submit_public_quote_response` is now idempotent (migration `0014`) —
+  a response of the same type within a 2-minute window is treated as the
+  same submission, no duplicate row/event, covering a retried request or
+  a second tab, not just a client-side disabled button.
+- `QuotesPage` list + `QuoteDetailPage` now show a "Needs financing"
+  badge/banner whenever the latest response is `need_financing` and the
+  quote isn't closed out.
+- New `notify-shop-response` Edge Function (reuses the already-configured
+  Resend secrets, no new one needed) emails the shop on a high-intent
+  response, called fire-and-forget after the customer's own submission
+  already succeeded — never blocks or affects their confirmation. A
+  30-second replay guard keeps a stale/retried call from re-notifying.
+- Deliberately not built this round: quote-to-invoice conversion
+  attribution. Real, separate follow-up work — see docs/FINANCING_INTENT.md.
+
+### Verification (this round)
+
+- Baseline before any changes: `tsc -b --noEmit` clean, lint clean,
+  255/255 vitest passing — recorded so any later failure could be
+  correctly attributed.
+- After all three slices: `tsc -b --noEmit` clean, `npm run lint` clean,
+  `npx vitest run` **271/271 passing** across 20 files (16 new: 11 in
+  `productResolver.test.ts`, 5 net-new/rewritten in
+  `PublicQuotePage.test.tsx` covering the exact staff-preview-vs-real-view
+  distinction), `npm run build` clean. All three new/modified Edge
+  Functions (`resolve-product`, `send-quote-email`, `notify-shop-response`)
+  typechecked standalone via the project's Deno-shim workflow.
+- Four Playwright smoke passes, each catching real issues before they
+  shipped: unknown-barcode → resolver candidates → add-to-cart (7 checks,
+  caught and fixed the click-eating layout bug above); staff "Open quote"
+  vs. a real emailed delivery link (6 checks, confirmed the exact bug
+  from the brief is fixed — bare link changes nothing, the real delivery
+  link advances status and records exactly one view even on repeat
+  opens); the financing CTA end to end including a real 3-option quote's
+  "Choose this option" affordance (6 checks). All four prior rounds'
+  smoke scripts (product-suggestions, invoice document) re-run clean
+  after each slice — no regressions.
+- Not deployed: `resolve-product` and `notify-shop-response` are written,
+  typechecked, and ready, but this session has no Supabase deploy access
+  (a standing, repeatedly-documented limitation). `ANTHROPIC_API_KEY` is
+  still not set anywhere in the live project — until it is, the resolver
+  falls back to UPCitemdb-only for barcodes and returns no text
+  candidates, gracefully, exactly like every prior AI-dependent feature
+  in this codebase.
