@@ -278,7 +278,12 @@ export default function ScanWorkspacePage() {
       const created = await repo.createInvoice({ items: cartToInvoiceItemInputs(cart) })
       setInvoice(created)
       setPaymentAmount((created.totalCents / 100).toString())
-    } catch {
+    } catch (err) {
+      // Log the real Postgres/network error to the console — the toast
+      // stays generic for the cashier, but without this, a real failure
+      // (e.g. migration 0011's tables/trigger missing in production) is
+      // completely invisible and undiagnosable from the browser.
+      console.error('createInvoice failed', err)
       toast('error', 'Could not create the invoice. Please try again.')
     } finally {
       setCreatingInvoice(false)
