@@ -365,7 +365,14 @@ export interface DataRepository {
 
   // Anonymous public-quote surface (RPC-backed in production).
   getPublicQuote(publicToken: string): Promise<PublicQuote | null>
-  recordPublicView(publicToken: string): Promise<void>
+  /**
+   * Records a real customer view — but only when deliveryToken matches the
+   * specific token embedded in an actually-sent email for this quote. A
+   * null deliveryToken (the bare link staff use for "Open quote"/"Copy
+   * link") is always a no-op — dashboard previews must never mark a quote
+   * opened. See docs/QUOTE_TRACKING.md.
+   */
+  recordPublicView(publicToken: string, deliveryToken: string | null): Promise<void>
   submitPublicResponse(
     publicToken: string,
     responseType: ResponseType,

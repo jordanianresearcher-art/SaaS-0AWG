@@ -657,6 +657,12 @@ export class DemoRepository implements DataRepository {
       sentBy: 'demo-user-owner',
       createdAt: now.toISOString(),
       sentAt: now.toISOString(),
+      // A real (not deterministic) token, matching production's shape —
+      // lets a demo/Playwright test grab it from the created row and
+      // simulate visiting the actual delivered link with ?d=<token>.
+      deliveryToken: newId(),
+      firstViewedAt: null,
+      viewCount: 0,
     })
     quote.lastEmailedAt = now.toISOString()
     quote.status = advanceStatus(quote.status, 'emailed')
@@ -728,12 +734,30 @@ export class DemoRepository implements DataRepository {
     }
   }
 
-  async recordPublicView(publicToken: string): Promise<void> {
+  async recordPublicView(publicToken: string, deliveryToken: string | null): Promise<void> {
+    // Mirrors record_quote_delivery_view's trust rule: only a real,
+    // matching delivery token (from an actually-sent email) can ever
+    // record a view or advance status. The bare public link staff use for
+    // "Open quote"/"Copy link" carries no token — nothing to look up, so
+    // this is a no-op, same as a staff preview should be.
+    if (!deliveryToken) return
     const quote = this.quoteByToken(publicToken)
     if (!quote || quote.status === 'draft') return
-    this.addEvent(quote.id, 'quote_viewed', {}, null)
-    quote.status = advanceStatus(quote.status, 'viewed')
-    this.touch(quote)
+    const email = this.db.emails.find(
+      (e) => e.quoteId === quote.id && e.deliveryToken === deliveryToken && (e.status === 'sent' || e.status === 'demo_sent'),
+    )
+    if (!email) return
+
+    if (!email.firstViewedAt) {
+      const now = new Date().toISOString()
+      email.firstViewedAt = now
+      email.viewCount += 1
+      this.addEvent(quote.id, 'quote_viewed', { source: 'email_delivery' }, null)
+      quote.status = advanceStatus(quote.status, 'viewed')
+      this.touch(quote)
+    } else {
+      email.viewCount += 1
+    }
     this.persist()
   }
 

@@ -305,10 +305,46 @@ Deno.serve(async (req) => {
   }
 
   const appUrl = (Deno.env.get('APP_URL') ?? '').replace(/\/$/, '')
-  const publicUrl = `${appUrl}/q/${quote.public_token}`
   const options = (quote.quote_options ?? []) as Array<{ price_cents: number; recommended: boolean }>
   const recommended = options.find((o) => o.recommended)
   const valueCents = recommended?.price_cents ?? (options.length ? Math.max(...options.map((o) => o.price_cents)) : 0)
+  const vehicle =
+    customer.vehicle_year && customer.vehicle_make && customer.vehicle_model
+      ? `${customer.vehicle_year} ${customer.vehicle_make} ${customer.vehicle_model}`
+      : null
+
+  // The subject line never depends on the quote link itself (see COPY
+  // above), so it can be computed before the email_messages row exists.
+  const subject = COPY[template].subject({ shopName: shop.name, vehicle } as EmailContext)
+
+  // Record the attempt first (this is also where delivery_token comes
+  // from -- one real, distinct token per send, embedded in the actual
+  // link below) so failures are visible in the app either way.
+  const { data: emailRow } = await admin
+    .from('email_messages')
+    .insert({
+      shop_id: quote.shop_id,
+      quote_id: quoteId,
+      recipient_email: customer.email,
+      template_type: template,
+      subject,
+      status: 'sending',
+      sent_by: user.id,
+    })
+    .select('id, delivery_token')
+    .single()
+
+  // The link that actually goes out in the email carries this send's own
+  // delivery_token -- this is what lets record_quote_delivery_view tell a
+  // real customer open apart from staff's bare-token "Open quote"/"Copy
+  // link" (which never has one). If the insert somehow failed to return a
+  // token (should never happen -- the column has a DB default), fall back
+  // to the bare link rather than blocking the send entirely; that send
+  // just won't be view-trackable, which is a smaller problem than not
+  // sending it.
+  const publicUrl = emailRow?.delivery_token
+    ? `${appUrl}/q/${quote.public_token}?d=${emailRow.delivery_token}`
+    : `${appUrl}/q/${quote.public_token}`
 
   const rendered = renderEmail(template, {
     shopName: shop.name,
@@ -318,31 +354,13 @@ Deno.serve(async (req) => {
     shopLogoUrl: shop.logo_url,
     shopColor: shop.primary_color,
     firstName: customer.first_name,
-    vehicle:
-      customer.vehicle_year && customer.vehicle_make && customer.vehicle_model
-        ? `${customer.vehicle_year} ${customer.vehicle_make} ${customer.vehicle_model}`
-        : null,
+    vehicle,
     hasWindowTint: Array.isArray(quote.window_tints) && quote.window_tints.length > 0,
     valueCents,
     expirationDate: quote.expiration_date,
     publicUrl,
-    optOutUrl: `${publicUrl}?stop=1`,
+    optOutUrl: `${appUrl}/q/${quote.public_token}?stop=1`,
   })
-
-  // Record the attempt first so failures are visible in the app.
-  const { data: emailRow } = await admin
-    .from('email_messages')
-    .insert({
-      shop_id: quote.shop_id,
-      quote_id: quoteId,
-      recipient_email: customer.email,
-      template_type: template,
-      subject: rendered.subject,
-      status: 'sending',
-      sent_by: user.id,
-    })
-    .select('id')
-    .single()
 
   let providerMessageId: string | null = null
   try {

@@ -184,6 +184,9 @@ function mapEmail(r: Row): EmailMessage {
     sentBy: r.sent_by,
     createdAt: r.created_at,
     sentAt: r.sent_at,
+    deliveryToken: r.delivery_token,
+    firstViewedAt: r.first_viewed_at ?? null,
+    viewCount: r.view_count ?? 0,
   }
 }
 
@@ -1015,8 +1018,15 @@ export class SupabaseRepository implements DataRepository {
     return (data as PublicQuote | null) ?? null
   }
 
-  async recordPublicView(publicToken: string): Promise<void> {
-    await this.supabase.rpc('record_public_quote_view', { p_public_token: publicToken })
+  async recordPublicView(publicToken: string, deliveryToken: string | null): Promise<void> {
+    // The bare public link (staff previews, old un-tokened links) carries
+    // no delivery token -- nothing to record, by construction, rather than
+    // by trusting a "this is just a preview" flag from the caller.
+    if (!deliveryToken) return
+    await this.supabase.rpc('record_quote_delivery_view', {
+      p_public_token: publicToken,
+      p_delivery_token: deliveryToken,
+    })
   }
 
   async submitPublicResponse(

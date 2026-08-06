@@ -432,6 +432,12 @@ export interface EmailMessage {
   sentBy: string | null
   createdAt: string
   sentAt: string | null
+  /** Opaque per-send token embedded in this email's actual quote link (see send-quote-email) — distinct from the quote's own public_token, which staff use for previews and which never marks a quote opened. */
+  deliveryToken: string
+  /** Set once, by the trusted record_quote_delivery_view RPC, the first time a real customer opens this specific delivered link. Never set by a staff preview. */
+  firstViewedAt: string | null
+  /** Deduplicated open count for this delivery — first view sets firstViewedAt and fires a quote_viewed event; repeats only bump this. */
+  viewCount: number
 }
 
 export interface Employee {

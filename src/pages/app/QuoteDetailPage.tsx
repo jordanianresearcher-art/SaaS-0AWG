@@ -377,6 +377,12 @@ export default function QuoteDetailPage() {
                     <div>
                       <p className="text-base font-semibold text-ink">{TEMPLATE_CONFIG[e.templateType].label}</p>
                       <p className="text-sm text-zinc-500">{formatDateTime(e.createdAt)} · to {e.recipientEmail}</p>
+                      {e.firstViewedAt ? (
+                        <p className="mt-0.5 text-sm font-medium text-green-700">
+                          Opened {formatDateTime(e.firstViewedAt)}
+                          {e.viewCount > 1 ? ` · viewed ${e.viewCount}×` : ''}
+                        </p>
+                      ) : null}
                     </div>
                     <EmailStatusBadge status={e.status} />
                   </li>
@@ -384,7 +390,8 @@ export default function QuoteDetailPage() {
               </ul>
               <p className="mt-2 text-xs text-zinc-500">
                 “Accepted” means our email provider took the message — it does not prove the customer read it.
-                Quote views are tracked separately when the customer opens their link.
+                “Opened” only appears once the customer loads their link from this specific email — previewing the
+                quote yourself from this page never counts.
               </p>
             </Card>
           )}

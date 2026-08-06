@@ -33,9 +33,14 @@ export default function PublicQuotePage() {
   const [submitted, setSubmitted] = useState<ResponseType | null>(null)
   const [optedOut, setOptedOut] = useState(false)
   const wantsStop = searchParams.get('stop') === '1'
+  // Only present on a real emailed link (embedded server-side in
+  // send-quote-email) — the bare link staff use for "Open quote"/"Copy
+  // link" never carries one, so a null here means "don't record a view,"
+  // not "record it anonymously." See docs/QUOTE_TRACKING.md.
+  const deliveryToken = searchParams.get('d')
 
   const respondedKey = `0g-responded-${publicToken}`
-  const viewedKey = `0g-viewed-${publicToken}`
+  const viewedKey = `0g-viewed-${publicToken}-${deliveryToken ?? 'none'}`
 
   useEffect(() => {
     let cancelled = false
@@ -57,10 +62,14 @@ export default function PublicQuotePage() {
         setQuote(data)
         setOptedOut(data.optedOut)
         setState('ready')
-        // Record only the first meaningful view per browser session.
+        // Record only the first meaningful view per browser session — the
+        // repository layer is the real source of truth for "first view
+        // ever" (idempotent server-side), this is just avoiding a redundant
+        // call on every remount. A deliveryToken-less load (bare/staff
+        // link) always no-ops inside recordView itself.
         if (!sessionStorage.getItem(viewedKey)) {
           sessionStorage.setItem(viewedKey, '1')
-          void resolved.recordView()
+          void resolved.recordView(deliveryToken)
         }
         if (sessionStorage.getItem(respondedKey)) {
           setSubmitted(sessionStorage.getItem(respondedKey) as ResponseType)
@@ -72,7 +81,7 @@ export default function PublicQuotePage() {
     return () => {
       cancelled = true
     }
-  }, [publicToken, respondedKey, viewedKey])
+  }, [publicToken, respondedKey, viewedKey, deliveryToken])
 
   const color = quote?.shopPrimaryColor || '#1d4ed8'
 

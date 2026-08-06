@@ -7,9 +7,9 @@ import { DemoRepository } from '../data/demoRepository'
 
 // Drives the real customer-facing flow against the demo repository in jsdom.
 
-function renderPage(token: string) {
+function renderPage(token: string, query = '') {
   return render(
-    <MemoryRouter initialEntries={[`/q/${token}`]}>
+    <MemoryRouter initialEntries={[`/q/${token}${query}`]}>
       <Routes>
         <Route path="/q/:publicToken" element={<PublicQuotePage />} />
       </Routes>
@@ -40,17 +40,66 @@ describe('PublicQuotePage', () => {
     expect(screen.queryByText(/marcus\.bell@example\.com/)).not.toBeInTheDocument()
   })
 
-  it('records the view once per browser session', async () => {
+  it('a bare/staff link (no delivery token) never records a customer view or changes status', async () => {
+    // This is the exact bug being fixed: staff's "Open quote"/"Copy link"
+    // buttons use this same bare /q/:token URL with no ?d= param. It must
+    // never be indistinguishable from a real customer opening the emailed
+    // link.
     renderPage(token)
     await screen.findByText(/here's your quote/i)
+    // Give any (incorrect) async recording a moment to have fired.
+    await new Promise((r) => setTimeout(r, 50))
+    const fresh = new DemoRepository()
+    const bundles = await fresh.listQuoteBundles()
+    const target = bundles.find((b) => b.quote.publicToken === token)!
+    const views = target.events.filter((e) => e.eventType === 'quote_viewed')
+    expect(views.length).toBe(1) // only the originally-seeded one — nothing new
+  })
+
+  it('records exactly one view when opened through a valid emailed delivery link, even after a refresh', async () => {
+    const fresh1 = new DemoRepository()
+    const bundles1 = await fresh1.listQuoteBundles()
+    // sierra-pat is seeded as 'emailed' (not yet viewed), with one sent email.
+    const emailedBundle = bundles1.find((b) => b.quote.status === 'emailed' && b.emails.length > 0)!
+    const deliveryToken = emailedBundle.emails[0].deliveryToken
+    const emailedToken = emailedBundle.quote.publicToken
+
+    renderPage(emailedToken, `?d=${deliveryToken}`)
+    await screen.findByText(/here's your quote/i)
+
     await waitFor(async () => {
-      const fresh = new DemoRepository()
-      const bundles = await fresh.listQuoteBundles()
-      const target = bundles.find((b) => b.quote.publicToken === token)!
-      const views = target.events.filter((e) => e.eventType === 'quote_viewed')
-      expect(views.length).toBeGreaterThanOrEqual(2) // 1 seeded + 1 new
+      const fresh2 = new DemoRepository()
+      const bundles2 = await fresh2.listQuoteBundles()
+      const target = bundles2.find((b) => b.quote.publicToken === emailedToken)!
+      expect(target.quote.status).toBe('viewed')
+      expect(target.events.filter((e) => e.eventType === 'quote_viewed')).toHaveLength(1)
     })
-    expect(sessionStorage.getItem(`0g-viewed-${token}`)).toBe('1')
+
+    // A second load through the exact same delivery link (e.g. the
+    // customer refreshes, or opens it again later) must not duplicate it.
+    // Clearing sessionStorage first simulates a genuinely new
+    // browser/tab/session, so this actually exercises the *server-side*
+    // idempotency guarantee (record_quote_delivery_view / DemoRepository's
+    // equivalent) rather than just the client-side sessionStorage cache.
+    sessionStorage.clear()
+    renderPage(emailedToken, `?d=${deliveryToken}`)
+    await screen.findByText(/here's your quote/i)
+    await new Promise((r) => setTimeout(r, 50))
+
+    const fresh3 = new DemoRepository()
+    const bundles3 = await fresh3.listQuoteBundles()
+    const target = bundles3.find((b) => b.quote.publicToken === emailedToken)!
+    expect(target.events.filter((e) => e.eventType === 'quote_viewed')).toHaveLength(1)
+  })
+
+  it('a mismatched or invalid delivery token records nothing', async () => {
+    renderPage(token, '?d=00000000-0000-0000-0000-000000000000')
+    await screen.findByText(/here's your quote/i)
+    await new Promise((r) => setTimeout(r, 50))
+    const fresh = new DemoRepository()
+    const bundles = await fresh.listQuoteBundles()
+    const target = bundles.find((b) => b.quote.publicToken === token)!
+    expect(target.events.filter((e) => e.eventType === 'quote_viewed')).toHaveLength(1) // still just the seeded one
   })
 
   it('lets the customer submit a response and shows confirmation', async () => {

@@ -37,7 +37,7 @@ export interface DemoDB {
   seedVersion: number
 }
 
-export const DEMO_SEED_VERSION = 12
+export const DEMO_SEED_VERSION = 13
 
 const SHOP_ID = 'demo-shop'
 
@@ -568,6 +568,12 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
         sentBy: 'demo-user-staff',
         createdAt: daysAgo(now, e.daysAgo, 9),
         sentAt: daysAgo(now, e.daysAgo, 9),
+        // Deterministic per-seed token — not a real send, but keeps the
+        // shape consistent with sendEmail()'s real (crypto-random) one so
+        // demo data and freshly-sent demo emails behave the same way.
+        deliveryToken: `demo-delivery-${seed.key}-${i}`,
+        firstViewedAt: null,
+        viewCount: 0,
       })
     })
   }

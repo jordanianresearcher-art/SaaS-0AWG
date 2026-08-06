@@ -8,7 +8,8 @@ import { env, supabaseConfigured } from '../lib/env'
 
 export interface PublicQuoteApi {
   get(): Promise<PublicQuote | null>
-  recordView(): Promise<void>
+  /** deliveryToken comes from the emailed link's ?d= param — null for a bare/staff link, which never records anything. */
+  recordView(deliveryToken: string | null): Promise<void>
   submitResponse(responseType: ResponseType, optionId: string | null, message: string | null): Promise<void>
   optOut(): Promise<void>
 }
@@ -27,7 +28,7 @@ export async function resolvePublicQuoteApi(token: string): Promise<PublicQuoteA
     if (found) {
       return {
         get: () => demo.getPublicQuote(token),
-        recordView: () => demo.recordPublicView(token),
+        recordView: (deliveryToken) => demo.recordPublicView(token, deliveryToken),
         submitResponse: (r, o, m) => demo.submitPublicResponse(token, r, o, m),
         optOut: () => demo.optOutPublicQuote(token),
       }
@@ -41,8 +42,9 @@ export async function resolvePublicQuoteApi(token: string): Promise<PublicQuoteA
         if (error) throw error
         return (data as PublicQuote | null) ?? null
       },
-      recordView: async () => {
-        await supabase.rpc('record_public_quote_view', { p_public_token: token })
+      recordView: async (deliveryToken) => {
+        if (!deliveryToken) return
+        await supabase.rpc('record_quote_delivery_view', { p_public_token: token, p_delivery_token: deliveryToken })
       },
       submitResponse: async (responseType, optionId, message) => {
         const { error } = await supabase.rpc('submit_public_quote_response', {
