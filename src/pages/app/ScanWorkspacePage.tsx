@@ -7,7 +7,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Barcode, Camera, Loader2, Mail, MapPin, Minus, Package, Pencil, Phone, Plus, Printer, Search, Trash2 } from 'lucide-react'
+import { AlertTriangle, Barcode, Camera, Loader2, Mail, MapPin, Minus, Package, Pencil, Phone, Plus, Printer, Search, Trash2 } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
 import { Button, Card, EmptyState, Field, Input, LoadingBlock, Modal, Select } from '../../components/ui'
@@ -26,8 +26,20 @@ import {
   type ScannedCartItem,
 } from '../../lib/scanCart'
 import type { CatalogItem, Invoice, InvoicePaymentMethod, Shop } from '../../types'
-import type { ProductSuggestion } from '../../data/repository'
+import type { ProductResolutionCandidate, ProductSuggestion } from '../../data/repository'
 import type { ScanQuotePrefill } from './NewQuotePage'
+
+const CONFIDENCE_BADGE: Record<ProductResolutionCandidate['confidenceLevel'], string> = {
+  high: 'bg-green-100 text-green-800',
+  probable: 'bg-blue-50 text-brand',
+  low: 'bg-zinc-100 text-zinc-600',
+}
+
+const CONFIDENCE_LABEL: Record<ProductResolutionCandidate['confidenceLevel'], string> = {
+  high: 'Strong match',
+  probable: 'Possible match',
+  low: 'Low confidence',
+}
 
 // @zxing/browser (~470kb) only matters once someone actually opens the
 // scanner — code-split it into its own chunk instead of bloating the main
@@ -82,6 +94,18 @@ export default function ScanWorkspacePage() {
   const [editingRowId, setEditingRowId] = useState<string | null>(null)
   const [customName, setCustomName] = useState('')
   const [customPrice, setCustomPrice] = useState('')
+  // Never-dead-end resolver state: a barcode that missed the local catalog
+  // (and wasn't a single confident external match) goes through
+  // resolveProduct() automatically. null = no candidates being shown;
+  // an array (possibly empty, though an empty array closes the modal
+  // immediately in favor of the retained-code hint below) is what's
+  // offered for confirmation. See handleBarcodeDetected.
+  const [resolveCandidates, setResolveCandidates] = useState<ProductResolutionCandidate[] | null>(null)
+  const [resolving, setResolving] = useState(false)
+  // The most recent scanned/typed code that genuinely found nothing —
+  // retained (never discarded) so staff can still act on it via the
+  // one-off-item field below instead of hitting a dead end.
+  const [unresolvedCode, setUnresolvedCode] = useState<string | null>(null)
   // Set only by picking a ProductSuggestField dropdown result — carries the
   // brand/model/image that plain text typing can't. Cleared the moment the
   // name is hand-edited again so a stale match never rides along silently.
@@ -116,11 +140,17 @@ export default function ScanWorkspacePage() {
   async function handleBarcodeDetected(code: string) {
     setScannerOpen(false)
     setLookupBusy(true)
+    // Tracked locally (not read back from state, which wouldn't reflect a
+    // setResolveCandidates call made earlier in this same invocation) so
+    // the finally block below knows whether to return focus to the scan
+    // input or leave it on the just-opened candidate modal.
+    let openedCandidateModal = false
     try {
       const result = await repo.lookupProductByUpc(code)
       if (result.source === 'catalog') {
         addCatalogItem(result.catalogItem)
         toast('success', `Added ${result.catalogItem.name}.`)
+        setUnresolvedCode(null)
       } else if (result.source === 'external') {
         // Save it to the catalog so the next scan of this exact barcode is
         // an instant local match instead of another external lookup.
@@ -135,16 +165,72 @@ export default function ScanWorkspacePage() {
         setCatalogItems((prev) => (prev ? [...prev, saved] : [saved]))
         addCatalogItem(saved)
         toast('success', `Found "${saved.name}" — added to your catalog and this order.`)
+        setUnresolvedCode(null)
       } else {
-        toast('error', `No match for that barcode (${code}). Add it manually below.`)
+        // Never dead-end: nothing in the local catalog and no single
+        // confident external match, so automatically continue into the
+        // universal resolver instead of just reporting "not found." This
+        // second call is a cache hit in the common case (lookupProductByUpc
+        // already triggered the real AI/web search internally), not a
+        // repeat network round trip.
+        setResolving(true)
+        const resolved = await repo.resolveProduct({ kind: 'barcode', code })
+        setUnresolvedCode(code)
+        if (resolved.candidates.length > 0) {
+          setResolveCandidates(resolved.candidates)
+          openedCandidateModal = true
+        } else {
+          toast('error', `No match for that barcode (${code}) anywhere we looked. It's been kept below — add the details manually.`)
+        }
       }
     } catch (err) {
       toast('error', err instanceof Error ? err.message : 'Barcode lookup failed.')
     } finally {
       setLookupBusy(false)
+      setResolving(false)
       // Return focus to the scan field either way, so the very next scan —
-      // via the scanner, no click needed — just works.
-      scanInputRef.current?.focus()
+      // via the scanner, no click needed — just works. Not stolen back
+      // while the candidate-confirmation modal is open, though.
+      if (!openedCandidateModal) scanInputRef.current?.focus()
+    }
+  }
+
+  function handleAddCandidate(candidate: ProductResolutionCandidate) {
+    setCart((prev) =>
+      addOrIncrementCartItem(prev, {
+        id: newId(),
+        catalogItemId: null,
+        name: candidate.name,
+        brand: candidate.brand,
+        model: candidate.model,
+        imageUrl: candidate.imageUrl,
+        unitPriceCents: candidate.referencePriceCents ?? 0,
+        quantity: 1,
+        category: null,
+      }),
+    )
+    toast('success', `Added ${candidate.name}.`)
+    setResolveCandidates(null)
+    setUnresolvedCode(null)
+  }
+
+  async function handleSaveCandidateToCatalog(candidate: ProductResolutionCandidate) {
+    try {
+      const saved = await repo.createCatalogItem({
+        brand: candidate.brand,
+        model: candidate.model,
+        name: candidate.name,
+        defaultPriceCents: candidate.referencePriceCents,
+        upc: candidate.upc,
+        imageUrl: candidate.imageUrl,
+      })
+      setCatalogItems((prev) => (prev ? [...prev, saved] : [saved]))
+      addCatalogItem(saved)
+      toast('success', `Saved "${saved.name}" to your catalog and added it to this order.`)
+      setResolveCandidates(null)
+      setUnresolvedCode(null)
+    } catch {
+      toast('error', 'Could not save that product. Please try again.')
     }
   }
 
@@ -183,6 +269,7 @@ export default function ScanWorkspacePage() {
     setCustomName('')
     setCustomPrice('')
     setCustomSuggestion(null)
+    setUnresolvedCode(null)
   }
 
   async function handleCreateInvoice() {
@@ -300,7 +387,7 @@ export default function ScanWorkspacePage() {
                   {lookupBusy ? (
                     <span className="inline-flex items-center gap-2 text-sm font-medium text-zinc-500">
                       <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                      Looking it up…
+                      {resolving ? 'Not in your catalog — searching product sources…' : 'Checking your catalog…'}
                     </span>
                   ) : null}
                   <Button variant="secondary" onClick={() => setScannerOpen(true)} className="ml-auto">
@@ -357,6 +444,12 @@ export default function ScanWorkspacePage() {
 
               <Card className="no-print space-y-2">
                 <p className="text-sm font-semibold text-ink">Add a one-off item</p>
+                {unresolvedCode ? (
+                  <p className="flex items-start gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    Scanned code {unresolvedCode} — no confident match. It's kept here; fill in the details and it'll still go in as a one-off item.
+                  </p>
+                ) : null}
                 <div className="flex flex-wrap items-start gap-2">
                   <div className="min-w-40 flex-1">
                     <ProductSuggestField
@@ -373,13 +466,97 @@ export default function ScanWorkspacePage() {
                       placeholder="Item name — try typing a model number"
                     />
                   </div>
-                  <Input value={customPrice} onChange={(e) => setCustomPrice(e.target.value)} placeholder="Price" inputMode="decimal" className="w-28" />
+                  {/* Wrapped in a width-constrained div rather than passing
+                      className="w-28" straight to Input -- Input's own base
+                      w-full class wins the Tailwind specificity tie against a
+                      narrower width passed via className (compiled-stylesheet
+                      order, not markup order), which silently stretched this
+                      field to the full row width and pushed Price/Add onto
+                      their own line below the name field's suggestion
+                      dropdown -- where closing that dropdown on an outside
+                      click could shift the layout out from under an
+                      in-flight click on Add. Same fix as the name field's
+                      own wrapper just above. */}
+                  <div className="w-28">
+                    <Input value={customPrice} onChange={(e) => setCustomPrice(e.target.value)} placeholder="Price" inputMode="decimal" />
+                  </div>
                   <Button variant="secondary" onClick={addCustomItem} disabled={!customName.trim()}>
                     <Plus className="h-4 w-4" aria-hidden="true" />
                     Add
                   </Button>
                 </div>
               </Card>
+
+              <Modal
+                open={resolveCandidates !== null && resolveCandidates.length > 0}
+                onClose={() => {
+                  setResolveCandidates(null)
+                  scanInputRef.current?.focus()
+                }}
+                title={unresolvedCode ? `Possible matches for ${unresolvedCode}` : 'Possible matches'}
+              >
+                <div className="space-y-3">
+                  <p className="text-sm text-zinc-600">
+                    This barcode isn&apos;t in your catalog yet. Here&apos;s what we found on the web — pick one, or add it manually
+                    below instead.
+                  </p>
+                  {(resolveCandidates ?? []).map((candidate) => (
+                    <div key={candidate.id} className="rounded-xl border border-zinc-200 p-3">
+                      <div className="flex items-start gap-3">
+                        <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-blue-50">
+                          {candidate.imageUrl ? (
+                            <img src={candidate.imageUrl} alt="" className="h-full w-full rounded-lg object-contain" />
+                          ) : (
+                            <Package className="h-6 w-6 text-brand" aria-hidden="true" />
+                          )}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-ink">
+                            {[candidate.brand, candidate.model].filter(Boolean).join(' ') || candidate.name}
+                          </p>
+                          <p className="truncate text-xs text-zinc-500">{candidate.name}</p>
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                            <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${CONFIDENCE_BADGE[candidate.confidenceLevel]}`}>
+                              {CONFIDENCE_LABEL[candidate.confidenceLevel]}
+                            </span>
+                            {candidate.referencePriceCents !== null ? (
+                              <span className="text-xs text-zinc-500">
+                                {formatCurrency(candidate.referencePriceCents)}
+                                {candidate.priceKind !== 'unknown' ? ` (${candidate.priceKind.toUpperCase()})` : ''}
+                                {candidate.priceSourceName ? ` — ${candidate.priceSourceName}` : ''}
+                              </span>
+                            ) : null}
+                          </div>
+                          {candidate.warnings.length > 0 ? (
+                            <p className="mt-1 flex items-start gap-1 text-xs text-amber-700">
+                              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                              {candidate.warnings[0]}
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className="mt-2 flex gap-2">
+                        <Button variant="secondary" className="flex-1" onClick={() => handleAddCandidate(candidate)}>
+                          Add to cart
+                        </Button>
+                        <Button variant="ghost" onClick={() => void handleSaveCandidateToCatalog(candidate)}>
+                          Save to catalog &amp; add
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                  <Button
+                    variant="ghost"
+                    className="w-full"
+                    onClick={() => {
+                      setResolveCandidates(null)
+                      scanInputRef.current?.focus()
+                    }}
+                  >
+                    None of these — I&apos;ll enter it manually
+                  </Button>
+                </div>
+              </Modal>
             </>
           ) : (
             <InvoiceDocument invoice={invoice} shop={shop} customerName={customerName} customerEmail={customerEmail} />

@@ -224,6 +224,63 @@ export interface ProductSuggestion {
   sourceUrl: string | null
 }
 
+// ---------------------------------------------------------------------------
+// Universal product resolver — the one canonical, typed contract behind
+// barcode lookup, typed search, and (later) photo lookup. See
+// docs/PRODUCT_RESOLVER.md. lookupProductByUpc/lookupProductSuggestions
+// above keep their existing narrower shapes for backward compatibility with
+// already-shipped call sites (ScanWorkspacePage, ProductSuggestField) — both
+// now delegate to resolveProduct() underneath rather than making their own
+// separate external calls.
+// ---------------------------------------------------------------------------
+
+/** Where a resolved candidate's data actually came from — never conflated with "this shop's own catalog," which is checked locally before resolveProduct is ever called. */
+export type ProductResolutionSource = 'resolution_cache' | 'verified_web_source' | 'ai_extracted'
+
+/** Whether a reference price is MSRP, a verified retail price, or unclear — distinct from a shop's own selling price/cost, which a candidate never carries (see CatalogItem.defaultPriceCents/costCents for that). */
+export type ProductPriceKind = 'msrp' | 'retail' | 'unknown'
+
+export type ProductConfidenceLevel = 'high' | 'probable' | 'low'
+
+/**
+ * One ranked candidate identity for a scanned barcode or typed query that
+ * didn't match anything already in this shop's catalog. Always a
+ * *suggestion* — nothing here is written to the shop's catalog or cart
+ * until staff explicitly act on it (see ScanWorkspacePage's confirmation
+ * UI). referencePriceCents is a reference/market price, never a shop's own
+ * confirmed selling price — the two are never overwritten by each other.
+ */
+export interface ProductResolutionCandidate {
+  id: string
+  source: ProductResolutionSource
+  brand: string | null
+  model: string | null
+  name: string
+  /** Free-text category hint (e.g. "car subwoofer") — not a raw ProductCategory value; map it with the existing guessCategoryFromName heuristic rather than trusting an AI-invented enum value. */
+  categoryHint: string | null
+  upc: string | null
+  imageUrl: string | null
+  referencePriceCents: number | null
+  priceKind: ProductPriceKind
+  priceSourceUrl: string | null
+  priceSourceName: string | null
+  /** 0-1 self-reported confidence, already discounted server-side for things like an unconfirmed barcode match. */
+  confidence: number
+  confidenceLevel: ProductConfidenceLevel
+  /** Short human-readable reasons supporting this match. */
+  evidence: string[]
+  /** Things staff should double-check before trusting this candidate (e.g. "barcode not directly confirmed"). */
+  warnings: string[]
+}
+
+export type ProductResolveRequest = { kind: 'barcode'; code: string } | { kind: 'text'; query: string }
+
+export interface ProductResolveResult {
+  candidates: ProductResolutionCandidate[]
+  /** The original code/query, always returned — even an empty-candidates result never loses what was scanned/typed, so the caller can fall back to a custom item with it prefilled. */
+  retainedInput: string
+}
+
 export interface ShopifyImportOptions {
   /** Resume a prior run — pass back the nextCursor from its result. */
   afterCursor?: string | null
@@ -265,8 +322,17 @@ export interface DataRepository {
   findCatalogItemByCode(code: string): Promise<CatalogItem | null>
   /** Local catalog first, then (production only) an external UPC database. A future phase adds a photo-lookup fallback for codes nothing recognizes. */
   lookupProductByUpc(code: string): Promise<UpcLookupResult>
-  /** AI+web-search autocomplete for a partially-typed SKU/model/name when adding a new catalog product. Demo mode never makes a real call — always resolves []. Production degrades to [] on any failure rather than throwing, same pattern as lookupProductByUpc. */
+  /** AI+web-search autocomplete for a partially-typed SKU/model/name when adding a new catalog product. Demo mode never makes a real call — always resolves []. Production degrades to [] on any failure rather than throwing, same pattern as lookupProductByUpc. Delegates to resolveProduct() underneath. */
   lookupProductSuggestions(query: string): Promise<ProductSuggestion[]>
+  /**
+   * The universal resolver: called when a barcode or typed query doesn't
+   * match anything already in this shop's catalog. Never throws and never
+   * dead-ends — an empty candidate list is a valid, safe result (caller
+   * falls back to a custom/temporary item using retainedInput). Demo mode
+   * never makes a real AI/web call — see DemoRepository for its
+   * deterministic simulated outcomes.
+   */
+  resolveProduct(request: ProductResolveRequest): Promise<ProductResolveResult>
 
   listInvoices(): Promise<Invoice[]>
   getInvoice(invoiceId: string): Promise<Invoice | null>

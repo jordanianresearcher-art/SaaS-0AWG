@@ -30,6 +30,11 @@ import type {
   NewPackageTemplateInput,
   NewQuoteInput,
   NewStockMovementInput,
+  ProductConfidenceLevel,
+  ProductPriceKind,
+  ProductResolutionCandidate,
+  ProductResolveRequest,
+  ProductResolveResult,
   ProductSuggestion,
   SendEmailResult,
   ShopifyImportOptions,
@@ -37,6 +42,8 @@ import type {
   ShopSettingsPatch,
   UpcLookupResult,
 } from './repository'
+import { dedupeCandidates, rankCandidates } from '../lib/productResolver'
+import { newId } from '../lib/ids'
 
 // Production repository. Row-level security scopes every query to shops the
 // signed-in user belongs to; the anonymous public page goes through
@@ -552,31 +559,34 @@ export class SupabaseRepository implements DataRepository {
     const item = await this.findCatalogItemByCode(code)
     if (item) return { source: 'catalog', catalogItem: item }
 
-    // Any failure reaching the external lookup — a real "nothing known
-    // about this code" 404, the function not deployed yet, a network
-    // hiccup, whatever — lands the caller in the same place: fall back to
-    // manual entry. From a cashier mid-scan, a hard-thrown error here is
-    // worse than "not found," so this never throws; it just logs for
-    // debugging and degrades gracefully like the rest of this lookup chain
-    // already does (see productLookup's local-first, external-optional shape).
+    // Fast, confident path only: a single high-confidence verified-source
+    // match (today, that's an exact UPCitemdb hit) auto-populates without
+    // staff confirmation, same behavior this method has always had. Any
+    // lower-confidence or AI-extracted result — including everything the
+    // resolver had to fall back to web search for — is NOT auto-added
+    // here; it comes back as not_found and the caller (ScanWorkspacePage)
+    // makes its own resolveProduct() call to show the full ranked
+    // candidate list for staff to confirm. That second call is a cache hit
+    // (this call already populated it), not a repeat AI/web call. This
+    // never throws — any failure (function not deployed, missing
+    // ANTHROPIC_API_KEY, a network hiccup) degrades to not_found, worse
+    // than which would be a hard error mid-scan.
     try {
-      const { data, error } = await this.supabase.functions.invoke('lookup-product-upc', { body: { code } })
-      if (error) {
-        if (!(error instanceof FunctionsHttpError) || error.context?.status !== 404) {
-          console.error('lookup-product-upc failed', error)
+      const result = await this.resolveProduct({ kind: 'barcode', code })
+      const top = result.candidates[0]
+      if (top && top.source === 'verified_web_source' && top.confidenceLevel === 'high') {
+        return {
+          source: 'external',
+          name: top.name,
+          brand: top.brand,
+          unitPriceCents: top.referencePriceCents,
+          imageUrl: top.imageUrl,
+          upc: top.upc ?? code,
         }
-        return { source: 'not_found' }
       }
-      return {
-        source: 'external',
-        name: data.name ?? null,
-        brand: data.brand ?? null,
-        unitPriceCents: data.unitPriceCents ?? null,
-        imageUrl: data.imageUrl ?? null,
-        upc: data.upc ?? code,
-      }
+      return { source: 'not_found' }
     } catch (err) {
-      console.error('lookup-product-upc failed', err)
+      console.error('lookupProductByUpc failed', err)
       return { source: 'not_found' }
     }
   }
@@ -584,29 +594,63 @@ export class SupabaseRepository implements DataRepository {
   async lookupProductSuggestions(query: string): Promise<ProductSuggestion[]> {
     const trimmed = query.trim()
     if (trimmed.length < 2) return []
+    const result = await this.resolveProduct({ kind: 'text', query: trimmed })
+    return result.candidates.map((c) => ({
+      name: c.name,
+      brand: c.brand,
+      model: c.model,
+      unitPriceCents: c.referencePriceCents,
+      imageUrl: c.imageUrl,
+      sourceUrl: c.priceSourceUrl,
+    }))
+  }
 
-    // Same never-throw rule as lookupProductByUpc: this powers an
-    // autocomplete dropdown, not a blocking step, so any failure (function
-    // not deployed yet, missing ANTHROPIC_API_KEY, a network hiccup, a rate
-    // limit) just means no suggestions — never interrupts manual entry.
+  async resolveProduct(request: ProductResolveRequest): Promise<ProductResolveResult> {
+    const retainedInput = request.kind === 'barcode' ? request.code : request.query
+    // Same never-throw rule as everything else in this lookup chain: this
+    // powers an autocomplete dropdown or a post-scan confirmation step, not
+    // a blocking one, so any failure (function not deployed yet, missing
+    // ANTHROPIC_API_KEY, a network hiccup, a rate limit) just means no
+    // candidates — never interrupts manual/custom-item entry.
     try {
-      const { data, error } = await this.supabase.functions.invoke('lookup-product-suggestions', { body: { query: trimmed } })
+      const { data, error } = await this.supabase.functions.invoke('resolve-product', {
+        body: { shopId: this.shopId, ...request },
+      })
       if (error) {
-        console.error('lookup-product-suggestions failed', error)
-        return []
+        if (!(error instanceof FunctionsHttpError) || error.context?.status !== 404) {
+          console.error('resolve-product failed', error)
+        }
+        return { candidates: [], retainedInput }
       }
-      const suggestions = Array.isArray(data?.suggestions) ? data.suggestions : []
-      return suggestions.map((s: Partial<ProductSuggestion>) => ({
-        name: typeof s.name === 'string' ? s.name : '',
-        brand: s.brand ?? null,
-        model: s.model ?? null,
-        unitPriceCents: s.unitPriceCents ?? null,
-        imageUrl: s.imageUrl ?? null,
-        sourceUrl: s.sourceUrl ?? null,
-      }))
+      const raw = Array.isArray(data?.candidates) ? (data.candidates as Row[]) : []
+      const mapped: ProductResolutionCandidate[] = raw
+        .map((c) => ({
+          id: typeof c.id === 'string' ? c.id : newId(),
+          source: (['resolution_cache', 'verified_web_source', 'ai_extracted'] as const).includes(c.source)
+            ? (c.source as ProductResolutionCandidate['source'])
+            : 'ai_extracted',
+          brand: typeof c.brand === 'string' ? c.brand : null,
+          model: typeof c.model === 'string' ? c.model : null,
+          name: typeof c.name === 'string' ? c.name : '',
+          categoryHint: typeof c.categoryHint === 'string' ? c.categoryHint : null,
+          upc: typeof c.upc === 'string' ? c.upc : null,
+          imageUrl: typeof c.imageUrl === 'string' ? c.imageUrl : null,
+          referencePriceCents: typeof c.referencePriceCents === 'number' ? c.referencePriceCents : null,
+          priceKind: (['msrp', 'retail', 'unknown'] as const).includes(c.priceKind) ? (c.priceKind as ProductPriceKind) : 'unknown',
+          priceSourceUrl: typeof c.priceSourceUrl === 'string' ? c.priceSourceUrl : null,
+          priceSourceName: typeof c.priceSourceName === 'string' ? c.priceSourceName : null,
+          confidence: typeof c.confidence === 'number' ? c.confidence : 0,
+          confidenceLevel: (['high', 'probable', 'low'] as const).includes(c.confidenceLevel)
+            ? (c.confidenceLevel as ProductConfidenceLevel)
+            : 'low',
+          evidence: Array.isArray(c.evidence) ? c.evidence.filter((e: unknown): e is string => typeof e === 'string') : [],
+          warnings: Array.isArray(c.warnings) ? c.warnings.filter((w: unknown): w is string => typeof w === 'string') : [],
+        }))
+        .filter((c) => c.name.length > 0)
+      return { candidates: rankCandidates(dedupeCandidates(mapped), retainedInput), retainedInput }
     } catch (err) {
-      console.error('lookup-product-suggestions failed', err)
-      return []
+      console.error('resolve-product failed', err)
+      return { candidates: [], retainedInput }
     }
   }
 

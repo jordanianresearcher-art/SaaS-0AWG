@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { DemoRepository } from './demoRepository'
+import { DemoRepository, DEMO_UNRESOLVED_BARCODE } from './demoRepository'
 
 function memoryStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> & { map: Map<string, string> } {
   const map = new Map<string, string>()
@@ -243,6 +243,23 @@ describe('DemoRepository', () => {
 
   it('lookupProductSuggestions never makes a real AI/web-search call in demo mode', async () => {
     expect(await repo.lookupProductSuggestions('NA-12F')).toEqual([])
+  })
+
+  it('resolveProduct never makes a real AI/web-search call, and text queries always resolve to no candidates', async () => {
+    const result = await repo.resolveProduct({ kind: 'text', query: 'NA-12F' })
+    expect(result).toEqual({ candidates: [], retainedInput: 'NA-12F' })
+  })
+
+  it('resolveProduct simulates a resolved-but-unconfirmed barcode deterministically, for the fixed demo code', async () => {
+    const result = await repo.resolveProduct({ kind: 'barcode', code: DEMO_UNRESOLVED_BARCODE })
+    expect(result.retainedInput).toBe(DEMO_UNRESOLVED_BARCODE)
+    expect(result.candidates.length).toBeGreaterThan(0)
+    expect(result.candidates.every((c) => c.upc === DEMO_UNRESOLVED_BARCODE)).toBe(true)
+  })
+
+  it('resolveProduct genuinely finds nothing for any other unrecognized barcode — never dead-ends silently, retains the code', async () => {
+    const result = await repo.resolveProduct({ kind: 'barcode', code: '000000000000' })
+    expect(result).toEqual({ candidates: [], retainedInput: '000000000000' })
   })
 
   it('seeds one paid demo invoice, linked to its stock movement', async () => {

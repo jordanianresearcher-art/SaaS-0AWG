@@ -24,6 +24,9 @@ import type {
   NewPackageTemplateInput,
   NewQuoteInput,
   NewStockMovementInput,
+  ProductResolutionCandidate,
+  ProductResolveRequest,
+  ProductResolveResult,
   ProductSuggestion,
   SendEmailResult,
   ShopifyImportResult,
@@ -37,6 +40,51 @@ import { nextFollowUpDateAfterSend } from '../lib/followUp'
 import { newId } from '../lib/ids'
 
 const STORAGE_KEY = '0gauge-demo-db'
+
+// A fixed, never-real barcode used purely so demo mode and Playwright smoke
+// tests can exercise the "unknown barcode -> resolver finds candidates" UI
+// deterministically, with zero network calls. Any other unrecognized code
+// genuinely resolves to no candidates, same as a real unresolvable scan.
+export const DEMO_UNRESOLVED_BARCODE = '999999999999'
+
+const DEMO_RESOLVED_CANDIDATES: ProductResolutionCandidate[] = [
+  {
+    id: 'demo-candidate-1',
+    source: 'verified_web_source',
+    brand: 'DS18',
+    model: 'PRO-X8.4',
+    name: 'PRO-X8.4 4-Channel Amplifier',
+    categoryHint: 'car audio amplifiers',
+    upc: DEMO_UNRESOLVED_BARCODE,
+    imageUrl: null,
+    referencePriceCents: 24999,
+    priceKind: 'msrp',
+    priceSourceUrl: 'https://example.com/demo/ds18-pro-x84',
+    priceSourceName: 'Demo source',
+    confidence: 0.72,
+    confidenceLevel: 'probable',
+    evidence: ['Demo data — simulates a resolved barcode match for testing.'],
+    warnings: [],
+  },
+  {
+    id: 'demo-candidate-2',
+    source: 'ai_extracted',
+    brand: 'DS18',
+    model: 'PRO-X4.2K',
+    name: 'PRO-X4.2K 4-Channel Amplifier (compact)',
+    categoryHint: 'car audio amplifiers',
+    upc: DEMO_UNRESOLVED_BARCODE,
+    imageUrl: null,
+    referencePriceCents: 19999,
+    priceKind: 'retail',
+    priceSourceUrl: 'https://example.com/demo/ds18-pro-x42k',
+    priceSourceName: 'Demo source',
+    confidence: 0.31,
+    confidenceLevel: 'low',
+    evidence: ['Demo data — a lower-confidence second guess.'],
+    warnings: ["This barcode wasn't directly confirmed by a source — verify it matches before relying on this match."],
+  },
+]
 
 /**
  * Demo-mode repository. All data lives in localStorage so a sales demo can be
@@ -292,11 +340,33 @@ export class DemoRepository implements DataRepository {
   }
 
   async lookupProductSuggestions(query: string): Promise<ProductSuggestion[]> {
-    // Demo mode must never make a real external (AI/web-search) call — no
-    // local catalog fallback makes sense for free-text autocomplete either,
-    // so this is always an empty list, regardless of what was typed.
-    void query
-    return []
+    const result = await this.resolveProduct({ kind: 'text', query })
+    return result.candidates.map((c) => ({
+      name: c.name,
+      brand: c.brand,
+      model: c.model,
+      unitPriceCents: c.referencePriceCents,
+      imageUrl: c.imageUrl,
+      sourceUrl: c.priceSourceUrl,
+    }))
+  }
+
+  async resolveProduct(request: ProductResolveRequest): Promise<ProductResolveResult> {
+    // Demo mode must never make a real AI/web-search call. Free-text
+    // queries always resolve to no candidates (same as before this
+    // resolver existed — there's no meaningful local fallback for
+    // autocomplete). Barcodes simulate two honest, deterministic outcomes
+    // so the "never dead-end" scanner UI is exercisable without a network:
+    // one fixed "known unknown" code returns a couple of plausible-looking
+    // candidates, and everything else genuinely resolves to nothing.
+    if (request.kind === 'text') {
+      return { candidates: [], retainedInput: request.query.trim() }
+    }
+    const code = request.code.trim()
+    if (code === DEMO_UNRESOLVED_BARCODE) {
+      return { candidates: DEMO_RESOLVED_CANDIDATES, retainedInput: code }
+    }
+    return { candidates: [], retainedInput: code }
   }
 
   async listInvoices(): Promise<Invoice[]> {

@@ -76,24 +76,21 @@ have) — see each phase below for what's ported vs. built new.
   is Phase 4). Code-split via `React.lazy`/`Suspense` in `ScanWorkspacePage`
   — the ~470kb zxing bundle only downloads once someone actually opens the
   scanner, not on every page load.
-- **`lookup-product-upc` Edge Function**: ported from that app's
-  `/api/lookup/upc` route (UPCitemdb's free trial endpoint, no API key
-  needed). Requires just a signed-in user — no shop-membership check, since
-  it's a pure external lookup that touches no shop-specific rows.
-- **`DataRepository.lookupProductByUpc()`**: local `catalog_items` match by
-  UPC/SKU first (`findCatalogItemByCode`), falling back to the Edge
-  Function only in production — demo mode never makes the real network
-  call, same rule as `runShopifyImport`. A successful external match is
-  immediately saved into the shop's catalog (with the UPC set) so the next
-  scan of that exact barcode is an instant local hit. **Never throws** —
-  any failure reaching the Edge Function (not deployed yet, a network
-  hiccup, whatever) degrades to the same `{ source: 'not_found' }` result
-  a genuine miss produces, logged to the console for debugging but never
-  surfaced as a raw error mid-scan. (Real shops will hit this today: the
-  Edge Function isn't deployed to the live project until the shop owner
-  runs `supabase functions deploy lookup-product-upc` — until then, every
-  barcode not already in the local catalog just falls through to "add it
-  manually," which is the correct degraded behavior, not a bug.)
+- **UPC lookup, now folded into the universal resolver**: this phase
+  originally shipped a standalone `lookup-product-upc` Edge Function
+  (UPCitemdb's free trial endpoint). A later round replaced it — see
+  **[docs/PRODUCT_RESOLVER.md](PRODUCT_RESOLVER.md)** — with
+  `resolve-product`, one shared resolver used by barcode lookup, typed
+  search, and (later) photo lookup. `DataRepository.lookupProductByUpc()`
+  keeps its original shape (local catalog match first, then a single
+  confident external hit auto-saved to the catalog) but now delegates to
+  the resolver underneath, and a barcode that misses UPCitemdb no longer
+  dead-ends — it automatically continues into an AI+web-search fallback
+  and, below full confidence, shows staff a confirmation card instead of
+  auto-saving. **Never throws** — any failure anywhere in that chain
+  (function not deployed, missing `ANTHROPIC_API_KEY`, a network hiccup)
+  degrades to the same safe "nothing found, kept for manual entry" result,
+  never a raw error mid-scan.
 - **Hardware (laser/CCD) barcode scanners are the primary input** — most
   of these (USB on a PC, Bluetooth on a phone/tablet) need no camera, app,
   or driver at all: to the browser they're just a keyboard that types a
@@ -175,20 +172,16 @@ have) — see each phase below for what's ported vs. built new.
 
 ## Completed (Product suggestions — AI+web-search autocomplete for manual entry)
 
-- **`lookup-product-suggestions` Edge Function**: given a partially-typed
-  SKU/model/name (e.g. "NA-12F"), calls Claude with the `web_search` tool
-  and a structured (`output_config`/`json_schema`) response — up to 5
-  candidate real products ranked most-likely-match first, each with
-  brand/model/name, an MSRP if found, a photo URL if found, and a source
-  URL. Called directly over HTTPS (no `@anthropic-ai/sdk` — this project's
-  Edge Functions stay dependency-light, matching `send-quote-email`'s raw
-  Resend fetch) rather than porting `car-audio-inventory`'s
-  `/api/lookup/vision` route wholesale — same underlying technique (Claude +
-  `web_search` + structured output), just text-query-driven instead of
-  photo-driven, and without that route's Shopify cross-check or official-
-  photo-scrape steps (out of scope for a lightweight autocomplete). Same
-  "any signed-in user" auth rule as `lookup-product-upc` — a pure lookup
-  that touches no shop-specific rows.
+- **The AI+web-search autocomplete, now folded into the universal
+  resolver.** This originally shipped as its own `lookup-product-suggestions`
+  Edge Function; a later round replaced it with the shared `resolve-product`
+  resolver — see **[docs/PRODUCT_RESOLVER.md](PRODUCT_RESOLVER.md)** for the
+  canonical contract (`ProductResolutionCandidate`/`resolveProduct`) now
+  used by barcode lookup, this autocomplete, and (later) photo lookup.
+  `DataRepository.lookupProductSuggestions()` keeps its original narrow
+  return shape (`ProductSuggestion[]`) for backward compatibility with
+  `ProductSuggestField` below, but now delegates to `resolveProduct({kind:'text', query})`
+  underneath rather than calling its own Edge Function.
 - **`DataRepository.lookupProductSuggestions()`**: demo mode always
   resolves `[]` (no real AI/web-search call, ever — same rule as
   `runShopifyImport`/`lookupProductByUpc`). Production never throws either
@@ -239,11 +232,11 @@ have) — see each phase below for what's ported vs. built new.
 
 | For | Status |
 | --- | --- |
-| `ANTHROPIC_API_KEY` (product-suggestion autocomplete now; photo lookup and voice-order parsing later) | **Needed now** — `lookup-product-suggestions` is written and ready but not yet deployed/callable until this secret exists. Not used server-side anywhere else in this project (Shopify import and email use their own separate credentials) — the shop owner sets it as a new Supabase Edge Function secret, same self-serve mechanism as `RESEND_API_KEY`/`SHOPIFY_ADMIN_ACCESS_TOKEN`. Until it's set, the autocomplete quietly shows no suggestions rather than erroring (see `lookupProductSuggestions`'s never-throw contract above) — same graceful-degradation shape as `lookupProductByUpc` before `lookup-product-upc` is deployed. |
+| `ANTHROPIC_API_KEY` (universal product resolver — barcode AI fallback + text autocomplete now; photo lookup and voice-order parsing later) | **Needed now** — `resolve-product` (see [docs/PRODUCT_RESOLVER.md](PRODUCT_RESOLVER.md)) is written and ready but not yet deployed/callable until this secret exists. Not used server-side anywhere else in this project (Shopify import and email use their own separate credentials) — the shop owner sets it as a new Supabase Edge Function secret, same self-serve mechanism as `RESEND_API_KEY`/`SHOPIFY_ADMIN_ACCESS_TOKEN`. Until it's set, the resolver quietly returns no candidates rather than erroring — same graceful-degradation shape as everywhere else in this lookup chain. |
 | `OPENAI_API_KEY` (voice transcription, Phase 5) | Not yet set — new secret, same mechanism. |
-| UPCitemdb (barcode lookup) | **Live this phase** — no key needed on the free trial tier (~100 lookups/day/IP), same as `car-audio-inventory` already uses it. Worth watching for rate-limit errors at real shop volume; a paid key is a drop-in swap in `lookup-product-upc/index.ts` if needed later. |
+| UPCitemdb (barcode lookup) | **Live this phase** — no key needed on the free trial tier (~100 lookups/day/IP), same as `car-audio-inventory` already uses it. Worth watching for rate-limit errors at real shop volume; a paid key is a drop-in swap in `resolve-product/index.ts` if needed later. |
 | `RESEND_API_KEY` / `EMAIL_FROM` (invoice emailing) | **Already configured** — `send-invoice-email` reuses the exact secrets `send-quote-email` already uses. No new secret needed; only the new function itself needs deploying (`supabase functions deploy send-invoice-email`). |
-| Supabase deploy/migration access | This session still has no Supabase personal access token/CLI (a standing limitation — see `docs/CATALOG_AND_PACKAGES.md`). Migration `0011` and the new Edge Functions (`lookup-product-upc`, `send-invoice-email`, `lookup-product-suggestions`) are written and ready; the shop owner applies/deploys them themselves via the CLI/SQL editor, same as prior migrations this project has shipped. |
+| Supabase deploy/migration access | This session still has no Supabase personal access token/CLI (a standing limitation — see `docs/CATALOG_AND_PACKAGES.md`). Migrations `0011`/`0012` and the Edge Functions (`resolve-product`, `send-invoice-email`) are written and ready; the shop owner applies/deploys them themselves via the CLI/SQL editor, same as prior migrations this project has shipped. |
 
 ## Known limitations (through this phase)
 
@@ -262,9 +255,10 @@ have) — see each phase below for what's ported vs. built new.
 - **Invoice** and **Quote** are working document types. Receive inventory/
   Outgoing order are visible in the side panel (so the eventual four-way
   choice is discoverable) but disabled — Phase 3 remainder.
-- No generated codes or label printing yet — items with no findable UPC
-  just fail the lookup and staff add them manually; nothing queues a label
-  to print. Phase 4.
+- No generated codes or label printing yet — a barcode the resolver can't
+  match to anything is retained and shown as a hint so staff can still add
+  it manually (see docs/PRODUCT_RESOLVER.md), but nothing generates a
+  fallback code for it or queues a label to print. Phase 4.
 - `markInvoicePaid` has no compensating "void a paid invoice" path — once
   paid, the stock movements it recorded are permanent (an `'adjustment'`
   movement is the manual undo, same ledger mechanism, just not wired to a
@@ -274,8 +268,8 @@ have) — see each phase below for what's ported vs. built new.
   selecting a suggestion doesn't auto-set a catalog item's category, staff
   still pick that manually (or via the existing name-based heuristic in
   `src/lib/categorize.ts`).
-- Until `ANTHROPIC_API_KEY` is set and `lookup-product-suggestions` is
-  deployed, `ProductSuggestField` never shows a dropdown of real results —
-  it silently reports "No matches found." after every search, same
-  graceful-degradation shape as the barcode lookup before its own Edge
-  Function is deployed.
+- Until `ANTHROPIC_API_KEY` is set and `resolve-product` is deployed,
+  `ProductSuggestField` never shows a dropdown of real results — it
+  silently reports "No matches found." after every search, and an unknown
+  barcode's resolver step likewise comes back with no candidates. Same
+  graceful-degradation shape throughout — see docs/PRODUCT_RESOLVER.md.
