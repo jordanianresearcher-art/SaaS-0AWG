@@ -1,11 +1,16 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Plus, Search } from 'lucide-react'
+import { CreditCard, Plus, Search } from 'lucide-react'
 import { useAppData } from '../../data/AppDataContext'
 import { Badge, Card, EmptyState, Input, LinkButton, LoadingBlock, Select } from '../../components/ui'
-import { STATUS_CONFIG } from '../../lib/status'
+import { isTerminal, STATUS_CONFIG } from '../../lib/status'
 import { customerDisplayName, formatCurrency, formatDate, formatVehicle, quoteValueCents } from '../../lib/format'
-import type { QuoteStatus } from '../../types'
+import type { QuoteBundle, QuoteStatus } from '../../types'
+
+/** Latest response is a still-open ask for financing — worth a glance from the list, not just the detail page. */
+function needsFinancingFollowUp(b: QuoteBundle): boolean {
+  return b.responses[0]?.responseType === 'need_financing' && !isTerminal(b.quote.status)
+}
 
 export default function QuotesPage() {
   const { bundles, loading } = useAppData()
@@ -92,6 +97,11 @@ export default function QuotesPage() {
                   <div className="flex shrink-0 flex-col items-end gap-1.5">
                     <span className="text-lg font-black text-ink">{formatCurrency(quoteValueCents(b.options))}</span>
                     <Badge className={STATUS_CONFIG[b.quote.status].badgeClass}>{STATUS_CONFIG[b.quote.status].label}</Badge>
+                    {needsFinancingFollowUp(b) ? (
+                      <Badge className="bg-amber-100 text-amber-800">
+                        <CreditCard className="h-3.5 w-3.5" aria-hidden="true" /> Needs financing
+                      </Badge>
+                    ) : null}
                   </div>
                 </Card>
               </Link>

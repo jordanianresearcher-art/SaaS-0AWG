@@ -7,6 +7,7 @@ import {
   Ban,
   CalendarClock,
   Copy,
+  CreditCard,
   DollarSign,
   ExternalLink,
   Files,
@@ -96,6 +97,7 @@ export default function QuoteDetailPage() {
   const suggested = suggestNextTemplate(emails, lastResponse?.responseType ?? null)
   const publicUrl = publicQuoteUrl(quote.publicToken)
   const terminal = isTerminal(quote.status)
+  const needsFinancingFollowUp = lastResponse?.responseType === 'need_financing' && !terminal
 
   const openEmail = (template: TemplateType) => {
     setEmailTemplate(template)
@@ -147,6 +149,16 @@ export default function QuoteDetailPage() {
           ) : null}
         </div>
       </div>
+
+      {needsFinancingFollowUp ? (
+        <div className="no-print flex items-center gap-3 rounded-2xl border-2 border-amber-300 bg-amber-50 p-4">
+          <CreditCard className="h-6 w-6 shrink-0 text-amber-700" aria-hidden="true" />
+          <p className="text-base font-bold text-amber-900">
+            {customer.firstName} asked about financing — this is the exact kind of interest that's already turned into
+            a real sale. Follow up.
+          </p>
+        </div>
+      ) : null}
 
       {/* Primary actions */}
       <Card className="no-print space-y-3">

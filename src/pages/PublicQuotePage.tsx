@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
-import { MapPin, Phone, Mail, BadgeCheck } from 'lucide-react'
+import { MapPin, Phone, Mail, BadgeCheck, CreditCard, Check } from 'lucide-react'
 import type { PublicQuote, ResponseType } from '../types'
 import { resolvePublicQuoteApi, type PublicQuoteApi } from '../data/publicQuote'
 import { RESPONSE_CONFIG } from '../lib/status'
@@ -11,14 +11,11 @@ import { Button, LoadingBlock } from '../components/ui'
 
 // What the customer sees. No login, no jargon, big buttons.
 
-const RESPONSE_CHOICES: ResponseType[] = [
-  'ready_to_book',
-  'need_financing',
-  'want_cheaper',
-  'after_payday',
-  'question',
-  'not_interested',
-]
+// need_financing has its own big, dedicated CTA right under the options
+// (see the Financing section below) — this real quote's proof of value —
+// so it's deliberately left out of the generic response grid rather than
+// buried as one of six equal-weight choices.
+const RESPONSE_CHOICES: ResponseType[] = ['ready_to_book', 'want_cheaper', 'after_payday', 'question', 'not_interested']
 
 export default function PublicQuotePage() {
   const { publicToken = '' } = useParams<{ publicToken: string }>()
@@ -85,19 +82,43 @@ export default function PublicQuotePage() {
 
   const color = quote?.shopPrimaryColor || '#1d4ed8'
 
+  // Shared by the generic response panel and the dedicated financing CTA —
+  // one tap, one call, one confirmation state, regardless of which action
+  // triggered it. The server itself also de-dupes a rapid repeat of the
+  // same response type (see migration 0014), so a double-click/retry here
+  // is safe even before the disabled-while-submitting guard kicks in.
+  const submit = useCallback(
+    async (responseType: ResponseType, optionId: string | null, msg: string | null) => {
+      if (!api) return
+      setSubmitting(true)
+      try {
+        await api.submitResponse(responseType, optionId, msg)
+        sessionStorage.setItem(respondedKey, responseType)
+        setSubmitted(responseType)
+        // Fire-and-forget — never blocks or affects this confirmation.
+        void api.notifyHighIntent(responseType)
+      } catch {
+        setState('error')
+      } finally {
+        setSubmitting(false)
+      }
+    },
+    [api, respondedKey],
+  )
+
   const submitResponse = useCallback(async () => {
-    if (!api || !selectedResponse) return
-    setSubmitting(true)
-    try {
-      await api.submitResponse(selectedResponse, selectedOption, message.trim() || null)
-      sessionStorage.setItem(respondedKey, selectedResponse)
-      setSubmitted(selectedResponse)
-    } catch {
-      setState('error')
-    } finally {
-      setSubmitting(false)
-    }
-  }, [api, selectedResponse, selectedOption, message, respondedKey])
+    if (!selectedResponse) return
+    await submit(selectedResponse, selectedOption, message.trim() || null)
+  }, [submit, selectedResponse, selectedOption, message])
+
+  // The financing CTA is meant to stay "extremely easy" — one tap, no
+  // intermediate form — carrying whichever option the customer has chosen
+  // (via "Choose this option" on a card below), or null if they haven't
+  // picked one yet. This is the exact action that produced this product's
+  // first real sale.
+  const requestFinancing = useCallback(async () => {
+    await submit('need_financing', selectedOption, null)
+  }, [submit, selectedOption])
 
   const doOptOut = useCallback(async () => {
     if (!api) return
@@ -211,6 +232,24 @@ export default function PublicQuotePage() {
                 <p className="mt-2 text-sm font-medium text-zinc-500">
                   {option.laborIncluded ? '✓ Professional installation included' : 'Installation billed separately'}
                 </p>
+                {quote.options.length > 1 ? (
+                  selectedOption === option.id ? (
+                    <p
+                      className="mt-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border-2 text-base font-bold"
+                      style={{ borderColor: color, color }}
+                    >
+                      <Check className="h-5 w-5" aria-hidden="true" /> Selected
+                    </p>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedOption(option.id)}
+                      className="mt-3 min-h-12 w-full rounded-xl border-2 border-zinc-300 text-base font-bold text-ink hover:border-zinc-400"
+                    >
+                      Choose this option
+                    </button>
+                  )
+                ) : null}
                 {depositUrl ? (
                   <div className="mt-3 space-y-1.5">
                     {depositAmountLabel ? (
@@ -244,6 +283,31 @@ export default function PublicQuotePage() {
             )
           })}
         </section>
+
+        {/* Financing — a real, extremely-easy, one-tap action. Not buried
+            in the generic response grid: this exact action produced this
+            product's first real sale ($3,245), so it stays prominent. */}
+        {quote.options.length > 0 && !optedOut ? (
+          <section aria-label="Financing" className="mt-6">
+            {submitted === 'need_financing' ? (
+              <div className="flex items-center justify-center gap-2 rounded-2xl border-2 border-green-300 bg-green-50 p-4 text-center text-base font-bold text-green-800">
+                <Check className="h-5 w-5 shrink-0" aria-hidden="true" />
+                Got it — {quote.shopName} will follow up about financing.
+              </div>
+            ) : submitted ? null : (
+              <button
+                type="button"
+                onClick={() => void requestFinancing()}
+                disabled={submitting}
+                className="flex min-h-16 w-full items-center justify-center gap-2 rounded-2xl border-2 text-lg font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                style={{ borderColor: color, color }}
+              >
+                <CreditCard className="h-6 w-6" aria-hidden="true" />
+                {submitting ? 'Sending…' : 'I need financing'}
+              </button>
+            )}
+          </section>
+        ) : null}
 
         {/* Window tint */}
         {quote.windowTints.length > 0 ? (
