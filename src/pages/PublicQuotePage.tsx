@@ -205,7 +205,7 @@ export default function PublicQuotePage() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <div className="flex items-center gap-2">
-                      <h2 className="text-xl font-black text-ink">{option.name}</h2>
+                      <h2 className="text-xl font-black text-ink">{option.name.trim() || 'Option'}</h2>
                       {option.recommended ? (
                         <span
                           className="flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold text-white"
@@ -225,7 +225,7 @@ export default function PublicQuotePage() {
                       {item.quantity > 1 ? `${item.quantity}× ` : ''}
                       {[item.brand, item.model].filter(Boolean).join(' ')}
                       {item.brand || item.model ? ' — ' : ''}
-                      {item.name}
+                      {item.name.trim() || 'Item'}
                     </li>
                   ))}
                 </ul>

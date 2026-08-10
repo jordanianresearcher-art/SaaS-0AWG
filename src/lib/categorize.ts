@@ -26,6 +26,11 @@ const NAME_CATEGORY_HINTS: Array<{ pattern: RegExp; category: ProductCategory }>
   // Kit" would otherwise match amp(lifier)? first and land as multi_amp.
   { pattern: /wiring kit|amp kit|wire kit|install(ation)? kit|\d[\s-]?gauge kit|power kit/i, category: 'wiring_kit' },
   { pattern: /mono.?block|mono.*amp/i, category: 'mono_amp' },
+  // 4/5-channel before the generic amp(lifier)? catch-all, which would
+  // otherwise shadow it — "4-Channel Amplifier"/"5 Channel Amp"/"4/5
+  // Channel Amplifier" all count; the two lookaheads let "amp" and the
+  // channel-count phrase appear in either order.
+  { pattern: /(?=.*\bamp)(?=.*\b[45][\s/-]*[45]?[\s-]?(?:ch|channel)\b)/i, category: 'four_five_channel_amp' },
   { pattern: /amp(lifier)?\b/i, category: 'multi_amp' },
   { pattern: /line output converter|\bloc\b/i, category: 'integration' },
   { pattern: /bass knob|bass control|bass remote|remote level control|\brlc\b/i, category: 'bass_control' },

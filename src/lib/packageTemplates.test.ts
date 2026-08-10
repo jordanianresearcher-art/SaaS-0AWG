@@ -10,7 +10,7 @@ function makeOption(overrides: Partial<QuoteOption> = {}): QuoteOption {
     tier: 'good',
     name: 'Good',
     description: 'Punchier bass, clean install.',
-    configId: 'truck_2x8',
+    configId: 'bass_2x8',
     priceCents: 89900,
     laborIncluded: true,
     depositPaymentMethod: null,
@@ -43,7 +43,7 @@ describe('quoteOptionToPackageTemplateDraft', () => {
 
     expect(draft.name).toBe('Truck 2x8 Starter') // trimmed
     expect(draft.description).toBe(option.description)
-    expect(draft.configId).toBe('truck_2x8')
+    expect(draft.configId).toBe('bass_2x8')
     expect(draft.vehicleTypes).toEqual(['truck'])
     expect(draft.installedPriceCents).toBe(89900)
     expect(draft.laborIncluded).toBe(true)

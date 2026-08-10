@@ -75,7 +75,7 @@ describe('DemoRepository', () => {
           tier: 'good',
           name: 'Good',
           description: '',
-          configId: 'truck_2x8',
+          configId: 'bass_2x8',
           priceCents: 99900,
           laborIncluded: true,
           depositPaymentMethod: null,
@@ -90,7 +90,7 @@ describe('DemoRepository', () => {
     expect(bundle?.quote.status).toBe('draft')
     expect(bundle?.options).toHaveLength(1)
     expect(bundle?.options[0].items).toHaveLength(1)
-    expect(bundle?.options[0].configId).toBe('truck_2x8')
+    expect(bundle?.options[0].configId).toBe('bass_2x8')
     expect(bundle?.options[0].items[0].category).toBe('subwoofer')
     expect(bundle?.customer.emailContactPermissionConfirmedAt).toBeTruthy()
   })
@@ -347,7 +347,7 @@ describe('DemoRepository', () => {
     const template = await repo.createPackageTemplate({
       name: 'Test Package',
       description: '',
-      configId: 'car_1x10',
+      configId: 'bass_1x10',
       vehicleTypes: ['car'],
       installedPriceCents: 49900,
       laborIncluded: true,

@@ -9,28 +9,30 @@ import {
 } from './audioConfigs'
 
 describe('configuration catalog', () => {
-  it('has every listed truck and car bass configuration with unique ids', () => {
+  it('has one generic bass configuration per sub count/size, unique ids, no vehicle-type split', () => {
     const ids = AUDIO_CONFIGURATIONS.map((c) => c.id)
     expect(new Set(ids).size).toBe(ids.length) // no duplicates
-    for (const id of ['truck_2x8', 'truck_4x8', 'truck_2x10', 'truck_2x12']) {
+    // Union of what used to be truck-only (2x8, 4x8, 2x10, 2x12) and
+    // car-only (1x8, 2x8, 1x10, 2x10, 1x12, 2x12, 1x15, 2x15) lists — now
+    // one generic set, usable for any vehicle type (see BASS_CONFIGS).
+    for (const id of ['bass_1x8', 'bass_2x8', 'bass_4x8', 'bass_1x10', 'bass_2x10', 'bass_1x12', 'bass_2x12', 'bass_1x15', 'bass_2x15']) {
       expect(ids).toContain(id)
     }
-    for (const id of ['car_1x8', 'car_2x8', 'car_1x10', 'car_2x10', 'car_1x12', 'car_2x12', 'car_1x15', 'car_2x15']) {
-      expect(ids).toContain(id)
-    }
+    // No leftover vehicle-specific bass templates.
+    expect(ids.some((id) => id.startsWith('truck_') || id.startsWith('car_'))).toBe(false)
   })
 
   it('encodes sub count and size from the label', () => {
-    const c = getConfiguration('truck_2x8')!
+    const c = getConfiguration('bass_2x8')!
     expect(c.subCount).toBe(2)
     expect(c.subSizeInches).toBe(8)
-    const c2 = getConfiguration('car_1x15')!
+    const c2 = getConfiguration('bass_1x15')!
     expect(c2.subCount).toBe(1)
     expect(c2.subSizeInches).toBe(15)
   })
 
   it('sizes the subwoofer slot minimum to the sub count', () => {
-    const sub = getConfiguration('truck_4x8')!.slots.find((s) => s.category === 'subwoofer')!
+    const sub = getConfiguration('bass_4x8')!.slots.find((s) => s.category === 'subwoofer')!
     expect(sub.minQuantity).toBe(4)
     expect(sub.requirement).toBe('required')
   })
@@ -43,7 +45,7 @@ describe('configuration catalog', () => {
   })
 
   it('treats integration and bass control as recommended, not required', () => {
-    const config = getConfiguration('truck_2x8')!
+    const config = getConfiguration('bass_2x8')!
     const integration = config.slots.find((s) => s.category === 'integration')!
     const bassControl = config.slots.find((s) => s.category === 'bass_control')!
     expect(integration.requirement).toBe('recommended')
@@ -51,7 +53,7 @@ describe('configuration catalog', () => {
   })
 
   it('offers the documented optional upgrade slots', () => {
-    const config = getConfiguration('truck_2x8')!
+    const config = getConfiguration('bass_2x8')!
     const optional = new Set(config.slots.filter((s) => s.requirement === 'optional').map((s) => s.category))
     for (const cat of ['battery', 'epicenter', 'integration_module', 'sound_treatment', 'ofc_wiring', 'door_speaker', 'fabrication']) {
       expect(optional).toContain(cat)
@@ -60,12 +62,12 @@ describe('configuration catalog', () => {
 })
 
 describe('lookups', () => {
-  it('returns truck bass configs for trucks and car bass configs for those bodies', () => {
-    const truckBass = configurationsForVehicleType('truck').filter((c) => c.shell === 'bass')
-    expect(truckBass.every((c) => c.id.startsWith('truck_'))).toBe(true)
-    const suvBass = configurationsForVehicleType('suv').filter((c) => c.shell === 'bass')
-    expect(suvBass.length).toBeGreaterThan(0)
-    expect(suvBass.every((c) => c.id.startsWith('car_'))).toBe(true)
+  it('offers every bass shell to every vehicle type — no truck/car split', () => {
+    const bassIds = AUDIO_CONFIGURATIONS.filter((c) => c.shell === 'bass').map((c) => c.id)
+    for (const vt of ['truck', 'car', 'sedan', 'hatchback', 'suv'] as const) {
+      const forType = configurationsForVehicleType(vt).filter((c) => c.shell === 'bass')
+      expect(forType.map((c) => c.id).sort()).toEqual([...bassIds].sort())
+    }
   })
 
   it('offers door-speaker and full-system configs across every vehicle type, unlike bass sizing', () => {
@@ -155,7 +157,7 @@ describe('full_system shell', () => {
 })
 
 describe('validatePackageSlots', () => {
-  const config = getConfiguration('truck_2x8')! // needs 2 subs + enclosure + mono amp + wiring + labor
+  const config = getConfiguration('bass_2x8')! // needs 2 subs + enclosure + mono amp + wiring + labor
 
   it('reports complete once every required slot is filled to its minimum', () => {
     const items: SlottableItem[] = [

@@ -46,6 +46,8 @@ const PRODUCT_TYPE_CATEGORY_HINTS: Array<{ pattern: RegExp; category: ProductCat
   { pattern: /subwoofer/i, category: 'subwoofer' },
   { pattern: /enclosure|\bbox\b/i, category: 'enclosure' },
   { pattern: /mono.*amp/i, category: 'mono_amp' },
+  // Before the generic amp(lifier)? catch-all — same pattern as categorize.ts.
+  { pattern: /(?=.*\bamp)(?=.*\b[45][\s/-]*[45]?[\s-]?(?:ch|channel)\b)/i, category: 'four_five_channel_amp' },
   { pattern: /amp(lifier)?/i, category: 'multi_amp' },
   { pattern: /wiring|wire kit/i, category: 'wiring_kit' },
   { pattern: /coax|component|midrange|tweeter|door speaker|\bspeaker/i, category: 'door_speaker' },

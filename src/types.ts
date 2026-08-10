@@ -77,6 +77,11 @@ export type ProductCategory =
   | 'enclosure'
   | 'mono_amp'
   | 'multi_amp'
+  // A 4- or 5-channel amp is common enough in car audio (front+rear
+  // speakers, or front+rear+sub off the 5th channel) to warrant its own
+  // category rather than the generic multi_amp bucket, which still covers
+  // 2/3/6+-channel amps.
+  | 'four_five_channel_amp'
   | 'wiring_kit'
   | 'integration'
   | 'bass_control'
@@ -328,7 +333,7 @@ export interface QuoteOption {
   tier: Tier
   name: string
   description: string
-  /** Which universal configuration (e.g. 'truck_2x8') this option was built against, if any. References AUDIO_CONFIGURATIONS seed data, not a DB table. */
+  /** Which universal configuration (e.g. 'bass_2x8') this option was built against, if any. References AUDIO_CONFIGURATIONS seed data, not a DB table. */
   configId: string | null
   priceCents: number
   laborIncluded: boolean

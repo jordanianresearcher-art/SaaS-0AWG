@@ -73,17 +73,17 @@ const catalog: CatalogItem[] = [
   makeCatalogItem({ id: 'other-1', category: 'door_speaker', name: 'Door speaker', defaultPriceCents: 12900 }),
 ]
 
-const truck2x8 = getConfiguration('truck_2x8')!
+const bass2x8 = getConfiguration('bass_2x8')!
 
 describe('catalogItemsForSlot', () => {
   it('returns only active, approved products in the slot category', () => {
-    const subSlot = truck2x8.slots.find((s) => s.category === 'subwoofer')!
+    const subSlot = bass2x8.slots.find((s) => s.category === 'subwoofer')!
     const eligible = catalogItemsForSlot(catalog, subSlot)
     expect(eligible.map((i) => i.id).sort()).toEqual(['sub-1', 'sub-2'])
   })
 
   it('never suggests a product from another category', () => {
-    const encSlot = truck2x8.slots.find((s) => s.category === 'enclosure')!
+    const encSlot = bass2x8.slots.find((s) => s.category === 'enclosure')!
     expect(catalogItemsForSlot(catalog, encSlot).map((i) => i.id)).toEqual(['enc-1'])
   })
 })
@@ -119,17 +119,17 @@ describe('addToSlot / setSlotQuantity / removeFromSlot', () => {
 
 describe('assignmentsToSlottableItems / isBuilderComplete', () => {
   it('is incomplete with nothing assigned', () => {
-    expect(isBuilderComplete(truck2x8, {}, catalog)).toBe(false)
+    expect(isBuilderComplete(bass2x8, {}, catalog)).toBe(false)
   })
 
   it('becomes complete once every required slot is filled to its minimum', () => {
     let assignments: SlotAssignments = {}
-    assignments = setSlotQuantity(assignments, 'subwoofer', 'sub-1', 2) // truck_2x8 needs 2
+    assignments = setSlotQuantity(assignments, 'subwoofer', 'sub-1', 2) // bass_2x8 needs 2
     assignments = addToSlot(assignments, 'enclosure', 'enc-1')
     assignments = addToSlot(assignments, 'mono_amp', 'amp-1')
     assignments = addToSlot(assignments, 'wiring_kit', 'wire-1')
     assignments = addToSlot(assignments, 'labor', 'labor-1')
-    expect(isBuilderComplete(truck2x8, assignments, catalog)).toBe(true)
+    expect(isBuilderComplete(bass2x8, assignments, catalog)).toBe(true)
   })
 
   it('stays incomplete when a required slot is under-filled', () => {
@@ -139,7 +139,7 @@ describe('assignmentsToSlottableItems / isBuilderComplete', () => {
     assignments = addToSlot(assignments, 'mono_amp', 'amp-1')
     assignments = addToSlot(assignments, 'wiring_kit', 'wire-1')
     assignments = addToSlot(assignments, 'labor', 'labor-1')
-    expect(isBuilderComplete(truck2x8, assignments, catalog)).toBe(false)
+    expect(isBuilderComplete(bass2x8, assignments, catalog)).toBe(false)
   })
 
   it('never lets a dangling assignment (deleted catalog item) fill a slot', () => {
@@ -196,23 +196,23 @@ describe('requiresCompatibilityConfirmation', () => {
 })
 
 describe('resolveBuilderCatalog', () => {
-  const laborSlot = truck2x8.slots.find((s) => s.category === 'labor')!
+  const laborSlot = bass2x8.slots.find((s) => s.category === 'labor')!
 
   it('adds a synthetic labor catalog item filling the labor slot when a price is set', () => {
-    const resolved = resolveBuilderCatalog(truck2x8, catalog, {}, 15000)
+    const resolved = resolveBuilderCatalog(bass2x8, catalog, {}, 15000)
     const laborItem = resolved.catalog.find((i) => i.id === LABOR_CATALOG_ITEM_ID)
     expect(laborItem?.defaultPriceCents).toBe(15000)
     expect(resolved.assignments[laborSlot.key]).toEqual([{ catalogItemId: LABOR_CATALOG_ITEM_ID, quantity: 1 }])
   })
 
   it('never fabricates a labor entry when no price (or a zero/negative one) is set', () => {
-    expect(resolveBuilderCatalog(truck2x8, catalog, {}, null).assignments[laborSlot.key]).toBeUndefined()
-    expect(resolveBuilderCatalog(truck2x8, catalog, {}, 0).assignments[laborSlot.key]).toBeUndefined()
+    expect(resolveBuilderCatalog(bass2x8, catalog, {}, null).assignments[laborSlot.key]).toBeUndefined()
+    expect(resolveBuilderCatalog(bass2x8, catalog, {}, 0).assignments[laborSlot.key]).toBeUndefined()
   })
 
   it('clears a previously-set labor assignment if the price is removed', () => {
     const assignments: SlotAssignments = { [laborSlot.key]: [{ catalogItemId: LABOR_CATALOG_ITEM_ID, quantity: 1 }] }
-    const resolved = resolveBuilderCatalog(truck2x8, catalog, assignments, null)
+    const resolved = resolveBuilderCatalog(bass2x8, catalog, assignments, null)
     expect(resolved.assignments[laborSlot.key]).toBeUndefined()
   })
 

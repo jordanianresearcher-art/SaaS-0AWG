@@ -43,10 +43,17 @@ import type { CatalogItem, PaymentMethod, ProductCategory, QuoteBundle, Tier } f
 
 const PAYMENT_METHODS = Object.keys(PAYMENT_METHOD_INFO) as PaymentMethod[]
 
+const optionalDollarSchema = z
+  .string()
+  .refine((v) => v.trim() === '' || parseDollarsToCents(v) !== null, 'Enter a valid dollar amount')
+
 const itemSchema = z.object({
   brand: z.string(),
   model: z.string(),
-  name: z.string().min(1, 'What is this item?'),
+  // Nothing on this form is required (see the top-level schema comment) —
+  // a blank name still lands as a real line item; QuoteDetailPage/
+  // PublicQuotePage/emails all fall back to "Item" when name is empty.
+  name: z.string(),
   quantity: z.coerce.number().int().min(1, 'At least 1'),
   // Set when this row came from the drag-and-drop package builder, so it can fill a
   // configuration slot again later (e.g. duplicating the quote). Manual/catalog rows leave it null.
@@ -56,12 +63,14 @@ const itemSchema = z.object({
 const optionSchema = z
   .object({
     tier: z.enum(['good', 'better', 'insane', 'custom']),
-    name: z.string().min(1, 'Give this option a name'),
+    // Blank falls back to the tier's default label ("Good"/"Better"/…) at
+    // display time — see optionDisplayName below.
+    name: z.string(),
     description: z.string(),
-    price: z
-      .string()
-      .min(1, 'Enter a price')
-      .refine((v) => parseDollarsToCents(v) !== null, 'Enter a valid dollar amount'),
+    // Optional like everything else here — blank is treated as $0 downstream
+    // (see onSubmit's parseDollarsToCents(opt.price) ?? 0), same as the
+    // deposit-amount field already did.
+    price: optionalDollarSchema,
     laborIncluded: z.boolean(),
     depositAmount: z
       .string()
@@ -69,8 +78,10 @@ const optionSchema = z
     depositOverride: z.boolean(),
     depositMethod: z.enum(['none', 'link', 'zelle', 'cashapp', 'venmo', 'paypal']),
     depositHandle: z.string(),
-    items: z.array(itemSchema).min(1, 'Add at least one product'),
-    // Which universal configuration (e.g. 'truck_2x8') this option was built against, if any.
+    // No minimum — an option can be saved with zero line items (e.g. a
+    // flat-fee/labor-only quote) and products added later.
+    items: z.array(itemSchema),
+    // Which universal configuration (e.g. 'bass_2x8') this option was built against, if any.
     configId: z.string().nullable(),
   })
   .superRefine((values, ctx) => {
@@ -113,10 +124,6 @@ const tintWindowSchema = z.object({
   vltPercent: tintPercentSchema,
 })
 
-const optionalDollarSchema = z
-  .string()
-  .refine((v) => v.trim() === '' || parseDollarsToCents(v) !== null, 'Enter a valid dollar amount')
-
 const windowTintSchema = z.object({
   // Blank falls back to a generic "Tint option" label at display time —
   // not required, matching how little else on this form is required.
@@ -137,7 +144,11 @@ const schema = z
   .object({
     firstName: z.string(),
     lastName: z.string(),
-    email: z.string().email('A valid email is required — quotes are sent by email'),
+    // Optional like everything else — a blank email still saves the quote;
+    // checkSendEligibility (src/lib/eligibility.ts) blocks *sending* with a
+    // clear "no email on file" message until one's added, same safety net
+    // as the permission checkbox below.
+    email: z.string().refine((v) => v.trim() === '' || z.string().email().safeParse(v).success, 'Enter a valid email address'),
     phone: z.string(),
     // Blank ('') means "no vehicle yet" — a real select from VEHICLE_YEARS is
     // the only other possible value, so no numeric range check is needed here.
@@ -146,9 +157,9 @@ const schema = z
     vehicleModel: z.string(),
     vehicleTrim: z.string(),
     source: z.string(),
-    permissionConfirmed: z.literal(true, {
-      errorMap: () => ({ message: 'You must confirm the customer asked for this quote' }),
-    }),
+    // Not gated on true — staff can save a quote without checking this;
+    // it's still recorded on the customer record either way (see onSubmit).
+    permissionConfirmed: z.boolean(),
     expirationDate: z.string(),
     internalNotes: z.string(),
     nextFollowUpAt: z.string(),
@@ -443,7 +454,7 @@ export default function NewQuotePage() {
               <Input id="q-last" autoComplete="off" {...register('lastName')} />
             </Field>
           </div>
-          <Field label="Email" htmlFor="q-email" error={errors.email?.message} required>
+          <Field label="Email" htmlFor="q-email" error={errors.email?.message}>
             <Input id="q-email" type="email" inputMode="email" autoComplete="off" {...register('email')} />
           </Field>
           <Field label="Phone" htmlFor="q-phone" hint="For click-to-call. We never text customers.">
@@ -470,11 +481,6 @@ export default function NewQuotePage() {
               />
               This customer requested a quote and the shop is permitted to email them about it.
             </label>
-            {errors.permissionConfirmed ? (
-              <p role="alert" className="mt-2 text-sm font-medium text-red-700">
-                {errors.permissionConfirmed.message}
-              </p>
-            ) : null}
           </div>
         </Card>
 
@@ -867,7 +873,7 @@ function OptionEditor({
               <option value="custom">Custom</option>
             </Select>
           </Field>
-          <Field label="Option name" htmlFor={`opt-${index}-name`} error={optionErrors?.name?.message} required>
+          <Field label="Option name" htmlFor={`opt-${index}-name`} error={optionErrors?.name?.message}>
             <Input id={`opt-${index}-name`} {...register(`options.${index}.name`)} />
           </Field>
         </div>
@@ -972,7 +978,6 @@ function OptionEditor({
                     <button
                       type="button"
                       aria-label="Remove item"
-                      disabled={itemFields.length === 1}
                       onClick={() => remove(j)}
                       className="flex h-12 w-12 items-center justify-center rounded-xl text-zinc-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-30"
                     >
@@ -980,12 +985,8 @@ function OptionEditor({
                     </button>
                   </div>
                 ))}
+                {itemFields.length === 0 ? <p className="text-sm text-zinc-500">No products yet — add one, or skip if this is a flat-fee/labor-only option.</p> : null}
               </div>
-              {optionErrors?.items?.[0]?.name?.message ? (
-                <p role="alert" className="mt-1 text-sm font-medium text-red-700">
-                  {optionErrors.items[0].name.message}
-                </p>
-              ) : null}
               <div className="mt-2 flex flex-wrap gap-2">
                 <Button variant="ghost" onClick={() => append({ brand: '', model: '', name: '', quantity: 1, category: null })}>
                   <Plus className="h-5 w-5" aria-hidden="true" /> Add product
@@ -1000,7 +1001,7 @@ function OptionEditor({
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Price (installed)" htmlFor={`opt-${index}-price`} error={optionErrors?.price?.message} required>
+          <Field label="Price (installed)" htmlFor={`opt-${index}-price`} error={optionErrors?.price?.message}>
             <Input id={`opt-${index}-price`} inputMode="decimal" placeholder="$2,899" {...register(`options.${index}.price`)} />
           </Field>
           <Field

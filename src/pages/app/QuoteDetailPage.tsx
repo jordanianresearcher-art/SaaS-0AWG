@@ -247,7 +247,7 @@ export default function QuoteDetailPage() {
             <Card key={option.id} className={option.recommended ? 'border-brand' : ''}>
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
-                  <h3 className="text-lg font-bold text-ink">{option.name}</h3>
+                  <h3 className="text-lg font-bold text-ink">{option.name.trim() || 'Option'}</h3>
                   {option.recommended ? <Badge className="bg-blue-50 text-brand">Recommended</Badge> : null}
                 </div>
                 <p className="text-xl font-black text-ink">{formatCurrency(option.priceCents)}</p>
@@ -259,7 +259,7 @@ export default function QuoteDetailPage() {
                     <span className="text-zinc-700">
                       {item.quantity > 1 ? `${item.quantity}× ` : ''}
                       {[item.brand, item.model].filter(Boolean).join(' ')}{item.brand || item.model ? ' — ' : ''}
-                      {item.name}
+                      {item.name.trim() || 'Item'}
                     </span>
                   </li>
                 ))}

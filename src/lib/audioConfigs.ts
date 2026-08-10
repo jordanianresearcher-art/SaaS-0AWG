@@ -28,6 +28,7 @@ export const PRODUCT_CATEGORY_INFO: Record<ProductCategory, { label: string }> =
   enclosure: { label: 'Enclosure / box' },
   mono_amp: { label: 'Mono amplifier' },
   multi_amp: { label: 'Multi-channel amplifier' },
+  four_five_channel_amp: { label: '4/5-Channel amplifier' },
   wiring_kit: { label: 'Amp wiring kit' },
   integration: { label: 'Signal integration / LOC' },
   bass_control: { label: 'Bass control' },
@@ -177,26 +178,30 @@ function bassConfig(
   }
 }
 
-// Truck bass shells.
-const TRUCK_BASS: AudioConfiguration[] = [
-  bassConfig('truck_2x8', 'Truck 2×8', ['truck'], 2, 8),
-  bassConfig('truck_4x8', 'Truck 4×8', ['truck'], 4, 8),
-  bassConfig('truck_2x10', 'Truck 2×10', ['truck'], 2, 10),
-  bassConfig('truck_2x12', 'Truck 2×12', ['truck'], 2, 12),
+// Bass shells — one generic set of sub-count/size combinations, usable for
+// any vehicle type. Previously split into a truck-only list (which had
+// 2×8/4×8/2×10/2×12) and a separate car/sedan/hatchback/SUV list (1×8/2×8/
+// 1×10/2×10/1×12/2×12/1×15/2×15) — that meant "Truck 2×8" and "Car 2×8"
+// existed as two near-duplicate templates, and 4×8 was truck-only even
+// though any vehicle with the cargo space can fit 4 subs. Merged into the
+// union of both lists, generic across every vehicle type — a shop just
+// picks the sub count/size that fits, not a vehicle-type-gated template.
+const BASS_CONFIGS: AudioConfiguration[] = [
+  bassConfig('bass_1x8', '1×8', VEHICLE_TYPES, 1, 8),
+  bassConfig('bass_2x8', '2×8', VEHICLE_TYPES, 2, 8),
+  bassConfig('bass_4x8', '4×8', VEHICLE_TYPES, 4, 8),
+  bassConfig('bass_1x10', '1×10', VEHICLE_TYPES, 1, 10),
+  bassConfig('bass_2x10', '2×10', VEHICLE_TYPES, 2, 10),
+  bassConfig('bass_1x12', '1×12', VEHICLE_TYPES, 1, 12),
+  bassConfig('bass_2x12', '2×12', VEHICLE_TYPES, 2, 12),
+  bassConfig('bass_1x15', '1×15', VEHICLE_TYPES, 1, 15),
+  bassConfig('bass_2x15', '2×15', VEHICLE_TYPES, 2, 15),
 ]
 
-// Car / sedan / hatchback / SUV bass shells.
+// full_system_car below still needs this narrower list — a "complete
+// system" starter shell is deliberately one-per-broad-vehicle-group (see
+// the full-system section), unlike the now-fully-generic bass shells above.
 const CAR_VEHICLE_TYPES: VehicleType[] = ['car', 'sedan', 'hatchback', 'suv']
-const CAR_BASS: AudioConfiguration[] = [
-  bassConfig('car_1x8', 'Car 1×8', CAR_VEHICLE_TYPES, 1, 8),
-  bassConfig('car_2x8', 'Car 2×8', CAR_VEHICLE_TYPES, 2, 8),
-  bassConfig('car_1x10', 'Car 1×10', CAR_VEHICLE_TYPES, 1, 10),
-  bassConfig('car_2x10', 'Car 2×10', CAR_VEHICLE_TYPES, 2, 10),
-  bassConfig('car_1x12', 'Car 1×12', CAR_VEHICLE_TYPES, 1, 12),
-  bassConfig('car_2x12', 'Car 2×12', CAR_VEHICLE_TYPES, 2, 12),
-  bassConfig('car_1x15', 'Car 1×15', CAR_VEHICLE_TYPES, 1, 15),
-  bassConfig('car_2x15', 'Car 2×15', CAR_VEHICLE_TYPES, 2, 15),
-]
 
 // ---------------------------------------------------------------------------
 // Door-speaker ("voice") shells — front stage upgrades, independent of bass.
@@ -225,7 +230,7 @@ function speakerSlots(includeTweeter: boolean, frontOnly: boolean): ConfigSlot[]
     },
     {
       key: 'multi_amp',
-      category: 'multi_amp',
+      category: 'four_five_channel_amp',
       label: '4/5-channel amplifier',
       requirement: 'recommended',
       minQuantity: 1,
@@ -302,7 +307,7 @@ function fullSystemSlots(subCount: number, subSizeInches: number, includeTweeter
     },
     {
       key: 'multi_amp',
-      category: 'multi_amp',
+      category: 'four_five_channel_amp',
       label: '4/5-channel amplifier (speakers)',
       requirement: 'recommended',
       minQuantity: 1,
@@ -381,8 +386,7 @@ const FULL_SYSTEM_CONFIGS: AudioConfiguration[] = [
 ]
 
 export const AUDIO_CONFIGURATIONS: AudioConfiguration[] = [
-  ...TRUCK_BASS,
-  ...CAR_BASS,
+  ...BASS_CONFIGS,
   ...DOOR_SPEAKER_CONFIGS,
   ...FULL_SYSTEM_CONFIGS,
 ]

@@ -62,7 +62,7 @@ export interface NewQuoteInput {
     depositPaymentHandle: string | null
     depositAmountCents: number | null
     recommended: boolean
-    /** Which universal configuration (e.g. 'truck_2x8') this was built against, if any. Optional — the fast/visual builder that sets this is a later phase. */
+    /** Which universal configuration (e.g. 'bass_2x8') this was built against, if any. Optional — the fast/visual builder that sets this is a later phase. */
     configId?: string | null
     items: Array<{
       brand: string | null
