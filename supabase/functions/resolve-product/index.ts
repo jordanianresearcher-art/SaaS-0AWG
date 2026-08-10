@@ -10,10 +10,19 @@
 //   { kind: 'text', shopId, query }    -- a partial brand/model/SKU/name
 //
 // Resolution order (barcode): shop's resolution cache -> UPCitemdb (a real
-// barcode database, decent confidence) -> Claude + web_search using the
-// code itself as a search hint (lower confidence -- barcode databases
-// don't always cover obscure car-audio SKUs) -> cache the result either way.
-// Resolution order (text): shop's resolution cache -> Claude + web_search.
+// barcode database, decent confidence) -> AI + web_search using the code
+// itself as a search hint (lower confidence -- barcode databases don't
+// always cover obscure car-audio SKUs) -> cache the result either way.
+// Resolution order (text): shop's resolution cache -> AI + web_search.
+//
+// "AI + web_search" tries OpenAI first (Responses API, `web_search` tool,
+// strict `text.format` json_schema output) if OPENAI_API_KEY is set, else
+// falls back to Claude (Messages API, `web_search` tool, `output_config`
+// json_schema output) if ANTHROPIC_API_KEY is set instead. Same prompt,
+// same AI_CANDIDATE_SCHEMA, same confidence-capping rules either way --
+// the provider is just which API answers the grounding question. Whichever
+// key a shop's operator actually funds is the one that runs; no error if
+// only one (or neither) is set, see resolveViaAi below.
 //
 // This function never invents a product from memory alone -- every AI
 // candidate is grounded in a live web_search call, self-reports a
@@ -26,9 +35,10 @@
 // shop's catalog."
 //
 // Deploy:  supabase functions deploy resolve-product
-// Needs ANTHROPIC_API_KEY (same gap as the function this replaces — not yet
-// set in the live project; see docs/PRODUCT_RESOLVER.md's credentials table).
-// UPCitemdb needs no key on the free trial tier.
+// Needs OPENAI_API_KEY and/or ANTHROPIC_API_KEY for the AI+web-search
+// fallback (either one is enough; OpenAI is preferred when both are set —
+// see docs/PRODUCT_RESOLVER.md's credentials table). UPCitemdb needs no
+// key on the free trial tier.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
@@ -49,7 +59,8 @@ function fail(status: number, message: string): Response {
 }
 
 const ANTHROPIC_VERSION = '2023-06-01'
-const MODEL = 'claude-sonnet-5'
+const ANTHROPIC_MODEL = 'claude-sonnet-5'
+const OPENAI_MODEL = 'gpt-5.6'
 const BARCODE_CACHE_DAYS = 30
 const TEXT_CACHE_DAYS = 7
 
@@ -201,34 +212,12 @@ interface RawAiCandidate {
   evidence: unknown
 }
 
-async function resolveViaClaude(apiKey: string, prompt: string, upc: string | null): Promise<Candidate[]> {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': ANTHROPIC_VERSION,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: 1536,
-      tools: [{ type: 'web_search_20260318', name: 'web_search', max_uses: 3 }],
-      output_config: { format: { type: 'json_schema', schema: AI_CANDIDATE_SCHEMA } },
-      messages: [{ role: 'user', content: prompt }],
-    }),
-  })
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '')
-    console.error('resolve-product: Anthropic API error', res.status, errText.slice(0, 500))
-    return []
-  }
-
-  const data = await res.json()
-  const textBlock = Array.isArray(data?.content) ? data.content.find((b: { type?: string }) => b?.type === 'text') : null
-  const rawText = textBlock?.text
+// Shared by both providers: parse a provider's raw structured-output text
+// into candidates, applying the same barcode-confirmation confidence cap
+// either way. `providerLabel` is only for the console.error breadcrumb.
+function parseAiCandidates(rawText: string | null | undefined, upc: string | null, providerLabel: string): Candidate[] {
   if (typeof rawText !== 'string') {
-    console.error('resolve-product: no text block in Anthropic response')
+    console.error(`resolve-product: no text output in ${providerLabel} response`)
     return []
   }
 
@@ -236,7 +225,7 @@ async function resolveViaClaude(apiKey: string, prompt: string, upc: string | nu
   try {
     parsed = JSON.parse(rawText)
   } catch {
-    console.error('resolve-product: unparseable structured output', rawText.slice(0, 500))
+    console.error(`resolve-product: unparseable ${providerLabel} structured output`, rawText.slice(0, 500))
     return []
   }
 
@@ -275,6 +264,87 @@ async function resolveViaClaude(apiKey: string, prompt: string, upc: string | nu
       }
     })
     .filter((c): c is Candidate => c !== null)
+}
+
+async function resolveViaClaude(apiKey: string, prompt: string, upc: string | null): Promise<Candidate[]> {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': ANTHROPIC_VERSION,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL,
+      max_tokens: 1536,
+      tools: [{ type: 'web_search_20260318', name: 'web_search', max_uses: 3 }],
+      output_config: { format: { type: 'json_schema', schema: AI_CANDIDATE_SCHEMA } },
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  })
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '')
+    console.error('resolve-product: Anthropic API error', res.status, errText.slice(0, 500))
+    return []
+  }
+
+  const data = await res.json()
+  const textBlock = Array.isArray(data?.content) ? data.content.find((b: { type?: string }) => b?.type === 'text') : null
+  return parseAiCandidates(textBlock?.text, upc, 'Anthropic')
+}
+
+// OpenAI Responses API: the `web_search` built-in tool grounds the answer,
+// `text.format` with a strict json_schema constrains the final assistant
+// message to AI_CANDIDATE_SCHEMA -- same schema Claude uses, since the
+// candidate shape is provider-agnostic. The tool call itself shows up as a
+// separate `web_search_call` item in `output`; the actual structured JSON
+// is the `message` item's `output_text` content part.
+async function resolveViaOpenAi(apiKey: string, prompt: string, upc: string | null): Promise<Candidate[]> {
+  const res = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      tools: [{ type: 'web_search' }],
+      input: prompt,
+      text: { format: { type: 'json_schema', name: 'product_candidates', schema: AI_CANDIDATE_SCHEMA, strict: true } },
+    }),
+  })
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '')
+    console.error('resolve-product: OpenAI API error', res.status, errText.slice(0, 500))
+    return []
+  }
+
+  const data = await res.json()
+  const messageItem = Array.isArray(data?.output) ? data.output.find((o: { type?: string }) => o?.type === 'message') : null
+  const textPart = Array.isArray(messageItem?.content)
+    ? messageItem.content.find((c: { type?: string }) => c?.type === 'output_text')
+    : null
+  // `output_text` is also offered as a root-level convenience field by the
+  // API -- fall back to it if the shape above ever changes underneath us.
+  const rawText = typeof textPart?.text === 'string' ? textPart.text : typeof data?.output_text === 'string' ? data.output_text : null
+  return parseAiCandidates(rawText, upc, 'OpenAI')
+}
+
+// The one entry point the handler calls -- picks whichever provider this
+// shop's operator has actually funded. OpenAI wins if both are set (that's
+// the current ask; either key alone is enough to light up AI resolution,
+// and neither being set degrades gracefully to no AI candidates, same as
+// always).
+async function resolveViaAi(prompt: string, upc: string | null): Promise<Candidate[]> {
+  const openAiKey = Deno.env.get('OPENAI_API_KEY')
+  if (openAiKey) return resolveViaOpenAi(openAiKey, prompt, upc)
+
+  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY')
+  if (anthropicKey) return resolveViaClaude(anthropicKey, prompt, upc)
+
+  return []
 }
 
 // ---------------------------------------------------------------------------
@@ -361,38 +431,30 @@ Deno.serve(async (req: Request) => {
     if (upcHit) {
       candidates = [upcHit]
     } else {
-      const apiKey = Deno.env.get('ANTHROPIC_API_KEY')
-      if (apiKey) {
-        candidates = await resolveViaClaude(
-          apiKey,
-          `A car-audio shop employee scanned a barcode/UPC that isn't in a standard barcode database: "${normalizedKey}". ` +
-            'Search the web (barcode lookup sites, manufacturer sites, retailer listings) to try to identify what car-audio or ' +
-            'related shop product this barcode belongs to. Only set barcode_confirmed to true if a source explicitly ties this exact ' +
-            "code to the product -- otherwise leave it false/null and lower your confidence, since you're inferring from a general " +
-            'product search rather than a direct barcode match. Return up to 3 candidates, most-likely first, or zero if nothing ' +
-            'plausible turns up -- never invent a product.',
-          normalizedKey,
-        )
-      }
+      candidates = await resolveViaAi(
+        `A car-audio shop employee scanned a barcode/UPC that isn't in a standard barcode database: "${normalizedKey}". ` +
+          'Search the web (barcode lookup sites, manufacturer sites, retailer listings) to try to identify what car-audio or ' +
+          'related shop product this barcode belongs to. Only set barcode_confirmed to true if a source explicitly ties this exact ' +
+          "code to the product -- otherwise leave it false/null and lower your confidence, since you're inferring from a general " +
+          'product search rather than a direct barcode match. Return up to 3 candidates, most-likely first, or zero if nothing ' +
+          'plausible turns up -- never invent a product.',
+        normalizedKey,
+      )
     }
   } else {
     // kind === 'text' guarantees query was validated non-empty above, but
     // that narrowing doesn't survive across the separate if/else on `kind`
     // a few lines up -- the fallback is unreachable in practice.
     const textQuery = query ?? ''
-    const apiKey = Deno.env.get('ANTHROPIC_API_KEY')
-    if (apiKey) {
-      candidates = await resolveViaClaude(
-        apiKey,
-        `A car-audio shop employee is adding a new product to their catalog and has typed: "${textQuery}" ` +
-          '(a partial or full SKU, model number, or product name). Use web search to find up to 5 real, ' +
-          'specific car-audio products (amplifiers, subwoofers, speakers, head units, wiring, enclosures, ' +
-          'radios, DSPs, etc) that this could plausibly be, ranked most-likely-match first. Only include ' +
-          "products you're reasonably confident are real -- return fewer than 5 results (even zero) rather " +
-          "than guessing or inventing a product that doesn't exist.",
-        null,
-      )
-    }
+    candidates = await resolveViaAi(
+      `A car-audio shop employee is adding a new product to their catalog and has typed: "${textQuery}" ` +
+        '(a partial or full SKU, model number, or product name). Use web search to find up to 5 real, ' +
+        'specific car-audio products (amplifiers, subwoofers, speakers, head units, wiring, enclosures, ' +
+        'radios, DSPs, etc) that this could plausibly be, ranked most-likely-match first. Only include ' +
+        "products you're reasonably confident are real -- return fewer than 5 results (even zero) rather " +
+        "than guessing or inventing a product that doesn't exist.",
+      null,
+    )
   }
 
   // 3. Cache the result (even an empty one, so an obscure/unresolvable

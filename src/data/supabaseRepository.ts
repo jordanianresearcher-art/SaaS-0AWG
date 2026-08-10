@@ -571,9 +571,9 @@ export class SupabaseRepository implements DataRepository {
     // makes its own resolveProduct() call to show the full ranked
     // candidate list for staff to confirm. That second call is a cache hit
     // (this call already populated it), not a repeat AI/web call. This
-    // never throws — any failure (function not deployed, missing
-    // ANTHROPIC_API_KEY, a network hiccup) degrades to not_found, worse
-    // than which would be a hard error mid-scan.
+    // never throws — any failure (function not deployed, no funded
+    // OPENAI_API_KEY/ANTHROPIC_API_KEY, a network hiccup) degrades to
+    // not_found, worse than which would be a hard error mid-scan.
     try {
       const result = await this.resolveProduct({ kind: 'barcode', code })
       const top = result.candidates[0]
@@ -612,9 +612,9 @@ export class SupabaseRepository implements DataRepository {
     const retainedInput = request.kind === 'barcode' ? request.code : request.query
     // Same never-throw rule as everything else in this lookup chain: this
     // powers an autocomplete dropdown or a post-scan confirmation step, not
-    // a blocking one, so any failure (function not deployed yet, missing
-    // ANTHROPIC_API_KEY, a network hiccup, a rate limit) just means no
-    // candidates — never interrupts manual/custom-item entry.
+    // a blocking one, so any failure (function not deployed yet, no funded
+    // OPENAI_API_KEY/ANTHROPIC_API_KEY, a network hiccup, a rate limit)
+    // just means no candidates — never interrupts manual/custom-item entry.
     try {
       const { data, error } = await this.supabase.functions.invoke('resolve-product', {
         body: { shopId: this.shopId, ...request },

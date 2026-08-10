@@ -88,9 +88,9 @@ have) — see each phase below for what's ported vs. built new.
   dead-ends — it automatically continues into an AI+web-search fallback
   and, below full confidence, shows staff a confirmation card instead of
   auto-saving. **Never throws** — any failure anywhere in that chain
-  (function not deployed, missing `ANTHROPIC_API_KEY`, a network hiccup)
-  degrades to the same safe "nothing found, kept for manual entry" result,
-  never a raw error mid-scan.
+  (function not deployed, no funded `OPENAI_API_KEY`/`ANTHROPIC_API_KEY`,
+  a network hiccup) degrades to the same safe "nothing found, kept for
+  manual entry" result, never a raw error mid-scan.
 - **Hardware (laser/CCD) barcode scanners are the primary input** — most
   of these (USB on a PC, Bluetooth on a phone/tablet) need no camera, app,
   or driver at all: to the browser they're just a keyboard that types a
@@ -185,9 +185,10 @@ have) — see each phase below for what's ported vs. built new.
 - **`DataRepository.lookupProductSuggestions()`**: demo mode always
   resolves `[]` (no real AI/web-search call, ever — same rule as
   `runShopifyImport`/`lookupProductByUpc`). Production never throws either
-  — any failure (function not deployed yet, missing `ANTHROPIC_API_KEY`, a
-  rate limit, a network hiccup) degrades to `[]`, since this powers an
-  autocomplete dropdown, not a blocking step.
+  — any failure (function not deployed yet, no funded
+  `OPENAI_API_KEY`/`ANTHROPIC_API_KEY`, a rate limit, a network hiccup)
+  degrades to `[]`, since this powers an autocomplete dropdown, not a
+  blocking step.
 - **`src/components/ProductSuggestField.tsx`**: a reusable text input that
   debounce-searches (600ms, 3-char minimum) and shows results in a
   dropdown (photo/brand+model/name/price) — picking one hands the full
@@ -232,8 +233,7 @@ have) — see each phase below for what's ported vs. built new.
 
 | For | Status |
 | --- | --- |
-| `ANTHROPIC_API_KEY` (universal product resolver — barcode AI fallback + text autocomplete now; photo lookup and voice-order parsing later) | **Needed now** — `resolve-product` (see [docs/PRODUCT_RESOLVER.md](PRODUCT_RESOLVER.md)) is written and ready but not yet deployed/callable until this secret exists. Not used server-side anywhere else in this project (Shopify import and email use their own separate credentials) — the shop owner sets it as a new Supabase Edge Function secret, same self-serve mechanism as `RESEND_API_KEY`/`SHOPIFY_ADMIN_ACCESS_TOKEN`. Until it's set, the resolver quietly returns no candidates rather than erroring — same graceful-degradation shape as everywhere else in this lookup chain. |
-| `OPENAI_API_KEY` (voice transcription, Phase 5) | Not yet set — new secret, same mechanism. |
+| `OPENAI_API_KEY` **or** `ANTHROPIC_API_KEY` (universal product resolver — barcode AI fallback + text autocomplete now; photo lookup later) | **Set one, either is enough** — `resolve-product` (see [docs/PRODUCT_RESOLVER.md](PRODUCT_RESOLVER.md)) tries OpenAI first (Responses API + `web_search` tool) if `OPENAI_API_KEY` is set, else Claude (Messages API + `web_search` tool) if `ANTHROPIC_API_KEY` is set. Not used server-side anywhere else in this project (Shopify import and email use their own separate credentials) — the shop owner sets whichever they've actually funded as a Supabase Edge Function secret, same self-serve mechanism as `RESEND_API_KEY`/`SHOPIFY_ADMIN_ACCESS_TOKEN`. Until at least one is set (and funded — a $0 balance fails the same as a missing key), the resolver quietly returns no candidates rather than erroring — same graceful-degradation shape as everywhere else in this lookup chain. `OPENAI_API_KEY` doubles as the future Phase 5 voice-transcription key if that's ever built — no conflict, same secret either way. |
 | UPCitemdb (barcode lookup) | **Live this phase** — no key needed on the free trial tier (~100 lookups/day/IP), same as `car-audio-inventory` already uses it. Worth watching for rate-limit errors at real shop volume; a paid key is a drop-in swap in `resolve-product/index.ts` if needed later. |
 | `RESEND_API_KEY` / `EMAIL_FROM` (invoice emailing) | **Already configured** — `send-invoice-email` reuses the exact secrets `send-quote-email` already uses. No new secret needed; only the new function itself needs deploying (`supabase functions deploy send-invoice-email`). |
 | Supabase deploy/migration access | This session still has no Supabase personal access token/CLI (a standing limitation — see `docs/CATALOG_AND_PACKAGES.md`). Migrations `0011`/`0012` and the Edge Functions (`resolve-product`, `send-invoice-email`) are written and ready; the shop owner applies/deploys them themselves via the CLI/SQL editor, same as prior migrations this project has shipped. |
@@ -268,8 +268,9 @@ have) — see each phase below for what's ported vs. built new.
   selecting a suggestion doesn't auto-set a catalog item's category, staff
   still pick that manually (or via the existing name-based heuristic in
   `src/lib/categorize.ts`).
-- Until `ANTHROPIC_API_KEY` is set and `resolve-product` is deployed,
-  `ProductSuggestField` never shows a dropdown of real results — it
-  silently reports "No matches found." after every search, and an unknown
-  barcode's resolver step likewise comes back with no candidates. Same
-  graceful-degradation shape throughout — see docs/PRODUCT_RESOLVER.md.
+- Until a funded `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` is set and
+  `resolve-product` is deployed, `ProductSuggestField` never shows a
+  dropdown of real results — it silently reports "No matches found."
+  after every search, and an unknown barcode's resolver step likewise
+  comes back with no candidates. Same graceful-degradation shape
+  throughout — see docs/PRODUCT_RESOLVER.md.

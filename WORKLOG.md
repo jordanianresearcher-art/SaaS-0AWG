@@ -1803,3 +1803,85 @@ invisible to staff until they opened the quote.
   falls back to UPCitemdb-only for barcodes and returns no text
   candidates, gracefully, exactly like every prior AI-dependent feature
   in this codebase.
+
+## Round 26 — Live-deployment fixes, then OpenAI as an alternate AI provider
+
+This round was two parts: closing out live-deployment issues the shop
+owner hit after Round 25 shipped, then adding OpenAI as a second AI
+provider for the product resolver's web-search fallback.
+
+### Live-deployment fixes
+
+- **Invoice creation was failing in production** ("Could not create the
+  invoice. Please try again.") — root-caused to migration
+  `0011_inventory_and_documents.sql` (which creates `invoices`,
+  `invoice_items`, `stock_movements`, and their triggers/RLS) never
+  having been applied to the live database, even though migrations
+  `0009`/`0010` had been. Diagnosed via a sequence of targeted
+  `information_schema` queries run by the shop owner rather than
+  guessing; confirmed fixed once `0011` was applied directly via the
+  Supabase SQL Editor (this project's proven deploy path — the CLI's own
+  migration ledger has never matched what's actually been applied, a
+  standing gap documented in prior rounds).
+- **`ScanWorkspacePage.handleCreateInvoice()`** now `console.error`s the
+  real thrown error before showing the generic toast — the silent
+  `catch { toast(...) }` had made this exact production failure
+  undiagnosable from the browser. (Commit `881752f`, landed mid-diagnosis
+  before this round's other changes.)
+
+### OpenAI as an alternate AI provider (`resolve-product`)
+
+The shop owner's Anthropic org had a $0 credit balance — every Claude API
+call was failing with "credit balance is too low," which `resolveViaClaude`
+correctly treats as "found nothing" (never invents a product from a
+provider failure) rather than surfacing a scary error mid-scan. That's
+correct behavior for a genuine miss, but it also means a billing failure
+and a real "nothing found" are indistinguishable from the UI — worth
+knowing if this happens again. Rather than requiring the shop to fund
+Anthropic specifically, `resolve-product` now supports OpenAI as well:
+
+- **`resolveViaOpenAi(apiKey, prompt, upc)`** (new): calls OpenAI's
+  Responses API (`POST /v1/responses`) with the built-in `web_search`
+  tool and a strict `text.format` json_schema constraining the final
+  message to the exact same `AI_CANDIDATE_SCHEMA` Claude already used —
+  the candidate shape is provider-agnostic, so one schema serves both.
+  Parses the `message`-type item's `output_text` content part (falling
+  back to the API's root-level `output_text` convenience field).
+- **`parseAiCandidates(rawText, upc, providerLabel)`** (new, extracted):
+  the JSON.parse + confidence-capping + field-mapping logic that used to
+  live inside `resolveViaClaude` alone, now shared by both providers so
+  the barcode-confirmation confidence cap and warning text apply
+  identically regardless of which one answered.
+- **`resolveViaAi(prompt, upc)`** (new): the one call site the handler
+  uses now — tries `OPENAI_API_KEY` first (the shop owner's ask this
+  round), falls back to `ANTHROPIC_API_KEY` if only that's set, returns
+  `[]` if neither is set. Replaces two near-duplicated
+  `Deno.env.get('ANTHROPIC_API_KEY')` + `resolveViaClaude(...)` blocks
+  (barcode branch, text branch) with one call each.
+- Verified the exact current OpenAI Responses API request/response shape
+  (`tools: [{type:'web_search'}]`, `text.format.type: 'json_schema'` with
+  `strict: true`, response `output[].content[].text` for `type:
+  'output_text'` items) via web search before writing the integration,
+  rather than guessing field names — a wrong tool-type or param name
+  would have failed the exact same silent way the Anthropic billing issue
+  did (logged server-side, empty candidates to the caller), which is
+  exactly the failure mode just spent effort diagnosing.
+- `docs/PRODUCT_RESOLVER.md` and `docs/INVENTORY_AND_SCANNING.md`
+  (credentials table + three prose mentions) updated: either
+  `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` now works, OpenAI preferred if
+  both are set, and the docs now call out explicitly that a *funded* key
+  is required — a $0 balance degrades exactly like a missing key, so
+  check `supabase functions logs resolve-product` before assuming a
+  genuine "nothing found."
+
+### Verification
+
+- `tsc -b --noEmit` clean, `npm run lint` clean, `npx vitest run`
+  271/271 passing (unchanged — this round touched no client-side logic,
+  only the Edge Function and its comments/docs), `npm run build` clean.
+  `resolve-product/index.ts` typechecked standalone via the project's
+  Deno-shim workflow after the OpenAI addition.
+- Not yet deployed by this session (no Supabase CLI access, standing
+  limitation): the shop owner needs to `supabase functions deploy
+  resolve-product` and set `OPENAI_API_KEY` (or keep/fund
+  `ANTHROPIC_API_KEY`) for the new provider path to actually run live.

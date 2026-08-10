@@ -53,12 +53,21 @@ both call `resolveProduct()` underneath.
 3. **Barcode only:** UPCitemdb (free trial tier, no key) — a real
    barcode-to-product database, classified `verified_web_source`,
    confidence 0.75.
-4. Claude + the `web_search` tool, structured JSON output
-   (`output_config`/`json_schema`, same pattern as last round's
-   suggestions function) — for text queries always, for barcodes only
-   once UPCitemdb has already missed. The barcode-mode prompt explicitly
-   asks whether a source *confirmed* the exact code belongs to the
-   product (`barcode_confirmed`); if not, confidence is capped at 0.35
+4. AI + web search, structured JSON output — for text queries always, for
+   barcodes only once UPCitemdb has already missed. **OpenAI first if
+   `OPENAI_API_KEY` is set** (Responses API, the built-in `web_search`
+   tool, strict `text.format` json_schema output), **else Claude if
+   `ANTHROPIC_API_KEY` is set** (Messages API, the `web_search` tool,
+   `output_config`/`json_schema` output) — either key alone is enough,
+   OpenAI wins if both are set, and neither set means this step is
+   skipped entirely (not an error). Same prompt and the exact same
+   `AI_CANDIDATE_SCHEMA` either way; `resolveViaAi` in the Edge Function
+   is the one place that picks a provider, and `parseAiCandidates` is the
+   one place that turns a provider's raw text into `Candidate[]`, so the
+   confidence-capping rule below applies identically regardless of which
+   provider answered. The barcode-mode prompt explicitly asks whether a
+   source *confirmed* the exact code belongs to the product
+   (`barcode_confirmed`); if not, confidence is capped at 0.35
    server-side regardless of what the model claims, and a warning is
    attached — the model is never trusted to assert a barcode match from
    general product knowledge alone.
@@ -134,8 +143,16 @@ network access; every other unrecognized barcode genuinely resolves to
   text, resolve from that) is not built this round — the camera
   scanner's "Take photo instead" path still reports "not available yet."
   A large, separate piece of work; deferred and not built shallowly.
-- **`ANTHROPIC_API_KEY` still isn't set** in the live Supabase project (a
-  standing gap from prior rounds) and `resolve-product` itself isn't
-  deployed yet. Until both are done, barcode misses fall through to
-  UPCitemdb only (no AI fallback) and text search returns no candidates —
-  gracefully, not an error, same degradation shape as before.
+- **Neither `OPENAI_API_KEY` nor `ANTHROPIC_API_KEY` is required** for the
+  rest of the resolver to work — UPCitemdb barcode lookups and the local
+  catalog/cache paths run regardless. Set whichever one the shop's
+  operator has actually funded (`supabase secrets set OPENAI_API_KEY=...`
+  or `ANTHROPIC_API_KEY=...`) to light up the AI+web-search step; without
+  either, barcode misses fall through to UPCitemdb only and text search
+  returns no candidates — gracefully, not an error, same degradation
+  shape as before. A request that fails at the provider (bad key, no
+  credit balance, rate limit) degrades the exact same way: logged
+  server-side via `console.error` (`supabase functions logs
+  resolve-product`), empty candidates to the caller — a billing problem
+  and a genuine "nothing found" look identical from the UI, so check the
+  logs before assuming the latter.
