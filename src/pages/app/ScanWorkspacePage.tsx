@@ -1,17 +1,18 @@
 // The scan-to-invoice workspace: the shop's primary daily workflow. Scan a
 // barcode (or search/add manually) and it lands in the center work area,
 // editable via a pencil button; the side panel is where staff decide what
-// this scan session becomes. This phase wires only the "Invoice" document
-// type end to end — Quote/Receive inventory/Outgoing order are shown as
-// upcoming, not yet functional (see docs/INVENTORY_AND_SCANNING.md).
+// this scan session becomes — an invoice or a quote, both finished right
+// here (Receive inventory/Outgoing order are still shown as upcoming, not
+// yet functional — see docs/INVENTORY_AND_SCANNING.md).
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { AlertTriangle, Barcode, Camera, Loader2, Mail, MapPin, Minus, Package, Pencil, Phone, Plus, Printer, Search, Trash2 } from 'lucide-react'
+import { AlertTriangle, Barcode, Camera, Copy, Loader2, Mail, Minus, Package, Pencil, Plus, Printer, Search, Trash2 } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
 import { Button, Card, EmptyState, Field, Input, LoadingBlock, Modal, Select } from '../../components/ui'
 import { ProductSuggestField } from '../../components/ProductSuggestField'
+import { SalesDocument, type SalesDocumentItem } from '../../components/SalesDocument'
+import { EmailPreviewModal, publicQuoteUrl } from '../../components/EmailPreviewModal'
 import { formatCurrency, formatDateTime, parseDollarsToCents } from '../../lib/format'
 import { newId } from '../../lib/ids'
 import { useHardwareScanner } from '../../lib/useHardwareScanner'
@@ -25,9 +26,8 @@ import {
   updateCartItem,
   type ScannedCartItem,
 } from '../../lib/scanCart'
-import type { CatalogItem, Invoice, InvoicePaymentMethod, Shop } from '../../types'
+import type { CatalogItem, Invoice, InvoicePaymentMethod, QuoteBundle } from '../../types'
 import type { ProductResolutionCandidate, ProductSuggestion } from '../../data/repository'
-import type { ScanQuotePrefill } from './NewQuotePage'
 
 const CONFIDENCE_BADGE: Record<ProductResolutionCandidate['confidenceLevel'], string> = {
   high: 'bg-green-100 text-green-800',
@@ -73,11 +73,36 @@ function catalogItemToCartItem(item: CatalogItem, quantity = 1): ScannedCartItem
   }
 }
 
+function invoiceToDocumentItems(invoice: Invoice): SalesDocumentItem[] {
+  return invoice.items.map((item) => ({
+    id: item.id,
+    name: item.name,
+    brand: item.brand,
+    model: item.model,
+    quantity: item.quantity,
+    unitPriceCents: item.unitPriceCents,
+  }))
+}
+
+// Quotes price per-option, not per-item (see SalesDocumentItem's doc
+// comment) -- unitPriceCents is always null here, which renders as "—"
+// rather than a fabricated per-line price.
+function quoteOptionToDocumentItems(option: QuoteBundle['options'][number] | undefined): SalesDocumentItem[] {
+  if (!option) return []
+  return option.items.map((item) => ({
+    id: item.id,
+    name: item.name,
+    brand: item.brand,
+    model: item.model,
+    quantity: item.quantity,
+    unitPriceCents: null,
+  }))
+}
+
 export default function ScanWorkspacePage() {
   const repo = useRepo()
   const { shop } = useAppData()
   const toast = useToast()
-  const navigate = useNavigate()
 
   const [catalogItems, setCatalogItems] = useState<CatalogItem[] | null>(null)
   useEffect(() => {
@@ -86,6 +111,13 @@ export default function ScanWorkspacePage() {
 
   const [cart, setCart] = useState<ScannedCartItem[]>([])
   const [invoice, setInvoice] = useState<Invoice | null>(null)
+  // Which document this scan session becomes — a toggle, not an action;
+  // switching modes never touches the cart. Only 'invoice'/'quote' are
+  // wired end to end (see the side panel's "Turn this into…" grid).
+  const [docType, setDocType] = useState<'invoice' | 'quote'>('invoice')
+  const [quote, setQuote] = useState<QuoteBundle | null>(null)
+  const [creatingQuote, setCreatingQuote] = useState(false)
+  const [quoteEmailPreviewOpen, setQuoteEmailPreviewOpen] = useState(false)
   const [scannerOpen, setScannerOpen] = useState(false)
   const [lookupBusy, setLookupBusy] = useState(false)
   const [manualQuery, setManualQuery] = useState('')
@@ -126,8 +158,8 @@ export default function ScanWorkspacePage() {
   const [customerEmail, setCustomerEmail] = useState('')
   const [sendingEmail, setSendingEmail] = useState(false)
 
-  const building = invoice === null
-  const subtotalCents = building ? cartSubtotalCents(cart) : invoice.subtotalCents
+  const building = invoice === null && quote === null
+  const subtotalCents = building ? cartSubtotalCents(cart) : invoice ? invoice.subtotalCents : (quote!.options[0]?.priceCents ?? 0)
 
   // Auto-focus the dedicated scan input on mount, and again whenever we
   // return to "building" after starting a new session — a hardware
@@ -170,23 +202,20 @@ export default function ScanWorkspacePage() {
         addCatalogItem(saved)
         toast('success', `Found "${saved.name}" — added to your catalog and this order.`)
         setUnresolvedCode(null)
-      } else {
+      } else if (result.source === 'candidates') {
         // Never dead-end: nothing in the local catalog and no single
-        // confident external match, so automatically continue into the
-        // universal resolver instead of just reporting "not found." This
-        // second call is a cache hit in the common case (lookupProductByUpc
-        // already triggered the real AI/web search internally), not a
-        // repeat network round trip.
-        setResolving(true)
-        const resolved = await repo.resolveProduct({ kind: 'barcode', code })
+        // confident external match, so show the ranked candidates
+        // lookupProductByUpc already resolved instead of just reporting
+        // "not found" — carried straight through from that one call (see
+        // UpcLookupResult's 'candidates' case), not a second network
+        // round-trip to re-fetch the same thing.
         setUnresolvedCode(code)
-        if (resolved.candidates.length > 0) {
-          setResolveKind('barcode')
-          setResolveCandidates(resolved.candidates)
-          openedCandidateModal = true
-        } else {
-          toast('error', `No match for that barcode (${code}) anywhere we looked. It's been kept below — add the details manually.`)
-        }
+        setResolveKind('barcode')
+        setResolveCandidates(result.candidates)
+        openedCandidateModal = true
+      } else {
+        setUnresolvedCode(code)
+        toast('error', `No match for that barcode (${code}) anywhere we looked. It's been kept below — add the details manually.`)
       }
     } catch (err) {
       toast('error', err instanceof Error ? err.message : 'Barcode lookup failed.')
@@ -350,6 +379,8 @@ export default function ScanWorkspacePage() {
   function startNewSession() {
     setCart([])
     setInvoice(null)
+    setQuote(null)
+    setDocType('invoice')
     setPaymentAmount('')
     setPaymentMethod('cash')
     setManualQuery('')
@@ -357,14 +388,66 @@ export default function ScanWorkspacePage() {
     setCustomerEmail('')
   }
 
-  // Hands the scan cart off to the existing quote-creation flow rather
-  // than trying to build a full quote (customer info, tiers, deposit
-  // config) here — NewQuotePage already does that well. Mirrors the
-  // "Duplicate quote" pre-fill pattern (see location.state.duplicateFrom
-  // there) with a parallel state key instead of overloading that one.
-  function sendCartToQuote() {
-    const prefill: ScanQuotePrefill = { items: cartToQuoteItemInputs(cart), priceCents: cartSubtotalCents(cart) }
-    navigate('/app/quotes/new', { state: { fromScan: prefill } })
+  // Builds a real quote right here — no redirect to NewQuotePage. A single
+  // option ('Quote', tier 'good') carrying the whole cart at the cart's
+  // subtotal, same shape NewQuotePage's own scan-prefill path
+  // (optionsFromScan) already produces from a cart — this just calls
+  // createQuote directly instead of routing through a form. Staff who need
+  // real tiers/deposit config/vehicle info still have the full NewQuotePage
+  // flow for that; this is the fast path for "just get a number in front
+  // of the customer."
+  async function handleCreateQuote() {
+    setCreatingQuote(true)
+    try {
+      const created = await repo.createQuote({
+        customer: {
+          firstName: customerName.trim() || 'Walk-in customer',
+          lastName: null,
+          email: customerEmail.trim(),
+          phone: null,
+          vehicleYear: null,
+          vehicleMake: null,
+          vehicleModel: null,
+          vehicleTrim: null,
+          source: null,
+          emailContactPermissionConfirmed: false,
+        },
+        quote: { internalNotes: null, expirationDate: null, nextFollowUpAt: null, windowTints: [] },
+        options: [
+          {
+            tier: 'good',
+            name: 'Quote',
+            description: '',
+            priceCents: cartSubtotalCents(cart),
+            laborIncluded: true,
+            depositPaymentMethod: null,
+            depositPaymentHandle: null,
+            depositAmountCents: null,
+            recommended: true,
+            configId: null,
+            items: cartToQuoteItemInputs(cart).map((item) => ({ ...item, description: null })),
+          },
+        ],
+      })
+      const bundle = await repo.getQuoteBundle(created.id)
+      if (!bundle) throw new Error('Quote created but could not be reloaded')
+      setQuote(bundle)
+    } catch (err) {
+      console.error('createQuote failed', err)
+      toast('error', 'Could not create the quote. Please try again.')
+    } finally {
+      setCreatingQuote(false)
+    }
+  }
+
+  async function handleCopyQuoteLink() {
+    if (!quote) return
+    try {
+      await navigator.clipboard.writeText(publicQuoteUrl(quote.quote.publicToken))
+      toast('success', 'Quote link copied.')
+    } catch {
+      toast('error', 'Could not copy the link.')
+    }
   }
 
   const filteredCatalog = useMemo(() => {
@@ -417,7 +500,7 @@ export default function ScanWorkspacePage() {
                   {lookupBusy ? (
                     <span className="inline-flex items-center gap-2 text-sm font-medium text-zinc-500">
                       <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                      {resolving ? 'Not in your catalog — searching product sources…' : 'Checking your catalog…'}
+                      {resolving ? 'Searching product sources…' : 'Looking it up…'}
                     </span>
                   ) : null}
                   <Button variant="secondary" onClick={() => setScannerOpen(true)} className="ml-auto">
@@ -589,9 +672,37 @@ export default function ScanWorkspacePage() {
                 </div>
               </Modal>
             </>
-          ) : (
-            <InvoiceDocument invoice={invoice} shop={shop} customerName={customerName} customerEmail={customerEmail} />
-          )}
+          ) : invoice ? (
+            <SalesDocument
+              kind="invoice"
+              shop={shop}
+              number={String(invoice.invoiceNumber)}
+              dateLabel={formatDateTime(invoice.createdAt)}
+              statusLabel={invoice.status === 'paid' ? 'PAID' : 'UNPAID'}
+              statusTone={invoice.status === 'paid' ? 'success' : 'warning'}
+              extraStatusLine={invoice.status === 'paid' && invoice.paymentMethod ? PAYMENT_METHOD_LABELS[invoice.paymentMethod] : undefined}
+              customerName={customerName}
+              customerEmail={customerEmail}
+              items={invoiceToDocumentItems(invoice)}
+              subtotalCents={invoice.subtotalCents}
+              totalCents={invoice.totalCents}
+              paidCents={invoice.status === 'paid' ? invoice.paymentAmountCents : null}
+            />
+          ) : quote ? (
+            <SalesDocument
+              kind="quote"
+              shop={shop}
+              number={quote.quote.id.slice(0, 8).toUpperCase()}
+              dateLabel={formatDateTime(quote.quote.createdAt)}
+              statusLabel={quote.quote.status.toUpperCase()}
+              statusTone={quote.quote.status === 'draft' ? 'neutral' : 'success'}
+              customerName={customerName}
+              customerEmail={customerEmail}
+              items={quoteOptionToDocumentItems(quote.options[0])}
+              subtotalCents={quote.options[0]?.priceCents ?? 0}
+              totalCents={quote.options[0]?.priceCents ?? 0}
+            />
+          ) : null}
         </div>
 
         {/* Side panel */}
@@ -601,13 +712,25 @@ export default function ScanWorkspacePage() {
               <>
                 <p className="text-sm font-semibold text-ink">Turn this into…</p>
                 <div className="grid grid-cols-2 gap-2">
-                  <div className="rounded-xl border-2 border-brand bg-blue-50 px-3 py-2.5 text-center text-sm font-semibold text-brand">Invoice</div>
                   <button
                     type="button"
-                    onClick={sendCartToQuote}
-                    disabled={cart.length === 0}
-                    title={cart.length === 0 ? 'Scan or add an item first' : 'Send these items to a new quote'}
-                    className="rounded-xl border-2 border-zinc-200 px-3 py-2.5 text-center text-sm font-semibold text-charcoal transition-colors hover:border-brand hover:text-brand disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-zinc-200 disabled:hover:text-charcoal"
+                    onClick={() => setDocType('invoice')}
+                    className={
+                      docType === 'invoice'
+                        ? 'rounded-xl border-2 border-brand bg-blue-50 px-3 py-2.5 text-center text-sm font-semibold text-brand'
+                        : 'rounded-xl border-2 border-zinc-200 px-3 py-2.5 text-center text-sm font-semibold text-charcoal transition-colors hover:border-brand hover:text-brand'
+                    }
+                  >
+                    Invoice
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDocType('quote')}
+                    className={
+                      docType === 'quote'
+                        ? 'rounded-xl border-2 border-brand bg-blue-50 px-3 py-2.5 text-center text-sm font-semibold text-brand'
+                        : 'rounded-xl border-2 border-zinc-200 px-3 py-2.5 text-center text-sm font-semibold text-charcoal transition-colors hover:border-brand hover:text-brand'
+                    }
                   >
                     Quote
                   </button>
@@ -631,11 +754,15 @@ export default function ScanWorkspacePage() {
             </div>
 
             {building ? (
-              <Button className="w-full" onClick={handleCreateInvoice} disabled={cart.length === 0 || creatingInvoice}>
-                {creatingInvoice ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" /> : null}
-                Create invoice
+              <Button
+                className="w-full"
+                onClick={docType === 'invoice' ? handleCreateInvoice : () => void handleCreateQuote()}
+                disabled={cart.length === 0 || creatingInvoice || creatingQuote}
+              >
+                {creatingInvoice || creatingQuote ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" /> : null}
+                {docType === 'invoice' ? 'Create invoice' : 'Create quote'}
               </Button>
-            ) : (
+            ) : invoice ? (
               <div className="space-y-3">
                 <div className="space-y-2">
                   <Field label="Customer name" htmlFor="cust-name" hint="Optional — shown on the printed invoice.">
@@ -687,10 +814,59 @@ export default function ScanWorkspacePage() {
                   </Button>
                 </div>
               </div>
-            )}
+            ) : quote ? (
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <Field label="Customer name" htmlFor="cust-name" hint="Optional — shown on the quote.">
+                    <Input id="cust-name" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Walk-in customer" />
+                  </Field>
+                  <Field label="Customer email" htmlFor="cust-email" hint="Needed to email the quote.">
+                    <Input id="cust-email" type="email" value={customerEmail} onChange={(e) => setCustomerEmail(e.target.value)} placeholder="name@example.com" />
+                  </Field>
+                </div>
+
+                <div className="space-y-2 border-t border-zinc-100 pt-3">
+                  <Button className="w-full" variant="secondary" onClick={() => window.print()}>
+                    <Printer className="h-5 w-5" aria-hidden="true" />
+                    Print quote
+                  </Button>
+                  <Button className="w-full" variant="secondary" onClick={() => void handleCopyQuoteLink()}>
+                    <Copy className="h-5 w-5" aria-hidden="true" />
+                    Copy customer link
+                  </Button>
+                  <Button className="w-full" onClick={() => setQuoteEmailPreviewOpen(true)}>
+                    <Mail className="h-5 w-5" aria-hidden="true" />
+                    Preview &amp; send quote email
+                  </Button>
+                  <a
+                    href={`/app/quotes/${quote.quote.id}`}
+                    className="block w-full rounded-xl px-4 py-2.5 text-center text-sm font-semibold text-brand hover:underline"
+                  >
+                    Open full quote page (tiers, deposit, vehicle info…)
+                  </a>
+                  <Button className="w-full" variant="ghost" onClick={startNewSession}>
+                    Start a new scan
+                  </Button>
+                </div>
+              </div>
+            ) : null}
           </Card>
         </div>
       </div>
+
+      {quote ? (
+        <EmailPreviewModal
+          bundle={quote}
+          initialTemplate="initial"
+          open={quoteEmailPreviewOpen}
+          onClose={() => setQuoteEmailPreviewOpen(false)}
+          onSent={() => {
+            void repo.getQuoteBundle(quote.quote.id).then((b) => {
+              if (b) setQuote(b)
+            })
+          }}
+        />
+      ) : null}
 
       <Modal open={scannerOpen} onClose={() => setScannerOpen(false)} title="Scan a barcode">
         <Suspense fallback={<LoadingBlock label="Loading scanner…" />}>
@@ -810,123 +986,6 @@ function CartRowCard({
           <Trash2 className="h-4 w-4" aria-hidden="true" />
         </button>
       </div>
-    </Card>
-  )
-}
-
-/**
- * The invoice, laid out like an actual invoice — this is both what's shown
- * on screen and (via the existing .no-print convention hiding everything
- * else on the page) what prints/Saves-as-PDF, and mirrors what
- * invoiceEmailTemplate.ts renders for the emailed copy. Letterhead style
- * matches PublicQuotePage's shop-branding convention (logo-or-name, a
- * primaryColor accent bar, phone/address).
- */
-function InvoiceDocument({
-  invoice,
-  shop,
-  customerName,
-  customerEmail,
-}: {
-  invoice: Invoice
-  shop: Shop | null
-  customerName: string
-  customerEmail: string
-}) {
-  const color = shop?.primaryColor || '#1d4ed8'
-  return (
-    <Card className="overflow-hidden space-y-0 p-0">
-      <div className="p-6" style={{ borderTop: `6px solid ${color}` }}>
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            {shop?.logoUrl ? (
-              <img src={shop.logoUrl} alt={shop.name} className="max-h-12" />
-            ) : (
-              <p className="text-xl font-black text-ink">{shop?.name ?? 'Your Shop'}</p>
-            )}
-            <div className="mt-2 space-y-0.5 text-sm text-zinc-500">
-              {shop?.address ? (
-                <p className="flex items-center gap-1.5">
-                  <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> {shop.address}
-                </p>
-              ) : null}
-              {shop?.phone ? (
-                <p className="flex items-center gap-1.5">
-                  <Phone className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> {shop.phone}
-                </p>
-              ) : null}
-            </div>
-          </div>
-          <div className="text-right">
-            <p className="text-2xl font-black tracking-tight text-ink">INVOICE</p>
-            <p className="text-sm font-semibold text-zinc-500">#{invoice.invoiceNumber}</p>
-            <p className="mt-1 text-sm text-zinc-500">{formatDateTime(invoice.createdAt)}</p>
-            {invoice.status === 'paid' ? (
-              <span className="mt-2 inline-block rounded-full bg-green-100 px-3 py-1 text-xs font-bold text-green-800">
-                PAID{invoice.paymentMethod ? ` — ${PAYMENT_METHOD_LABELS[invoice.paymentMethod]}` : ''}
-              </span>
-            ) : (
-              <span className="mt-2 inline-block rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800">UNPAID</span>
-            )}
-          </div>
-        </div>
-
-        {customerName.trim() || customerEmail.trim() ? (
-          <div className="mt-5 border-t border-zinc-100 pt-4">
-            <p className="text-xs font-semibold tracking-wide text-zinc-400 uppercase">Bill to</p>
-            {customerName.trim() ? <p className="text-sm font-semibold text-ink">{customerName.trim()}</p> : null}
-            {customerEmail.trim() ? <p className="text-sm text-zinc-500">{customerEmail.trim()}</p> : null}
-          </div>
-        ) : null}
-      </div>
-
-      <table className="w-full border-t border-zinc-100 text-sm">
-        <thead>
-          <tr className="border-b border-zinc-100 text-left text-xs font-semibold tracking-wide text-zinc-400 uppercase">
-            <th className="px-6 py-2 font-semibold">Item</th>
-            <th className="px-3 py-2 text-right font-semibold">Qty</th>
-            <th className="px-3 py-2 text-right font-semibold">Price</th>
-            <th className="px-6 py-2 text-right font-semibold">Total</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-zinc-100">
-          {invoice.items.map((item) => (
-            <tr key={item.id}>
-              <td className="px-6 py-3">
-                <p className="font-medium text-ink">{item.name}</p>
-                {item.brand || item.model ? <p className="text-xs text-zinc-500">{[item.brand, item.model].filter(Boolean).join(' · ')}</p> : null}
-              </td>
-              <td className="px-3 py-3 text-right text-zinc-500">{item.quantity}</td>
-              <td className="px-3 py-3 text-right text-zinc-500">{formatCurrency(item.unitPriceCents)}</td>
-              <td className="px-6 py-3 text-right font-semibold text-ink">{formatCurrency(item.unitPriceCents * item.quantity)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      <div className="flex justify-end p-6 pt-4">
-        <div className="w-full max-w-56 space-y-1.5">
-          <div className="flex items-center justify-between text-sm text-zinc-500">
-            <span>Subtotal</span>
-            <span>{formatCurrency(invoice.subtotalCents)}</span>
-          </div>
-          <div className="flex items-center justify-between border-t border-zinc-200 pt-1.5 text-base font-bold text-ink">
-            <span>Total</span>
-            <span>{formatCurrency(invoice.totalCents)}</span>
-          </div>
-          {invoice.status === 'paid' && invoice.paymentAmountCents !== null ? (
-            <div className="flex items-center justify-between text-sm text-green-700">
-              <span>Paid</span>
-              <span>{formatCurrency(invoice.paymentAmountCents)}</span>
-            </div>
-          ) : null}
-        </div>
-      </div>
-
-      <p className="border-t border-zinc-100 px-6 py-4 text-center text-xs text-zinc-400">
-        Thank you for your business{shop?.name ? ` — ${shop.name}` : ''}
-        {shop?.phone ? ` · ${shop.phone}` : ''}
-      </p>
     </Card>
   )
 }

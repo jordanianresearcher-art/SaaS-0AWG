@@ -85,6 +85,17 @@ All of this lives in one Edge Function, `supabase/functions/resolve-product/inde
 — it replaces (and both old functions were deleted) `lookup-product-upc`
 and `lookup-product-suggestions`.
 
+**Two round trips that don't need to be sequential run concurrently
+instead:** step 1's `findCatalogItemByCode` issues its UPC lookup and its
+SKU lookup as one `Promise.all` (neither depends on the other's result,
+both only need the already-known `code`). Inside the Edge Function, the
+shop-membership check and step 2's cache read are likewise independent of
+each other's *result* — both only need `shopId`/`kind`/`normalizedKey`,
+already known before either query runs — so they also fire as one
+`Promise.all`; the membership result still gates whether the cache result
+is ever used or returned, so authorization isn't weakened, the two
+round-trips just overlap instead of waiting on each other.
+
 ## Photo lookup
 
 Ported from `car-audio-inventory`'s (this app's sister inventory-scanning
@@ -158,9 +169,16 @@ regardless of what order the server happened to return things in.
 2. A single confident (`verified_web_source`, `confidenceLevel: 'high'`)
    external match → auto-saved to the catalog and added, same fast path
    this already had.
-3. Otherwise → automatically calls `resolveProduct({ kind: 'barcode', code })`
-   (a cache hit in the common case — step 2 above already triggered the
-   real lookup and populated the cache).
+3. Otherwise, the candidates already fetched: `lookupProductByUpc()`
+   internally calls `resolveProduct()` to check for step 2's single
+   confident match, so it already has the full ranked candidate list in
+   hand by the time it decides step 2 doesn't apply. Earlier this list was
+   discarded and `ScanWorkspacePage` made its own separate
+   `resolveProduct({ kind: 'barcode', code })` call to re-fetch it — a full
+   second Edge Function round trip (its own auth + membership + cache
+   overhead) just to re-fetch data the first call already had. Fixed:
+   `UpcLookupResult` gained a `'candidates'` variant that carries the list
+   straight through, so this is one round trip, not two.
    - Candidates found → a confirmation modal shows up to what the
      resolver returned (image, brand/model, confidence badge, reference
      price + source, warnings) with **"Add to cart"** (fast default,

@@ -6,11 +6,16 @@ work in this area so effort isn't duplicated.
 
 ## Completed (Phase 1 — Foundation)
 
-- **Universal configuration engine** (`src/lib/audioConfigs.ts`): all 12
-  spec'd bass configurations (truck 2×8/4×8/2×10/2×12; car/sedan/
-  hatchback/SUV 1×8 through 2×15), each with required/recommended/optional
-  component slots. Pure, tested, framework-agnostic — no UI depends on it
-  yet.
+- **Universal configuration engine** (`src/lib/audioConfigs.ts`): all 9
+  spec'd bass configurations (1×8 through 2×15), each with
+  required/recommended/optional component slots. Pure, tested,
+  framework-agnostic — no UI depends on it yet. **Generalized (this
+  round)**: these were originally split into vehicle-gated `TRUCK_BASS`/
+  `CAR_BASS` arrays with duplicate truck/car style entries and a
+  truck-only 4×8; per an explicit user request they're now one
+  `BASS_CONFIGS` array (`bass_1x8`…`bass_2x15`), identical across every
+  vehicle type. `full_system_car`'s own configs are untouched — out of
+  scope for that request.
 - **`validatePackageSlots()`**: the reusable "is this package complete"
   logic, tested against under-filled, missing, recommended-only, and
   categoryless-item cases.

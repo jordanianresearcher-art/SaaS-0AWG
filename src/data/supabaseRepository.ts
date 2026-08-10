@@ -538,42 +538,37 @@ export class SupabaseRepository implements DataRepository {
     // Two plain .eq() queries rather than a single .or() — a scanned/typed
     // code lands directly in a PostgREST filter string, and .or()'s syntax
     // treats commas/parens specially, so this avoids ever needing to escape
-    // untrusted input into that mini-language at all.
-    const { data: byUpc, error: upcError } = await this.supabase
-      .from('catalog_items')
-      .select('*')
-      .eq('shop_id', this.shopId)
-      .eq('upc', trimmed)
-      .maybeSingle()
-    if (upcError) throw upcError
-    if (byUpc) return mapCatalogItem(byUpc as Row)
-
-    const { data: bySku, error: skuError } = await this.supabase
-      .from('catalog_items')
-      .select('*')
-      .eq('shop_id', this.shopId)
-      .eq('sku', trimmed)
-      .maybeSingle()
-    if (skuError) throw skuError
-    return bySku ? mapCatalogItem(bySku as Row) : null
+    // untrusted input into that mini-language at all. Run concurrently
+    // (Promise.all), not sequentially — a barcode almost never matches a
+    // sku, so that second query used to add its full round-trip on top of
+    // the first on every miss, real latency on the most common "not in
+    // catalog yet" scan for no reason (each query is independent, one
+    // doesn't need the other's result).
+    const [upcResult, skuResult] = await Promise.all([
+      this.supabase.from('catalog_items').select('*').eq('shop_id', this.shopId).eq('upc', trimmed).maybeSingle(),
+      this.supabase.from('catalog_items').select('*').eq('shop_id', this.shopId).eq('sku', trimmed).maybeSingle(),
+    ])
+    if (upcResult.error) throw upcResult.error
+    if (upcResult.data) return mapCatalogItem(upcResult.data as Row)
+    if (skuResult.error) throw skuResult.error
+    return skuResult.data ? mapCatalogItem(skuResult.data as Row) : null
   }
 
   async lookupProductByUpc(code: string): Promise<UpcLookupResult> {
     const item = await this.findCatalogItemByCode(code)
     if (item) return { source: 'catalog', catalogItem: item }
 
-    // Fast, confident path only: a single high-confidence verified-source
-    // match (today, that's an exact UPCitemdb hit) auto-populates without
-    // staff confirmation, same behavior this method has always had. Any
-    // lower-confidence or AI-extracted result — including everything the
-    // resolver had to fall back to web search for — is NOT auto-added
-    // here; it comes back as not_found and the caller (ScanWorkspacePage)
-    // makes its own resolveProduct() call to show the full ranked
-    // candidate list for staff to confirm. That second call is a cache hit
-    // (this call already populated it), not a repeat AI/web call. This
-    // never throws — any failure (function not deployed, no funded
-    // OPENAI_API_KEY/ANTHROPIC_API_KEY, a network hiccup) degrades to
-    // not_found, worse than which would be a hard error mid-scan.
+    // Fast, confident path: a single high-confidence verified-source match
+    // (today, that's an exact UPCitemdb hit) auto-populates without staff
+    // confirmation, same behavior this method has always had. Anything
+    // lower-confidence or AI-extracted comes back as 'candidates' with the
+    // full ranked list already attached — see UpcLookupResult's doc
+    // comment for why this matters: it lets the caller skip a second
+    // resolveProduct() network round-trip just to re-fetch what this call
+    // already resolved. This never throws — any failure (function not
+    // deployed, no funded OPENAI_API_KEY/ANTHROPIC_API_KEY, a network
+    // hiccup) degrades to not_found, worse than which would be a hard
+    // error mid-scan.
     try {
       const result = await this.resolveProduct({ kind: 'barcode', code })
       const top = result.candidates[0]
@@ -586,6 +581,9 @@ export class SupabaseRepository implements DataRepository {
           imageUrl: top.imageUrl,
           upc: top.upc ?? code,
         }
+      }
+      if (result.candidates.length > 0) {
+        return { source: 'candidates', candidates: result.candidates, retainedInput: result.retainedInput }
       }
       return { source: 'not_found' }
     } catch (err) {

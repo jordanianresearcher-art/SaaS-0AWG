@@ -334,9 +334,18 @@ export class DemoRepository implements DataRepository {
 
   async lookupProductByUpc(code: string): Promise<UpcLookupResult> {
     // Demo mode must never make a real external call (same rule as
-    // runShopifyImport) — a local miss is just a miss here.
+    // runShopifyImport) — a local miss falls through to the same
+    // deterministic resolveProduct() simulation ScanWorkspacePage's own
+    // fallback used to call separately, just returned here directly so
+    // demo mode matches production's single-round-trip shape (see
+    // UpcLookupResult's 'candidates' case).
     const item = await this.findCatalogItemByCode(code)
-    return item ? { source: 'catalog', catalogItem: item } : { source: 'not_found' }
+    if (item) return { source: 'catalog', catalogItem: item }
+    const result = await this.resolveProduct({ kind: 'barcode', code })
+    if (result.candidates.length > 0) {
+      return { source: 'candidates', candidates: result.candidates, retainedInput: result.retainedInput }
+    }
+    return { source: 'not_found' }
   }
 
   async lookupProductSuggestions(query: string): Promise<ProductSuggestion[]> {

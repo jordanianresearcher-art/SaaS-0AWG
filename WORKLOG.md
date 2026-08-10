@@ -2023,3 +2023,141 @@ barcode/text already does.
   redeploy `resolve-product` and try a real photo; if it comes back
   empty, `supabase functions logs resolve-product` will show whether
   OpenAI rejected the request shape outright or something else failed.
+
+## Round 29 — Packing-slip-style documents, inline quotes, nothing-required forms, generic shells, and a scan-speed pass
+
+Two user messages this round: one large multi-part request delivered with
+a real Shopify packing-slip HTML template and a rendered PDF as reference,
+then — after most of that landed — "the lookup is working, but the other
+software I sent you (car inventory) does it waaay faster, we need to get
+that speed."
+
+### Part A — packing-slip-style invoice/quote, inline quote creation, form fixes, new category, generic shells
+
+- **`src/components/SalesDocument.tsx`** (new): one shared printable/
+  on-screen document for both invoices and quotes, `kind: 'invoice' |
+  'quote'`. Ported the reference packing slip's *technique* — a dark→
+  brand-color gradient bar, a bordered order-info box, bordered info
+  cards, a dark rounded section-title bar over the items table, a
+  bordered totals panel, a bordered policy box — but themed off the
+  shop's own `primaryColor` instead of the reference's hardcoded red, and
+  with a Bill-To + Status two-card grid instead of the reference's
+  Ship-To/Bill-To/Customer three-card layout (this app has no shipping-
+  address concept — installs happen in the shop). The "Terms" box reuses
+  the existing `shop.quoteDisclaimer` field rather than inventing a new
+  one. `SalesDocumentItem.unitPriceCents` is nullable — quotes here price
+  per-option, not per-item (`QuoteItem` has no price field), so a quote's
+  Price/Total columns render "—" rather than a fabricated number.
+- **Inline quote creation in `ScanWorkspacePage.tsx`**: the old static
+  "Invoice" tile + a "Quote" button that navigated away to `NewQuotePage`
+  is now a real `docType: 'invoice' | 'quote'` toggle. Picking Quote and
+  tapping Create builds a real quote directly via `repo.createQuote(...)`
+  — a single option (tier `good`, name `Quote`, price = the cart
+  subtotal) — no navigation, no redirect, matching the explicit ask
+  ("If I pick quote from the scan page, I need the quote functionality in
+  the same page, not redirect to a new page"). Print / copy customer link
+  / preview & send (reusing the existing, already-tested
+  `EmailPreviewModal` rather than building new send logic) / open the
+  full quote page (for tiers/deposit/vehicle info) / start a new scan all
+  work from the same panel as the invoice flow.
+- **`NewQuotePage.tsx` — root-caused "issues with fields"**: verified via
+  live Playwright interaction (not guesswork) that every field already
+  worked — the actual problem was over-eager required-field validation
+  blocking legitimate saves. Relaxed the Zod schema across the board:
+  option/item names no longer `.min(1)`, price no longer required,
+  options no longer need at least one item, email is checked-if-present
+  but not required (`.refine` instead of `.email()`), and the "email
+  permission confirmed" checkbox is a plain boolean instead of
+  `z.literal(true)`. The remove-item button is no longer force-disabled
+  at exactly one item. This doesn't remove the real safety net —
+  `checkSendEligibility` (`src/lib/eligibility.ts`) already independently
+  blocks *sending* (not saving) a quote with no email or unconfirmed
+  permission, with a specific message either way; relaxing intake just
+  stops it from blocking the *save*, which is where the friction didn't
+  belong. `customers.email` is `not null` at the DB level but a form
+  always submits a string (possibly `''`), so no migration was needed.
+- **`four_five_channel_amp` category** (migration `0015`): additive enum
+  value, distinct from the generic `multi_amp` bucket. Wired into
+  `categorize.ts`/`shopifyImport.ts` via a dual-lookahead regex
+  (`(?=.*\bamp)(?=.*\b[45][\s/-]*[45]?[\s-]?(?:ch|channel)\b)`) placed
+  before the generic `amp(lifier)?` catch-all, so "4-Channel Amplifier"
+  and "4/5 Channel Amp" land here while plain "2-Channel"/"6-Channel"
+  amps still fall through to `multi_amp`. Also fixed two pre-existing
+  `audioConfigs.ts` shell slots that were *labeled* "4/5-channel
+  amplifier" but were actually backed by the generic `multi_amp`
+  category — a real latent bug this request happened to surface.
+- **Generic bass shell templates**: merged the vehicle-gated `TRUCK_BASS`/
+  `CAR_BASS` arrays (duplicate "Truck 2×8"/"Car 2×8" entries, a
+  truck-only 4×8) into one `BASS_CONFIGS` array, identical across all 5
+  vehicle types, IDs renamed `truck_NxN`/`car_NxN` → `bass_NxN` (9
+  configs, `bass_1x8`…`bass_2x15`). `full_system_car`'s own configs were
+  deliberately left alone — out of scope by a literal reading of "remove
+  2x8 and 4x8 templates or car or truck."
+
+### Part B — scan-speed pass ("the other software... does it waaay faster")
+
+Root-caused via reading the actual code (Edge Function + repository),
+not live profiling — this session has no Supabase access to profile
+against. Three concrete sequential-round-trip anti-patterns, all fixed:
+
+1. **A fully redundant second network round trip.**
+   `SupabaseRepository.lookupProductByUpc` already calls `resolveProduct()`
+   internally and gets the complete ranked candidate list back — but was
+   discarding it down to a bare `{ source: 'not_found' }` unless one
+   single high-confidence match existed. `ScanWorkspacePage`'s fallback
+   then called `repo.resolveProduct({ kind: 'barcode', code })` **again**
+   — a full second HTTP round trip to the Edge Function, complete with
+   its own auth + membership + cache overhead, just to re-fetch data the
+   first call already had in memory. Fixed by giving `UpcLookupResult` a
+   new `'candidates'` variant that carries the list straight through — one
+   round trip instead of two on the (common) "no local/no confident
+   external match" path. `DemoRepository.lookupProductByUpc` updated to
+   match, so demo mode's shape mirrors production.
+2. **Two independent Supabase queries running sequentially.**
+   `findCatalogItemByCode`'s UPC lookup and SKU lookup didn't depend on
+   each other — now issued as one `Promise.all`.
+3. **Same pattern in the Edge Function itself.** `resolve-product`'s
+   membership check and its cache read are independent of each other's
+   *result* (both only need `shopId`/`kind`/`normalizedKey`, already
+   known) but ran one after the other. Now `Promise.all`'d; the
+   membership result still gates whether the cache result is ever used
+   or returned, so this doesn't weaken authorization, it just overlaps
+   two round trips that never needed to be sequential. The `photo` kind
+   (no `normalizedKey` to pair a cache read with) keeps its own inline
+   membership check, unchanged.
+
+**Deliberately not chased**: AI/web-search call latency itself (inherent
+to the vision/AI-fallback paths — `car-audio-inventory`'s own code
+comments, read earlier this session, admit its vision call alone takes
+60–80s in production, so that reference app isn't fast on that path
+either) and Edge Function cold starts (a platform characteristic, not an
+application-code fix). The wins here are specifically the
+avoidable-by-this-app's-own-code overhead: one dead round trip removed,
+two pairs of independent queries parallelized.
+
+### Verification
+
+- `tsc -b --noEmit` clean, `npm run lint` clean, `npx vitest run` 272/272
+  passing, `npm run build` clean. `resolve-product/index.ts` typechecked
+  standalone via the Deno-shim workflow.
+- `smoke25-resolver.mjs` re-run clean (7/7) — this exercises exactly the
+  path Part B's fix #1 changed (the demo `999999999999` unresolved-barcode-
+  with-candidates flow now goes through `lookupProductByUpc`'s
+  `'candidates'` branch directly instead of a second `resolveProduct`
+  call) and confirms the confirmation-modal UX is unchanged end to end.
+- `smoke29-newquote-fields.mjs` re-run clean (20/20) — blank-form submit,
+  every field individually typed and read back, fully-filled submit, zero
+  console errors.
+- New `smoke30-invoice-quote-redesign.mjs` (15/15): the Invoice/Quote
+  toggle (no "Soon" badge on either), the redesigned document's INVOICE/
+  QUOTE label + number + status badge, mark-paid flipping the badge and
+  showing the payment method, print/email controls, quote creation
+  staying on the same page (no `waitForURL` navigation happens), the
+  quote document's "—" price cells for its per-option pricing, and the
+  Preview & send button opening the existing `EmailPreviewModal`.
+- `audioConfigs.test.ts` (23 tests) and `categorize.test.ts` (6 tests,
+  including the new amp-category cases) already covered Part A's data
+  changes and are part of the 272 passing above.
+- Docs updated: `docs/PRODUCT_RESOLVER.md` (candidates-passthrough +
+  parallelized-query notes), `docs/IMPLEMENTATION_STATUS.md` (bass-config
+  count/description corrected from the old truck/car split).

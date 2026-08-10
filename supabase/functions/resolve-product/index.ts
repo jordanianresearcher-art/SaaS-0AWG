@@ -729,27 +729,31 @@ Deno.serve(async (req: Request) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   )
 
-  // The cache is shop-scoped, so this needs to know which shop -- verify
-  // membership rather than trusting the client-supplied shopId outright.
-  const { data: membership } = await admin
-    .from('shop_memberships')
-    .select('id')
-    .eq('shop_id', shopId)
-    .eq('user_id', user.id)
-    .maybeSingle()
-  if (!membership) {
-    return fail(403, 'You are not a member of this shop.')
-  }
-
   // Photo lookup branches off entirely here -- no normalized cache key, no
   // cache read/write (see the "Photo lookup" note at the top of this
-  // file). Provider precedence matches resolveViaAi (OpenAI first).
+  // file), so it only needs the membership check below, not the parsing
+  // that barcode/text do first. Provider precedence matches resolveViaAi
+  // (OpenAI first).
   if (kind === 'photo') {
     const imageBase64 = typeof body?.imageBase64 === 'string' ? body.imageBase64 : ''
     if (!imageBase64) return fail(400, 'Missing photo')
     const mediaTypeRaw = body?.mediaType
     const mediaType: 'image/jpeg' | 'image/png' | 'image/webp' =
       mediaTypeRaw === 'image/png' || mediaTypeRaw === 'image/webp' ? mediaTypeRaw : 'image/jpeg'
+
+    // The cache/candidates fetch below doesn't apply to photo, but the
+    // membership check still must happen before doing anything real --
+    // done inline here rather than sharing the barcode/text block below
+    // since photo has no normalizedKey to run alongside it.
+    const { data: membership } = await admin
+      .from('shop_memberships')
+      .select('id')
+      .eq('shop_id', shopId)
+      .eq('user_id', user.id)
+      .maybeSingle()
+    if (!membership) {
+      return fail(403, 'You are not a member of this shop.')
+    }
 
     const candidates = await resolveViaVision(imageBase64, mediaType)
     return json(200, { ok: true, candidates, cached: false })
@@ -769,14 +773,22 @@ Deno.serve(async (req: Request) => {
     normalizedKey = normalizeQuery(query)
   }
 
-  // 1. Cache check.
-  const { data: cached } = await admin
-    .from('product_resolution_cache')
-    .select('candidates, expires_at')
-    .eq('shop_id', shopId)
-    .eq('kind', kind)
-    .eq('normalized_key', normalizedKey)
-    .maybeSingle()
+  // Membership check and the cache read are independent queries (the
+  // cache read doesn't depend on the membership result, only on
+  // shopId/kind/normalizedKey, all already known) -- run them concurrently
+  // rather than waiting on membership before even starting the cache
+  // lookup. The membership check still gates whether the cache result
+  // below is ever used or returned, so this doesn't weaken the
+  // authorization check, just overlaps two round-trips that don't need to
+  // be sequential.
+  const [membershipResult, cacheResult] = await Promise.all([
+    admin.from('shop_memberships').select('id').eq('shop_id', shopId).eq('user_id', user.id).maybeSingle(),
+    admin.from('product_resolution_cache').select('candidates, expires_at').eq('shop_id', shopId).eq('kind', kind).eq('normalized_key', normalizedKey).maybeSingle(),
+  ])
+  if (!membershipResult.data) {
+    return fail(403, 'You are not a member of this shop.')
+  }
+  const cached = cacheResult.data
 
   if (cached && (!cached.expires_at || new Date(cached.expires_at) > new Date())) {
     const candidates = (Array.isArray(cached.candidates) ? cached.candidates : []).map((c: Candidate) => ({

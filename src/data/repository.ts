@@ -199,13 +199,27 @@ export interface NewInvoiceInput {
 /**
  * Result of scanning/typing a barcode: either it matches something already
  * in this shop's catalog (the common case once a shop has scanned a
- * product once before), an external UPC database has it (production only —
- * demo mode never makes the real network call), or nothing knows about it
- * (caller falls back to a photo lookup or manual entry — later phases).
+ * product once before), an external UPC database has it with enough
+ * confidence to auto-add (production only — demo mode never makes the
+ * real network call), a lower-confidence/AI-derived candidate list needs
+ * staff to pick one (carried here directly — see the 'candidates' case
+ * below), or nothing knows about it at all.
  */
 export type UpcLookupResult =
   | { source: 'catalog'; catalogItem: CatalogItem }
   | { source: 'external'; name: string | null; brand: string | null; unitPriceCents: number | null; imageUrl: string | null; upc: string }
+  /**
+   * Same ranked candidates a follow-up resolveProduct({kind:'barcode'})
+   * call would return — carried through directly from the one resolution
+   * this method already ran, so the caller (ScanWorkspacePage) never has
+   * to make a second network round-trip just to re-fetch what this call
+   * already had. A second resolveProduct call would technically hit the
+   * server-side cache and skip the AI/UPCitemdb work, but it's still a
+   * full extra HTTP request + auth + membership check — real, noticeable
+   * latency on every barcode that isn't an instant catalog/high-confidence
+   * hit, which is the whole point of scanning fast.
+   */
+  | { source: 'candidates'; candidates: ProductResolutionCandidate[]; retainedInput: string }
   | { source: 'not_found' }
 
 /**
