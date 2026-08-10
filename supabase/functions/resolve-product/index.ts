@@ -15,11 +15,10 @@
 // itself as a search hint (lower confidence -- barcode databases don't
 // always cover obscure car-audio SKUs) -> cache the result either way.
 // Resolution order (text): shop's resolution cache -> AI + web_search.
-// Resolution order (photo): Claude vision + web_search, always fresh --
-// see "Photo lookup" below for why this one isn't cached or provider-
-// selectable like the other two.
+// Resolution order (photo): AI vision + web_search, always fresh -- see
+// "Photo lookup" below for why this one isn't cached like the other two.
 //
-// "AI + web_search" (barcode/text only) tries OpenAI first (Responses API,
+// "AI + web_search" (all three kinds) tries OpenAI first (Responses API,
 // `web_search` tool, strict `text.format` json_schema output) if
 // OPENAI_API_KEY is set, else falls back to Claude (Messages API,
 // `web_search` tool, `output_config` json_schema output) if
@@ -27,19 +26,23 @@
 // same confidence-capping rules either way -- the provider is just which
 // API answers the grounding question. Whichever key a shop's operator
 // actually funds is the one that runs; no error if only one (or neither)
-// is set, see resolveViaAi below.
+// is set, see resolveViaAi/resolveViaVision below.
 //
-// Photo lookup is Claude-only, not OpenAI-preferred like barcode/text --
-// this exact image+web_search+structured-output combination (one call:
-// photo in, ranked candidates out) is what's proven working in
-// car-audio-inventory's (this app's sister inventory-scanning app)
-// production vision route. OpenAI's Responses API support for combining
-// an image input, the `web_search` tool, and strict json_schema output in
-// a single request isn't confirmed as of this writing, so it isn't risked
-// here -- see resolveViaVision. Not cached either (see product_resolution_cache's
-// migration, which only allows kind in ('barcode','text')) -- a photo is
-// effectively never re-taken identically, so there's no meaningful cache
-// hit to chase, unlike a repeated barcode/text query.
+// Photo lookup's *method* (image + web_search + structured output in one
+// call) is ported from car-audio-inventory's (this app's sister
+// inventory-scanning app) production vision route, which is Claude-only.
+// This app tries OpenAI first for it too, same as barcode/text -- that
+// exact three-way combination (image input, the `web_search` tool, and
+// strict json_schema output) isn't explicitly documented as supported by
+// OpenAI's Responses API, but each piece is independently documented with
+// no stated incompatibility, and OpenAI is the funded provider. A
+// rejected combination degrades the same as any other provider failure
+// here: logged, empty candidates, automatic fallback to Claude only if
+// OPENAI_API_KEY isn't set at all (not a mid-request retry) -- see
+// resolveViaVision. Not cached (see product_resolution_cache's migration,
+// which only allows kind in ('barcode','text')) -- a photo is effectively
+// never re-taken identically, so there's no meaningful cache hit to
+// chase, unlike a repeated barcode/text query.
 //
 // This function never invents a product from memory alone -- every AI
 // candidate is grounded in a live web_search call, self-reports a
@@ -398,9 +401,19 @@ async function resolveViaClaude(apiKey: string, prompt: string, upc: string | nu
 }
 
 // ---------------------------------------------------------------------------
-// Photo lookup -- Claude vision + web_search, ported from
-// car-audio-inventory's vision route (this app's sister app). See the
-// "Photo lookup" note at the top of this file for why it's Claude-only.
+// Photo lookup -- ported from car-audio-inventory's vision route (this
+// app's sister app), which identifies a photographed product with one
+// Claude call: an image content block + a web_search-enabled, structured-
+// output prompt. This app tries OpenAI first here too now (same
+// precedence as barcode/text, see resolveViaVision below) -- the
+// image+web_search+structured-output combination isn't explicitly
+// documented as supported by OpenAI's Responses API, but each piece
+// (image input, the web_search tool, strict json_schema output) is
+// independently documented with no stated incompatibility between them,
+// and OpenAI is the funded provider being asked for here. If that
+// combination is ever rejected outright, it degrades exactly like every
+// other provider failure in this file: logged server-side, empty
+// candidates to the caller -- never a broken photo-lookup button.
 // ---------------------------------------------------------------------------
 
 const PAGE_URL_SCHEMA = {
@@ -417,12 +430,24 @@ const PAGE_URL_SCHEMA = {
   additionalProperties: false,
 }
 
-// Claude's web_search tool returns extracted text, not raw HTML, so it
-// can't see the product photo(s) on a page it finds -- find the single
-// best official product page, then fetch and scrape that page ourselves.
-// Narrow, cheap follow-up call; only made for the top vision candidate
-// when it didn't already come back with a photo (see resolveViaVision).
-async function findOfficialPhotoUrl(apiKey: string, name: string, brand: string | null): Promise<string | null> {
+const OFFICIAL_PAGE_PROMPT = (query: string) =>
+  `Find the single best official product page for: ${query}. Prioritize the manufacturer's own site or a ` +
+  "major car-audio retailer. Return null if you can't confidently find one for this exact product."
+
+const VISION_IDENTIFY_PROMPT =
+  'This is a photo of a car-audio shop product (amplifier, subwoofer, speaker, head unit, wiring, ' +
+  'enclosure, radio, DSP, etc), taken by staff. Identify the exact brand and model if you can read it in ' +
+  'the photo or on its packaging/label. Use web search to confirm the model, find its MSRP in USD, and a ' +
+  'plain-language category hint. Return up to 3 candidates, most-likely first, ranked by confidence -- or ' +
+  "zero if the photo doesn't show an identifiable product clearly enough; never invent a product from a " +
+  'blurry or ambiguous photo.'
+
+// A web_search tool's text-extraction result can't see the product
+// photo(s) on a page it finds -- find the single best official product
+// page, then fetch and scrape that page ourselves. Narrow, cheap
+// follow-up call; only made for the top vision candidate when it didn't
+// already come back with a photo (see resolveViaVisionClaude/OpenAi).
+async function findOfficialPhotoUrlClaude(apiKey: string, name: string, brand: string | null): Promise<string | null> {
   const query = [brand, name].filter(Boolean).join(' ')
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -437,15 +462,7 @@ async function findOfficialPhotoUrl(apiKey: string, name: string, brand: string 
         max_tokens: 512,
         tools: [{ type: 'web_search_20260318', name: 'web_search', max_uses: 2 }],
         output_config: { format: { type: 'json_schema', schema: PAGE_URL_SCHEMA } },
-        messages: [
-          {
-            role: 'user',
-            content:
-              `Find the single best official product page for: ${query}. Prioritize the manufacturer's own ` +
-              "site or a major car-audio retailer. Return null if you can't confidently find one for this " +
-              'exact product.',
-          },
-        ],
+        messages: [{ role: 'user', content: OFFICIAL_PAGE_PROMPT(query) }],
       }),
     })
     if (!res.ok) return null
@@ -461,12 +478,50 @@ async function findOfficialPhotoUrl(apiKey: string, name: string, brand: string 
     const photos = await scrapeProductImages(pageUrl)
     return photos[0] ?? null
   } catch (err) {
-    console.error('resolve-product: official photo lookup failed', err)
+    console.error('resolve-product: official photo lookup (Anthropic) failed', err)
     return null
   }
 }
 
-async function resolveViaVision(
+async function findOfficialPhotoUrlOpenAi(apiKey: string, name: string, brand: string | null): Promise<string | null> {
+  const query = [brand, name].filter(Boolean).join(' ')
+  try {
+    const res = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: OPENAI_MODEL,
+        tools: [{ type: 'web_search' }],
+        input: OFFICIAL_PAGE_PROMPT(query),
+        text: { format: { type: 'json_schema', name: 'official_page', schema: PAGE_URL_SCHEMA, strict: true } },
+      }),
+    })
+    if (!res.ok) return null
+
+    const data = await res.json()
+    const messageItem = Array.isArray(data?.output) ? data.output.find((o: { type?: string }) => o?.type === 'message') : null
+    const textPart = Array.isArray(messageItem?.content)
+      ? messageItem.content.find((c: { type?: string }) => c?.type === 'output_text')
+      : null
+    const rawText = typeof textPart?.text === 'string' ? textPart.text : typeof data?.output_text === 'string' ? data.output_text : null
+    if (typeof rawText !== 'string') return null
+
+    const parsed = JSON.parse(rawText) as { page_url?: unknown }
+    const pageUrl = parsed.page_url
+    if (typeof pageUrl !== 'string' || !pageUrl.startsWith('https://')) return null
+
+    const photos = await scrapeProductImages(pageUrl)
+    return photos[0] ?? null
+  } catch (err) {
+    console.error('resolve-product: official photo lookup (OpenAI) failed', err)
+    return null
+  }
+}
+
+async function resolveViaVisionClaude(
   apiKey: string,
   imageBase64: string,
   mediaType: 'image/jpeg' | 'image/png' | 'image/webp',
@@ -488,16 +543,7 @@ async function resolveViaVision(
           role: 'user',
           content: [
             { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageBase64 } },
-            {
-              type: 'text',
-              text:
-                'This is a photo of a car-audio shop product (amplifier, subwoofer, speaker, head unit, ' +
-                'wiring, enclosure, radio, DSP, etc), taken by staff. Identify the exact brand and model if ' +
-                'you can read it in the photo or on its packaging/label. Use web search to confirm the ' +
-                'model, find its MSRP in USD, and a plain-language category hint. Return up to 3 candidates, ' +
-                "most-likely first, ranked by confidence -- or zero if the photo doesn't show an " +
-                'identifiable product clearly enough; never invent a product from a blurry or ambiguous photo.',
-            },
+            { type: 'text', text: VISION_IDENTIFY_PROMPT },
           ],
         },
       ],
@@ -520,10 +566,81 @@ async function resolveViaVision(
   // this to at most one extra round trip.
   const top = candidates[0]
   if (top && !top.imageUrl) {
-    top.imageUrl = await findOfficialPhotoUrl(apiKey, top.name, top.brand)
+    top.imageUrl = await findOfficialPhotoUrlClaude(apiKey, top.name, top.brand)
   }
 
   return candidates
+}
+
+// OpenAI Responses API vision: an `input_image` content part (data URL,
+// not a separate mime-type field -- the encoding is embedded in the URL
+// itself) alongside `input_text`, the `web_search` tool, and the same
+// strict json_schema output as the barcode/text path. See the "Photo
+// lookup" note above this section for why this exact combination isn't
+// explicitly confirmed by OpenAI's own docs, and why it's used anyway.
+async function resolveViaVisionOpenAi(
+  apiKey: string,
+  imageBase64: string,
+  mediaType: 'image/jpeg' | 'image/png' | 'image/webp',
+): Promise<Candidate[]> {
+  const res = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      tools: [{ type: 'web_search' }],
+      input: [
+        {
+          role: 'user',
+          content: [
+            { type: 'input_image', image_url: `data:${mediaType};base64,${imageBase64}` },
+            { type: 'input_text', text: VISION_IDENTIFY_PROMPT },
+          ],
+        },
+      ],
+      text: { format: { type: 'json_schema', name: 'product_candidates', schema: AI_CANDIDATE_SCHEMA, strict: true } },
+    }),
+  })
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '')
+    console.error('resolve-product: OpenAI vision API error', res.status, errText.slice(0, 500))
+    return []
+  }
+
+  const data = await res.json()
+  const messageItem = Array.isArray(data?.output) ? data.output.find((o: { type?: string }) => o?.type === 'message') : null
+  const textPart = Array.isArray(messageItem?.content)
+    ? messageItem.content.find((c: { type?: string }) => c?.type === 'output_text')
+    : null
+  const rawText = typeof textPart?.text === 'string' ? textPart.text : typeof data?.output_text === 'string' ? data.output_text : null
+  const candidates = parseAiCandidates(rawText, null, 'OpenAI vision')
+
+  const top = candidates[0]
+  if (top && !top.imageUrl) {
+    top.imageUrl = await findOfficialPhotoUrlOpenAi(apiKey, top.name, top.brand)
+  }
+
+  return candidates
+}
+
+// The one entry point the handler calls for photo lookup -- same OpenAI-
+// preferred precedence as resolveViaAi below, now that both providers
+// have a working image+web_search+structured-output implementation.
+async function resolveViaVision(
+  imageBase64: string,
+  mediaType: 'image/jpeg' | 'image/png' | 'image/webp',
+): Promise<Candidate[]> {
+  const openAiKey = Deno.env.get('OPENAI_API_KEY')
+  if (openAiKey) return resolveViaVisionOpenAi(openAiKey, imageBase64, mediaType)
+
+  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY')
+  if (anthropicKey) return resolveViaVisionClaude(anthropicKey, imageBase64, mediaType)
+
+  return []
 }
 
 // OpenAI Responses API: the `web_search` built-in tool grounds the answer,
@@ -625,9 +742,8 @@ Deno.serve(async (req: Request) => {
   }
 
   // Photo lookup branches off entirely here -- no normalized cache key, no
-  // cache read/write (see the "Photo lookup" note at the top of this file),
-  // and a fixed provider (Claude only) rather than resolveViaAi's OpenAI-
-  // preferred logic.
+  // cache read/write (see the "Photo lookup" note at the top of this
+  // file). Provider precedence matches resolveViaAi (OpenAI first).
   if (kind === 'photo') {
     const imageBase64 = typeof body?.imageBase64 === 'string' ? body.imageBase64 : ''
     if (!imageBase64) return fail(400, 'Missing photo')
@@ -635,8 +751,7 @@ Deno.serve(async (req: Request) => {
     const mediaType: 'image/jpeg' | 'image/png' | 'image/webp' =
       mediaTypeRaw === 'image/png' || mediaTypeRaw === 'image/webp' ? mediaTypeRaw : 'image/jpeg'
 
-    const apiKey = Deno.env.get('ANTHROPIC_API_KEY')
-    const candidates = apiKey ? await resolveViaVision(apiKey, imageBase64, mediaType) : []
+    const candidates = await resolveViaVision(imageBase64, mediaType)
     return json(200, { ok: true, candidates, cached: false })
   }
 

@@ -1968,3 +1968,58 @@ the key was set (30-day barcode / 7-day text TTL, same gotcha already
 documented). This session has no live Supabase access to confirm
 directly; next step is a direct `curl` test against the deployed function
 bypassing the UI, still owed to the user as of this entry.
+
+## Round 28 — Photo lookup now tries OpenAI first, matching barcode/text
+
+The user insisted on OpenAI for photo lookup, citing "that's what worked
+flawlessly in the car inventory app." Checked the actual source before
+building anything: `car-audio-inventory` has zero OpenAI usage anywhere
+(`grep -rli openai` across the whole repo — nothing; `package.json` lists
+only `@anthropic-ai/sdk`). Its vision route, and everything else AI-
+related in that app, runs on Claude. That correction is worth recording,
+but it doesn't change what the user actually needs: they've funded
+OpenAI, not Anthropic, so photo lookup should run on OpenAI too, same as
+barcode/text already does.
+
+- **`resolveViaVisionOpenAi`** (new): the same photo-identification method
+  as the Claude version (now `resolveViaVisionClaude`), through OpenAI's
+  Responses API instead — `input_image` (base64 data URL, no separate
+  mime-type field) + `input_text` + the `web_search` tool + strict
+  `text.format` json_schema output, all in one call. Same
+  `AI_CANDIDATE_SCHEMA`/`parseAiCandidates` pipeline as every other path
+  in this function.
+- **`findOfficialPhotoUrlOpenAi`** (new): OpenAI equivalent of the
+  official-product-page lookup used to backfill a missing photo, reusing
+  the same `scrapeProductImages`/`PAGE_URL_SCHEMA`.
+- **`resolveViaVision(imageBase64, mediaType)`** (new dispatcher): same
+  OpenAI-preferred, Claude-fallback precedence as `resolveViaAi` — tries
+  `OPENAI_API_KEY` first, `ANTHROPIC_API_KEY` if that's unset, `[]` if
+  neither is. The handler's `kind === 'photo'` branch now calls this
+  instead of hardcoding `ANTHROPIC_API_KEY`.
+- **Honestly flagged, not hidden**: this specific three-way combination
+  (image input + `web_search` tool + strict json_schema output in one
+  Responses API request) isn't explicitly documented as supported by
+  OpenAI — each piece is independently documented with no stated
+  incompatibility, which is why it was built this way, but it hasn't been
+  verified against a real funded key by this session (no API keys here).
+  If OpenAI rejects the combination outright, it degrades exactly like
+  any other provider failure already in this file: logged via
+  `console.error`, empty candidates to the caller, never a broken button.
+  Documented in `docs/PRODUCT_RESOLVER.md`'s "Photo lookup" section and
+  flagged as a known limitation worth a first-use log check.
+
+### Verification
+
+- `tsc -b --noEmit` clean, `npm run lint` clean, `npx vitest run`
+  272/272 passing (unchanged — demo mode, which the tests exercise,
+  doesn't touch either provider), `npm run build` clean.
+  `resolve-product/index.ts` typechecked standalone via the Deno-shim
+  workflow after the rewrite.
+- `smoke28-photo-lookup.mjs` re-run clean (7/7) — demo mode's behavior is
+  identical either way, so this doesn't newly exercise the OpenAI path,
+  but confirms the handler restructuring didn't regress the UI flow.
+- Not deployable/testable against a real OpenAI key by this session (no
+  Supabase or provider credentials here) — the shop owner needs to
+  redeploy `resolve-product` and try a real photo; if it comes back
+  empty, `supabase functions logs resolve-product` will show whether
+  OpenAI rejected the request shape outright or something else failed.

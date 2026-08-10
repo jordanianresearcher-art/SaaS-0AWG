@@ -234,8 +234,7 @@ have) — see each phase below for what's ported vs. built new.
 
 | For | Status |
 | --- | --- |
-| `OPENAI_API_KEY` **or** `ANTHROPIC_API_KEY` (universal product resolver — barcode AI fallback + text autocomplete) | **Set one, either is enough** — `resolve-product` (see [docs/PRODUCT_RESOLVER.md](PRODUCT_RESOLVER.md)) tries OpenAI first (Responses API + `web_search` tool) if `OPENAI_API_KEY` is set, else Claude (Messages API + `web_search` tool) if `ANTHROPIC_API_KEY` is set. Not used server-side anywhere else in this project (Shopify import and email use their own separate credentials) — the shop owner sets whichever they've actually funded as a Supabase Edge Function secret, same self-serve mechanism as `RESEND_API_KEY`/`SHOPIFY_ADMIN_ACCESS_TOKEN`. Until at least one is set (and funded — a $0 balance fails the same as a missing key), the resolver quietly returns no candidates rather than erroring — same graceful-degradation shape as everywhere else in this lookup chain. `OPENAI_API_KEY` doubles as the future Phase 5 voice-transcription key if that's ever built — no conflict, same secret either way. |
-| `ANTHROPIC_API_KEY` **specifically** (photo/vision lookup) | **Needed for photo lookup only** — unlike barcode/text, the `kind: 'photo'` path doesn't fall back to OpenAI; see [docs/PRODUCT_RESOLVER.md](PRODUCT_RESOLVER.md)'s "Photo lookup" section for why. A shop running OpenAI-only still gets barcode/text AI resolution, just not photo lookup, until this is revisited. |
+| `OPENAI_API_KEY` **or** `ANTHROPIC_API_KEY` (universal product resolver — barcode/text/photo AI resolution, all three) | **Set one, either is enough** — `resolve-product` (see [docs/PRODUCT_RESOLVER.md](PRODUCT_RESOLVER.md)) tries OpenAI first (Responses API + `web_search` tool) for barcode, text, *and* photo lookup if `OPENAI_API_KEY` is set, else Claude (Messages API + `web_search` tool) for all three if `ANTHROPIC_API_KEY` is set. Not used server-side anywhere else in this project (Shopify import and email use their own separate credentials) — the shop owner sets whichever they've actually funded as a Supabase Edge Function secret, same self-serve mechanism as `RESEND_API_KEY`/`SHOPIFY_ADMIN_ACCESS_TOKEN`. Until at least one is set (and funded — a $0 balance fails the same as a missing key), the resolver quietly returns no candidates rather than erroring — same graceful-degradation shape as everywhere else in this lookup chain. `OPENAI_API_KEY` doubles as the future Phase 5 voice-transcription key if that's ever built — no conflict, same secret either way. |
 | UPCitemdb (barcode lookup) | **Live this phase** — no key needed on the free trial tier (~100 lookups/day/IP), same as `car-audio-inventory` already uses it. Worth watching for rate-limit errors at real shop volume; a paid key is a drop-in swap in `resolve-product/index.ts` if needed later. |
 | `RESEND_API_KEY` / `EMAIL_FROM` (invoice emailing) | **Already configured** — `send-invoice-email` reuses the exact secrets `send-quote-email` already uses. No new secret needed; only the new function itself needs deploying (`supabase functions deploy send-invoice-email`). |
 | Supabase deploy/migration access | This session still has no Supabase personal access token/CLI (a standing limitation — see `docs/CATALOG_AND_PACKAGES.md`). Migrations `0011`/`0012` and the Edge Functions (`resolve-product`, `send-invoice-email`) are written and ready; the shop owner applies/deploys them themselves via the CLI/SQL editor, same as prior migrations this project has shipped. |
@@ -247,10 +246,14 @@ have) — see each phase below for what's ported vs. built new.
   minor categorization nuance, not worth a migration on its own this round.
 - The camera-photo fallback in `BarcodeScanner` now runs a real AI vision
   lookup (see [docs/PRODUCT_RESOLVER.md](PRODUCT_RESOLVER.md)'s "Photo
-  lookup" section) — no longer a placeholder. It needs a funded
-  `ANTHROPIC_API_KEY` specifically, though (not OpenAI-interchangeable
-  like barcode/text), so a shop with only `OPENAI_API_KEY` set still sees
-  no candidates from this path.
+  lookup" section) — no longer a placeholder. Same `OPENAI_API_KEY`-
+  preferred, `ANTHROPIC_API_KEY`-fallback precedence as barcode/text now
+  (it wasn't at first — see WORKLOG for the round this changed). The
+  OpenAI path composes three independently-documented Responses API
+  features (image input, `web_search` tool, strict json_schema output)
+  that aren't explicitly confirmed compatible together by OpenAI's own
+  docs — expected to work, degrades gracefully if not, worth a first-use
+  check of `supabase functions logs resolve-product`.
 - Invoice emails have no send-history log (unlike quote emails, which
   write an `email_messages` row) — deliberate, see above, but it does mean
   there's no in-app record of who an invoice was emailed to or when.
