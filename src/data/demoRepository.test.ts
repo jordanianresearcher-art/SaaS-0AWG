@@ -262,6 +262,12 @@ describe('DemoRepository', () => {
     expect(result).toEqual({ candidates: [], retainedInput: '000000000000' })
   })
 
+  it('resolveProduct never makes a real vision call for photo lookups, and deterministically returns candidates so the confirmation UI is exercisable', async () => {
+    const result = await repo.resolveProduct({ kind: 'photo', imageBase64: 'zzz', mediaType: 'image/jpeg' })
+    expect(result.retainedInput).toBe('photo')
+    expect(result.candidates.length).toBeGreaterThan(0)
+  })
+
   it('seeds one paid demo invoice, linked to its stock movement', async () => {
     const invoices = await repo.listInvoices()
     expect(invoices).toHaveLength(1)

@@ -5,24 +5,41 @@
 // outside src/data/supabaseRepository.ts, which now calls this one). See
 // docs/PRODUCT_RESOLVER.md.
 //
-// Two request kinds, one response shape:
-//   { kind: 'barcode', shopId, code }  -- a scanned/typed UPC/EAN
-//   { kind: 'text', shopId, query }    -- a partial brand/model/SKU/name
+// Three request kinds, one response shape:
+//   { kind: 'barcode', shopId, code }                       -- a scanned/typed UPC/EAN
+//   { kind: 'text', shopId, query }                         -- a partial brand/model/SKU/name
+//   { kind: 'photo', shopId, imageBase64, mediaType }        -- a shop-floor product photo
 //
 // Resolution order (barcode): shop's resolution cache -> UPCitemdb (a real
 // barcode database, decent confidence) -> AI + web_search using the code
 // itself as a search hint (lower confidence -- barcode databases don't
 // always cover obscure car-audio SKUs) -> cache the result either way.
 // Resolution order (text): shop's resolution cache -> AI + web_search.
+// Resolution order (photo): Claude vision + web_search, always fresh --
+// see "Photo lookup" below for why this one isn't cached or provider-
+// selectable like the other two.
 //
-// "AI + web_search" tries OpenAI first (Responses API, `web_search` tool,
-// strict `text.format` json_schema output) if OPENAI_API_KEY is set, else
-// falls back to Claude (Messages API, `web_search` tool, `output_config`
-// json_schema output) if ANTHROPIC_API_KEY is set instead. Same prompt,
-// same AI_CANDIDATE_SCHEMA, same confidence-capping rules either way --
-// the provider is just which API answers the grounding question. Whichever
-// key a shop's operator actually funds is the one that runs; no error if
-// only one (or neither) is set, see resolveViaAi below.
+// "AI + web_search" (barcode/text only) tries OpenAI first (Responses API,
+// `web_search` tool, strict `text.format` json_schema output) if
+// OPENAI_API_KEY is set, else falls back to Claude (Messages API,
+// `web_search` tool, `output_config` json_schema output) if
+// ANTHROPIC_API_KEY is set instead. Same prompt, same AI_CANDIDATE_SCHEMA,
+// same confidence-capping rules either way -- the provider is just which
+// API answers the grounding question. Whichever key a shop's operator
+// actually funds is the one that runs; no error if only one (or neither)
+// is set, see resolveViaAi below.
+//
+// Photo lookup is Claude-only, not OpenAI-preferred like barcode/text --
+// this exact image+web_search+structured-output combination (one call:
+// photo in, ranked candidates out) is what's proven working in
+// car-audio-inventory's (this app's sister inventory-scanning app)
+// production vision route. OpenAI's Responses API support for combining
+// an image input, the `web_search` tool, and strict json_schema output in
+// a single request isn't confirmed as of this writing, so it isn't risked
+// here -- see resolveViaVision. Not cached either (see product_resolution_cache's
+// migration, which only allows kind in ('barcode','text')) -- a photo is
+// effectively never re-taken identically, so there's no meaningful cache
+// hit to chase, unlike a repeated barcode/text query.
 //
 // This function never invents a product from memory alone -- every AI
 // candidate is grounded in a live web_search call, self-reports a
@@ -153,6 +170,92 @@ async function resolveViaUpcItemDb(code: string): Promise<Candidate | null> {
   } catch (err) {
     console.error('resolve-product: UPCitemdb lookup failed', err)
     return null
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Official product photo scraping -- ported near-verbatim from
+// car-audio-inventory's src/lib/scrape-photos.ts (this app's sister
+// inventory-scanning app). Claude's web_search tool returns extracted
+// text, not raw HTML, so it can't see <img> tags or a photo gallery --
+// fetching the page ourselves and reading its JSON-LD Product schema /
+// Open Graph tags is how most e-commerce sites expose their listing
+// photos anyway. Used only by resolveViaVision below.
+// ---------------------------------------------------------------------------
+
+function collectLdImages(node: unknown, urls: Set<string>) {
+  if (!node || typeof node !== 'object') return
+  if (Array.isArray(node)) {
+    for (const item of node) collectLdImages(item, urls)
+    return
+  }
+  const obj = node as Record<string, unknown>
+  if (obj['@graph']) collectLdImages(obj['@graph'], urls)
+
+  const type = obj['@type']
+  const isProduct = type === 'Product' || (Array.isArray(type) && type.includes('Product'))
+  if (isProduct && obj.image) {
+    const img = obj.image
+    if (typeof img === 'string') {
+      urls.add(img)
+    } else if (Array.isArray(img)) {
+      for (const entry of img) {
+        if (typeof entry === 'string') urls.add(entry)
+        else if (entry && typeof entry === 'object' && typeof (entry as { url?: unknown }).url === 'string') {
+          urls.add((entry as { url: string }).url)
+        }
+      }
+    } else if (typeof img === 'object' && typeof (img as { url?: unknown }).url === 'string') {
+      urls.add((img as { url: string }).url)
+    }
+  }
+}
+
+async function scrapeProductImages(pageUrl: string, max = 8): Promise<string[]> {
+  try {
+    const res = await fetch(pageUrl, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+      },
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (!res.ok) return []
+
+    const contentType = res.headers.get('content-type') ?? ''
+    if (!contentType.includes('html')) return []
+
+    const html = await res.text()
+    const urls = new Set<string>()
+
+    for (const match of html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+      try {
+        collectLdImages(JSON.parse(match[1].trim()), urls)
+      } catch {
+        // Malformed/partial JSON-LD -- skip it.
+      }
+    }
+
+    for (const match of html.matchAll(/<meta[^>]+property=["']og:image(?::secure_url)?["'][^>]+content=["']([^"']+)["']/gi)) {
+      urls.add(match[1])
+    }
+    for (const match of html.matchAll(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image(?::secure_url)?["']/gi)) {
+      urls.add(match[1])
+    }
+
+    return Array.from(urls)
+      .map((u) => {
+        try {
+          return new URL(u, pageUrl).toString()
+        } catch {
+          return null
+        }
+      })
+      .filter((u): u is string => !!u && u.startsWith('https:'))
+      .slice(0, max)
+  } catch (err) {
+    console.error('resolve-product: failed to scrape product images', err)
+    return []
   }
 }
 
@@ -294,6 +397,135 @@ async function resolveViaClaude(apiKey: string, prompt: string, upc: string | nu
   return parseAiCandidates(textBlock?.text, upc, 'Anthropic')
 }
 
+// ---------------------------------------------------------------------------
+// Photo lookup -- Claude vision + web_search, ported from
+// car-audio-inventory's vision route (this app's sister app). See the
+// "Photo lookup" note at the top of this file for why it's Claude-only.
+// ---------------------------------------------------------------------------
+
+const PAGE_URL_SCHEMA = {
+  type: 'object',
+  properties: {
+    page_url: {
+      ...NULLABLE_STRING,
+      description:
+        'Direct HTTPS URL to the single best official product page (manufacturer site or a major ' +
+        "retailer's product listing) for this exact product. Null if you can't confidently find one.",
+    },
+  },
+  required: ['page_url'],
+  additionalProperties: false,
+}
+
+// Claude's web_search tool returns extracted text, not raw HTML, so it
+// can't see the product photo(s) on a page it finds -- find the single
+// best official product page, then fetch and scrape that page ourselves.
+// Narrow, cheap follow-up call; only made for the top vision candidate
+// when it didn't already come back with a photo (see resolveViaVision).
+async function findOfficialPhotoUrl(apiKey: string, name: string, brand: string | null): Promise<string | null> {
+  const query = [brand, name].filter(Boolean).join(' ')
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': ANTHROPIC_VERSION,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: ANTHROPIC_MODEL,
+        max_tokens: 512,
+        tools: [{ type: 'web_search_20260318', name: 'web_search', max_uses: 2 }],
+        output_config: { format: { type: 'json_schema', schema: PAGE_URL_SCHEMA } },
+        messages: [
+          {
+            role: 'user',
+            content:
+              `Find the single best official product page for: ${query}. Prioritize the manufacturer's own ` +
+              "site or a major car-audio retailer. Return null if you can't confidently find one for this " +
+              'exact product.',
+          },
+        ],
+      }),
+    })
+    if (!res.ok) return null
+
+    const data = await res.json()
+    const textBlock = Array.isArray(data?.content) ? data.content.find((b: { type?: string }) => b?.type === 'text') : null
+    if (typeof textBlock?.text !== 'string') return null
+
+    const parsed = JSON.parse(textBlock.text) as { page_url?: unknown }
+    const pageUrl = parsed.page_url
+    if (typeof pageUrl !== 'string' || !pageUrl.startsWith('https://')) return null
+
+    const photos = await scrapeProductImages(pageUrl)
+    return photos[0] ?? null
+  } catch (err) {
+    console.error('resolve-product: official photo lookup failed', err)
+    return null
+  }
+}
+
+async function resolveViaVision(
+  apiKey: string,
+  imageBase64: string,
+  mediaType: 'image/jpeg' | 'image/png' | 'image/webp',
+): Promise<Candidate[]> {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': ANTHROPIC_VERSION,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL,
+      max_tokens: 1536,
+      tools: [{ type: 'web_search_20260318', name: 'web_search', max_uses: 3 }],
+      output_config: { format: { type: 'json_schema', schema: AI_CANDIDATE_SCHEMA } },
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageBase64 } },
+            {
+              type: 'text',
+              text:
+                'This is a photo of a car-audio shop product (amplifier, subwoofer, speaker, head unit, ' +
+                'wiring, enclosure, radio, DSP, etc), taken by staff. Identify the exact brand and model if ' +
+                'you can read it in the photo or on its packaging/label. Use web search to confirm the ' +
+                'model, find its MSRP in USD, and a plain-language category hint. Return up to 3 candidates, ' +
+                "most-likely first, ranked by confidence -- or zero if the photo doesn't show an " +
+                'identifiable product clearly enough; never invent a product from a blurry or ambiguous photo.',
+            },
+          ],
+        },
+      ],
+    }),
+  })
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '')
+    console.error('resolve-product: Anthropic vision API error', res.status, errText.slice(0, 500))
+    return []
+  }
+
+  const data = await res.json()
+  const textBlock = Array.isArray(data?.content) ? data.content.find((b: { type?: string }) => b?.type === 'text') : null
+  const candidates = parseAiCandidates(textBlock?.text, null, 'Anthropic vision')
+
+  // The identify call above can't see <img> tags (see the note on
+  // scrapeProductImages), so a strong top match with no photo yet gets one
+  // more narrow lookup for a real one. Only the top candidate, to keep
+  // this to at most one extra round trip.
+  const top = candidates[0]
+  if (top && !top.imageUrl) {
+    top.imageUrl = await findOfficialPhotoUrl(apiKey, top.name, top.brand)
+  }
+
+  return candidates
+}
+
 // OpenAI Responses API: the `web_search` built-in tool grounds the answer,
 // `text.format` with a strict json_schema constrains the final assistant
 // message to AI_CANDIDATE_SCHEMA -- same schema Claude uses, since the
@@ -370,7 +602,7 @@ Deno.serve(async (req: Request) => {
 
   const body = await req.json().catch(() => null)
   const shopId = typeof body?.shopId === 'string' ? body.shopId : ''
-  const kind = body?.kind === 'barcode' || body?.kind === 'text' ? body.kind : null
+  const kind = body?.kind === 'barcode' || body?.kind === 'text' || body?.kind === 'photo' ? body.kind : null
   if (!shopId || !kind) {
     return fail(400, 'Missing shopId or kind')
   }
@@ -390,6 +622,22 @@ Deno.serve(async (req: Request) => {
     .maybeSingle()
   if (!membership) {
     return fail(403, 'You are not a member of this shop.')
+  }
+
+  // Photo lookup branches off entirely here -- no normalized cache key, no
+  // cache read/write (see the "Photo lookup" note at the top of this file),
+  // and a fixed provider (Claude only) rather than resolveViaAi's OpenAI-
+  // preferred logic.
+  if (kind === 'photo') {
+    const imageBase64 = typeof body?.imageBase64 === 'string' ? body.imageBase64 : ''
+    if (!imageBase64) return fail(400, 'Missing photo')
+    const mediaTypeRaw = body?.mediaType
+    const mediaType: 'image/jpeg' | 'image/png' | 'image/webp' =
+      mediaTypeRaw === 'image/png' || mediaTypeRaw === 'image/webp' ? mediaTypeRaw : 'image/jpeg'
+
+    const apiKey = Deno.env.get('ANTHROPIC_API_KEY')
+    const candidates = apiKey ? await resolveViaVision(apiKey, imageBase64, mediaType) : []
+    return json(200, { ok: true, candidates, cached: false })
   }
 
   let normalizedKey: string

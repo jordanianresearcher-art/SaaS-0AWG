@@ -609,7 +609,7 @@ export class SupabaseRepository implements DataRepository {
   }
 
   async resolveProduct(request: ProductResolveRequest): Promise<ProductResolveResult> {
-    const retainedInput = request.kind === 'barcode' ? request.code : request.query
+    const retainedInput = request.kind === 'barcode' ? request.code : request.kind === 'text' ? request.query : 'photo'
     // Same never-throw rule as everything else in this lookup chain: this
     // powers an autocomplete dropdown or a post-scan confirmation step, not
     // a blocking one, so any failure (function not deployed yet, no funded

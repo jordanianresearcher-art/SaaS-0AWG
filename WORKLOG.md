@@ -1885,3 +1885,86 @@ Anthropic specifically, `resolve-product` now supports OpenAI as well:
   limitation): the shop owner needs to `supabase functions deploy
   resolve-product` and set `OPENAI_API_KEY` (or keep/fund
   `ANTHROPIC_API_KEY`) for the new provider path to actually run live.
+
+## Round 27 — Photo/vision lookup, ported from car-audio-inventory
+
+The user pointed at their sister app, `car-audio-inventory` (a working
+production Next.js app with a proven photo-lookup flow), and asked for
+"same method" applied here. This round ports it — not a from-scratch
+design — plus starts diagnosing a separate live report that manual text
+search returns nothing even with a funded key.
+
+### Photo lookup (`resolve-product`, `kind: 'photo'`)
+
+- `resolveViaVision(apiKey, imageBase64, mediaType)`: one Claude call —
+  the photo as an `image` content block alongside a `web_search`-enabled,
+  structured-output prompt — asking for up to 3 ranked candidates through
+  the exact same `AI_CANDIDATE_SCHEMA`/`parseAiCandidates` pipeline
+  barcode/text already use. Deliberately Claude-only, not OpenAI-preferred
+  like barcode/text: this specific image + `web_search` + strict-schema
+  combination is what's proven working in `car-audio-inventory`'s
+  production vision route; OpenAI Responses API support for the same
+  three-way combination isn't confirmed, so it wasn't risked here.
+  Documented as a known asymmetry, not silently inconsistent.
+- `findOfficialPhotoUrl` + `scrapeProductImages` (ported near-verbatim
+  from `car-audio-inventory`'s `src/lib/scrape-photos.ts`): Claude's
+  `web_search` tool returns extracted text, not raw HTML, so it can't see
+  a product page's photos — a second, narrow Claude call finds the single
+  best official product page, then this app fetches that page itself and
+  reads its JSON-LD `Product.image` / Open Graph tags. Only runs for the
+  top candidate when it didn't already come back with an image — at most
+  one extra round trip.
+- **Not cached** — `product_resolution_cache`'s `kind` check constraint
+  only allows `'barcode'`/`'text'` (adding `'photo'` would need a live
+  migration), and a photo is realistically never retaken identically
+  anyway. `car-audio-inventory` doesn't cache its vision lookups either.
+- `ProductResolveRequest` gained `{ kind: 'photo'; imageBase64; mediaType }`
+  in `src/data/repository.ts`; `SupabaseRepository`/`DemoRepository`
+  updated (`retainedInput` is the fixed string `'photo'` — there's no
+  natural short code/query to echo back). Demo mode deterministically
+  "succeeds" with the same canned candidates the fixed unresolved-barcode
+  case uses, so the confirmation UI is exercisable without a camera.
+
+### UI (`ScanWorkspacePage.tsx`)
+
+- `handlePhotoCaptured` replaced the "Photo lookup isn't available yet"
+  stub with a real call into `resolveProduct({kind:'photo', ...})`,
+  reusing the exact same confirmation modal, candidate cards, and
+  "Add to cart" / "Save to catalog & add" actions the barcode path
+  already had — zero new UI beyond a `resolveKind` state (`'barcode' |
+  'photo'`) that swaps the modal's copy ("this barcode isn't in your
+  catalog yet" vs. "here's what we identified from the photo").
+
+### Verification
+
+- `tsc -b --noEmit` clean, `npm run lint` clean, `npx vitest run`
+  272/272 passing (1 new: demo mode's deterministic photo-candidate
+  test), `npm run build` clean. `resolve-product/index.ts` typechecked
+  standalone via the Deno-shim workflow.
+- New Playwright smoke, `smoke28-photo-lookup.mjs` (7 checks) — the first
+  one this project has driven through a **real** simulated camera rather
+  than stubbing around it: Chromium launched with
+  `--use-fake-device-for-media-stream`/`--use-fake-ui-for-media-stream`
+  plus `context.grantPermissions(['camera'])`, so the actual
+  `BrowserMultiFormatReader` video element gets a synthetic feed,
+  `captureFrameAsJpeg` draws a real frame, and the whole pipeline (photo
+  capture → `resolveProduct` → confirmation modal → "Add to cart" → cart)
+  runs for real, not mocked. All prior smoke scripts re-run clean
+  (`smoke20`, `smoke25`, `smoke26`, `smoke27`) — no regressions.
+- Not yet deployed by this session (no Supabase CLI access, standing
+  limitation): the shop owner needs to redeploy `resolve-product` for
+  this to go live, and confirm `ANTHROPIC_API_KEY` specifically is set
+  and funded — photo lookup doesn't fall back to OpenAI.
+
+### Still open: live text-search report
+
+The user separately reported that manual text search ("word search") in
+`ProductSuggestField` returns nothing in production even after setting
+`OPENAI_API_KEY`. Code review of `ProductSuggestField.tsx` and the
+`resolveViaAi`/`resolveViaOpenAi` path found no client-side bug — the
+likely causes are the deployed function predating the OpenAI-support
+commit (`2c23243`) or the cache still holding empty results from before
+the key was set (30-day barcode / 7-day text TTL, same gotcha already
+documented). This session has no live Supabase access to confirm
+directly; next step is a direct `curl` test against the deployed function
+bypassing the UI, still owed to the user as of this entry.

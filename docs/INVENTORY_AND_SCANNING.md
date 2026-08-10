@@ -81,7 +81,7 @@ have) — see each phase below for what's ported vs. built new.
   (UPCitemdb's free trial endpoint). A later round replaced it — see
   **[docs/PRODUCT_RESOLVER.md](PRODUCT_RESOLVER.md)** — with
   `resolve-product`, one shared resolver used by barcode lookup, typed
-  search, and (later) photo lookup. `DataRepository.lookupProductByUpc()`
+  search, and photo lookup. `DataRepository.lookupProductByUpc()`
   keeps its original shape (local catalog match first, then a single
   confident external hit auto-saved to the catalog) but now delegates to
   the resolver underneath, and a barcode that misses UPCitemdb no longer
@@ -177,7 +177,7 @@ have) — see each phase below for what's ported vs. built new.
   Edge Function; a later round replaced it with the shared `resolve-product`
   resolver — see **[docs/PRODUCT_RESOLVER.md](PRODUCT_RESOLVER.md)** for the
   canonical contract (`ProductResolutionCandidate`/`resolveProduct`) now
-  used by barcode lookup, this autocomplete, and (later) photo lookup.
+  used by barcode lookup, this autocomplete, and photo lookup.
   `DataRepository.lookupProductSuggestions()` keeps its original narrow
   return shape (`ProductSuggestion[]`) for backward compatibility with
   `ProductSuggestField` below, but now delegates to `resolveProduct({kind:'text', query})`
@@ -211,18 +211,19 @@ have) — see each phase below for what's ported vs. built new.
 - **Phase 3 remainder**: vendor receiving and outgoing orders (quote-from-
   scan is done — see above), both using the `outgoing_orders` table
   already landed in Phase 1's migration.
-- **Phase 4 — AI photo lookup + generated codes + label printing**: a
-  `lookup-product-vision` Edge Function (ported from that app's
-  `/api/lookup/vision` route — Claude + `web_search`, Shopify cross-check,
-  official product-photo scraping) for products with no findable barcode —
-  the scanner's "Take photo instead" button already exists and is wired to
-  a placeholder message pending this. For products with no UPC anywhere,
-  `src/lib/upc.ts` generates a real, checksum-valid **UPC-A number in
-  GS1's reserved in-store/restricted-circulation prefix (`02`)** —
+- **Phase 4 remainder — generated codes + label printing**: AI photo
+  lookup itself is now done (see below and
+  [docs/PRODUCT_RESOLVER.md](PRODUCT_RESOLVER.md)'s "Photo lookup"
+  section) — the scanner's "Take photo instead" button calls
+  `resolve-product` (`kind: 'photo'`) and shows the same never-dead-end
+  confirmation modal as barcode scanning. Still not built: for a product
+  with no UPC findable anywhere (not even via the photo path),
+  `src/lib/upc.ts` would generate a real, checksum-valid **UPC-A number
+  in GS1's reserved in-store/restricted-circulation prefix (`02`)** —
   guaranteed never to collide with an actual retail product's barcode,
   while still being a genuine, scannable GTIN (not a fake/ambiguous
-  internal code). `LabelSheetPage` prints these as a grid of labels (name,
-  code, barcode) sized for the shop's 4"×6" label printer.
+  internal code) — and `LabelSheetPage` would print these as a grid of
+  labels (name, code, barcode) sized for the shop's 4"×6" label printer.
 - **Phase 5 — Voice ordering**: record → `transcribe-voice-order` Edge
   Function (OpenAI Whisper) → `parse-voice-order` Edge Function (Claude
   structured output against this app's own `ProductCategory` taxonomy and
@@ -233,7 +234,8 @@ have) — see each phase below for what's ported vs. built new.
 
 | For | Status |
 | --- | --- |
-| `OPENAI_API_KEY` **or** `ANTHROPIC_API_KEY` (universal product resolver — barcode AI fallback + text autocomplete now; photo lookup later) | **Set one, either is enough** — `resolve-product` (see [docs/PRODUCT_RESOLVER.md](PRODUCT_RESOLVER.md)) tries OpenAI first (Responses API + `web_search` tool) if `OPENAI_API_KEY` is set, else Claude (Messages API + `web_search` tool) if `ANTHROPIC_API_KEY` is set. Not used server-side anywhere else in this project (Shopify import and email use their own separate credentials) — the shop owner sets whichever they've actually funded as a Supabase Edge Function secret, same self-serve mechanism as `RESEND_API_KEY`/`SHOPIFY_ADMIN_ACCESS_TOKEN`. Until at least one is set (and funded — a $0 balance fails the same as a missing key), the resolver quietly returns no candidates rather than erroring — same graceful-degradation shape as everywhere else in this lookup chain. `OPENAI_API_KEY` doubles as the future Phase 5 voice-transcription key if that's ever built — no conflict, same secret either way. |
+| `OPENAI_API_KEY` **or** `ANTHROPIC_API_KEY` (universal product resolver — barcode AI fallback + text autocomplete) | **Set one, either is enough** — `resolve-product` (see [docs/PRODUCT_RESOLVER.md](PRODUCT_RESOLVER.md)) tries OpenAI first (Responses API + `web_search` tool) if `OPENAI_API_KEY` is set, else Claude (Messages API + `web_search` tool) if `ANTHROPIC_API_KEY` is set. Not used server-side anywhere else in this project (Shopify import and email use their own separate credentials) — the shop owner sets whichever they've actually funded as a Supabase Edge Function secret, same self-serve mechanism as `RESEND_API_KEY`/`SHOPIFY_ADMIN_ACCESS_TOKEN`. Until at least one is set (and funded — a $0 balance fails the same as a missing key), the resolver quietly returns no candidates rather than erroring — same graceful-degradation shape as everywhere else in this lookup chain. `OPENAI_API_KEY` doubles as the future Phase 5 voice-transcription key if that's ever built — no conflict, same secret either way. |
+| `ANTHROPIC_API_KEY` **specifically** (photo/vision lookup) | **Needed for photo lookup only** — unlike barcode/text, the `kind: 'photo'` path doesn't fall back to OpenAI; see [docs/PRODUCT_RESOLVER.md](PRODUCT_RESOLVER.md)'s "Photo lookup" section for why. A shop running OpenAI-only still gets barcode/text AI resolution, just not photo lookup, until this is revisited. |
 | UPCitemdb (barcode lookup) | **Live this phase** — no key needed on the free trial tier (~100 lookups/day/IP), same as `car-audio-inventory` already uses it. Worth watching for rate-limit errors at real shop volume; a paid key is a drop-in swap in `resolve-product/index.ts` if needed later. |
 | `RESEND_API_KEY` / `EMAIL_FROM` (invoice emailing) | **Already configured** — `send-invoice-email` reuses the exact secrets `send-quote-email` already uses. No new secret needed; only the new function itself needs deploying (`supabase functions deploy send-invoice-email`). |
 | Supabase deploy/migration access | This session still has no Supabase personal access token/CLI (a standing limitation — see `docs/CATALOG_AND_PACKAGES.md`). Migrations `0011`/`0012` and the Edge Functions (`resolve-product`, `send-invoice-email`) are written and ready; the shop owner applies/deploys them themselves via the CLI/SQL editor, same as prior migrations this project has shipped. |
@@ -243,9 +245,12 @@ have) — see each phase below for what's ported vs. built new.
 - Catalog items created from an external UPC lookup land `importSource:
   'manual'` — there's no dedicated `'upc_lookup'` value in that enum. A
   minor categorization nuance, not worth a migration on its own this round.
-- The camera-photo fallback in `BarcodeScanner` captures a frame but
-  currently just tells staff photo lookup isn't available yet — the AI
-  vision pipeline is Phase 4.
+- The camera-photo fallback in `BarcodeScanner` now runs a real AI vision
+  lookup (see [docs/PRODUCT_RESOLVER.md](PRODUCT_RESOLVER.md)'s "Photo
+  lookup" section) — no longer a placeholder. It needs a funded
+  `ANTHROPIC_API_KEY` specifically, though (not OpenAI-interchangeable
+  like barcode/text), so a shop with only `OPENAI_API_KEY` set still sees
+  no candidates from this path.
 - Invoice emails have no send-history log (unlike quote emails, which
   write an `email_messages` row) — deliberate, see above, but it does mean
   there's no in-app record of who an invoice was emailed to or when.

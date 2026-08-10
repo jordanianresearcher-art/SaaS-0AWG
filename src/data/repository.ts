@@ -273,7 +273,19 @@ export interface ProductResolutionCandidate {
   warnings: string[]
 }
 
-export type ProductResolveRequest = { kind: 'barcode'; code: string } | { kind: 'text'; query: string }
+/**
+ * 'photo' is Claude-only server-side (see resolve-product/index.ts) — the
+ * exact image+web_search+structured-output combination this needs is
+ * proven working in car-audio-inventory's (this app's sister app)
+ * production vision route; OpenAI's equivalent combination isn't
+ * confirmed, so it isn't risked here. 'barcode'/'text' still prefer
+ * OpenAI when set. Same graceful degradation either way — no funded key
+ * for the relevant provider just means no candidates, never an error.
+ */
+export type ProductResolveRequest =
+  | { kind: 'barcode'; code: string }
+  | { kind: 'text'; query: string }
+  | { kind: 'photo'; imageBase64: string; mediaType: 'image/jpeg' | 'image/png' | 'image/webp' }
 
 export interface ProductResolveResult {
   candidates: ProductResolutionCandidate[]

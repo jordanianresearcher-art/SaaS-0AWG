@@ -21,7 +21,10 @@ into AI+web resolution instead of stopping.
 (`src/data/repository.ts`) — a discriminated request:
 
 ```ts
-type ProductResolveRequest = { kind: 'barcode'; code: string } | { kind: 'text'; query: string }
+type ProductResolveRequest =
+  | { kind: 'barcode'; code: string }
+  | { kind: 'text'; query: string }
+  | { kind: 'photo'; imageBase64: string; mediaType: 'image/jpeg' | 'image/png' | 'image/webp' }
 ```
 
 returning ranked `ProductResolutionCandidate[]`, each with: id, source
@@ -74,9 +77,53 @@ both call `resolveProduct()` underneath.
 5. Cache the result (even an empty one, so an obscure code/query doesn't
    re-trigger AI on every retry within the cache window).
 
+**Photo lookup is a separate, simpler path**, not part of the numbered
+order above: Claude vision + `web_search`, always fresh, never cached (see
+"Photo lookup" below).
+
 All of this lives in one Edge Function, `supabase/functions/resolve-product/index.ts`
 — it replaces (and both old functions were deleted) `lookup-product-upc`
 and `lookup-product-suggestions`.
+
+## Photo lookup
+
+Ported from `car-audio-inventory`'s (this app's sister inventory-scanning
+app) production vision route — same method, not a from-scratch design:
+one Claude call with the photo (base64 JPEG/PNG/WebP) as an `image`
+content block alongside a `web_search`-tool-enabled, structured-output
+prompt asking it to identify the product and confirm details on the web.
+Returns up to 3 ranked candidates through the exact same
+`AI_CANDIDATE_SCHEMA`/`Candidate` shape as barcode/text — `parseAiCandidates`
+is shared code, so confirmation-modal rendering, confidence badges, and
+the "Add to cart" / "Save to catalog & add" actions all work identically
+for a photo-derived candidate with zero new UI beyond copy that says
+"photo" instead of "barcode."
+
+Three deliberate differences from barcode/text:
+
+- **Claude-only, not OpenAI-preferred.** This exact image + `web_search` +
+  strict-json-schema-output combination is what's proven working in
+  `car-audio-inventory`'s production vision route. Whether OpenAI's
+  Responses API supports combining an image input, the `web_search` tool,
+  and strict `text.format` json_schema output in a single request isn't
+  confirmed, so it isn't risked here. A shop with only `OPENAI_API_KEY`
+  funded gets barcode/text AI resolution but not photo lookup, until this
+  is verified and ported.
+- **Never cached.** `product_resolution_cache`'s `kind` check constraint
+  only allows `'barcode'`/`'text'` (migration `0012`) — adding `'photo'`
+  would need a migration, and a photo is realistically never re-taken
+  identically, so there's no meaningful cache hit to chase anyway (same
+  reasoning `car-audio-inventory` itself uses — it doesn't cache vision
+  lookups either).
+- **A second, narrow follow-up call for a real photo.** Claude's
+  `web_search` tool returns extracted text, not raw HTML, so it can't see
+  a product page's `<img>` tags. If the top candidate comes back with no
+  `image_url`, `resolveViaVision` makes one more Claude call asking only
+  for the single best official product page URL, then fetches that page
+  itself and reads its JSON-LD `Product.image` / Open Graph tags
+  (`scrapeProductImages`, ported near-verbatim from `car-audio-inventory`'s
+  `src/lib/scrape-photos.ts`). Only the top candidate gets this — at most
+  one extra round trip, not one per candidate.
 
 ## Client-side ranking and dedup
 
@@ -118,6 +165,16 @@ regardless of what order the server happened to return things in.
      hint right above "Add a one-off item," never silently discarded; the
      scan is still completable as a custom/temporary line.
 
+`ScanWorkspacePage.handlePhotoCaptured` (the "Take photo instead" button
+inside the camera modal) follows the same confirmation-modal shape as
+step 3 above, just without a code to retain on a miss — nothing found
+just toasts and staff add the item manually, same as always. A
+`resolveKind` state (`'barcode' | 'photo'`) is all that changes: it picks
+which copy the shared confirmation modal shows ("this barcode isn't in
+your catalog yet" vs. "here's what we identified from the photo") — the
+modal, candidate cards, and both actions are the exact same JSX either
+way.
+
 ## Demo mode
 
 `DemoRepository.resolveProduct()` never makes a real call. Text queries
@@ -127,7 +184,13 @@ demo behavior exactly). A single fixed constant,
 canned candidates (one `probable`, one `low` with a warning) so the
 never-dead-end UI is exercisable in demo mode and Playwright without any
 network access; every other unrecognized barcode genuinely resolves to
-`[]`, exactly like a real miss.
+`[]`, exactly like a real miss. Photo lookup always deterministically
+"succeeds" with those same two canned candidates — there's no equivalent
+of an unresolved-barcode constant to compare an image against, and always
+succeeding is what actually exercises the confirmation UI in Playwright
+(see `smoke28-photo-lookup.mjs`, which drives a real camera capture via
+Chromium's fake-device flags and a synthetic video feed, then asserts on
+the photo-specific modal copy and candidate cards).
 
 ## Known limitations / deferred
 
@@ -138,11 +201,12 @@ network access; every other unrecognized barcode genuinely resolves to
   is a real, larger architectural decision that would have destabilized
   this round. This cache is the documented first step; a real shared
   library is future work, not silently working today.
-- **No photo/vision lookup yet.** The `image` request kind described in
-  the product brief (upload to Storage, extract visible brand/model/label
-  text, resolve from that) is not built this round — the camera
-  scanner's "Take photo instead" path still reports "not available yet."
-  A large, separate piece of work; deferred and not built shallowly.
+- **Photo lookup needs a funded `ANTHROPIC_API_KEY` specifically** —
+  unlike barcode/text, it doesn't fall back to OpenAI even if that's the
+  only key set (see "Photo lookup" above for why). A shop running
+  OpenAI-only still gets barcode/text AI resolution; photo lookup just
+  quietly returns no candidates until Anthropic is confirmed as the right
+  provider to add there too, or a verified OpenAI equivalent is built.
 - **Neither `OPENAI_API_KEY` nor `ANTHROPIC_API_KEY` is required** for the
   rest of the resolver to work — UPCitemdb barcode lookups and the local
   catalog/cache paths run regardless. Set whichever one the shop's

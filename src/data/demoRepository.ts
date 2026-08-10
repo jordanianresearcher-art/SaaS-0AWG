@@ -362,6 +362,13 @@ export class DemoRepository implements DataRepository {
     if (request.kind === 'text') {
       return { candidates: [], retainedInput: request.query.trim() }
     }
+    if (request.kind === 'photo') {
+      // Same rule: no real vision call in demo mode. Deterministically
+      // "succeeds" with the same canned candidates as the fixed unresolved
+      // barcode, purely so the photo-lookup confirmation UI is exercisable
+      // in demo/Playwright without a camera or network access.
+      return { candidates: DEMO_RESOLVED_CANDIDATES, retainedInput: 'photo' }
+    }
     const code = request.code.trim()
     if (code === DEMO_UNRESOLVED_BARCODE) {
       return { candidates: DEMO_RESOLVED_CANDIDATES, retainedInput: code }

@@ -101,6 +101,10 @@ export default function ScanWorkspacePage() {
   // immediately in favor of the retained-code hint below) is what's
   // offered for confirmation. See handleBarcodeDetected.
   const [resolveCandidates, setResolveCandidates] = useState<ProductResolutionCandidate[] | null>(null)
+  // Which resolver path produced resolveCandidates -- only matters for the
+  // confirmation modal's copy ("this barcode isn't in your catalog" reads
+  // wrong for a photo-sourced result). Set right alongside setResolveCandidates.
+  const [resolveKind, setResolveKind] = useState<'barcode' | 'photo'>('barcode')
   const [resolving, setResolving] = useState(false)
   // The most recent scanned/typed code that genuinely found nothing —
   // retained (never discarded) so staff can still act on it via the
@@ -177,6 +181,7 @@ export default function ScanWorkspacePage() {
         const resolved = await repo.resolveProduct({ kind: 'barcode', code })
         setUnresolvedCode(code)
         if (resolved.candidates.length > 0) {
+          setResolveKind('barcode')
           setResolveCandidates(resolved.candidates)
           openedCandidateModal = true
         } else {
@@ -240,9 +245,29 @@ export default function ScanWorkspacePage() {
   // is locked in.
   useHardwareScanner(handleBarcodeDetected, building)
 
-  function handlePhotoCaptured() {
+  // No barcode ever missed here — this is the "no readable barcode" path,
+  // so there's no unresolvedCode to set/retain, unlike handleBarcodeDetected.
+  async function handlePhotoCaptured(base64Jpeg: string) {
     setScannerOpen(false)
-    toast('error', "Photo lookup isn't available yet — add this item manually below.")
+    setLookupBusy(true)
+    setResolving(true)
+    let openedCandidateModal = false
+    try {
+      const resolved = await repo.resolveProduct({ kind: 'photo', imageBase64: base64Jpeg, mediaType: 'image/jpeg' })
+      if (resolved.candidates.length > 0) {
+        setResolveKind('photo')
+        setResolveCandidates(resolved.candidates)
+        openedCandidateModal = true
+      } else {
+        toast('error', "Couldn't identify a product in that photo. Add it manually below.")
+      }
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : 'Photo lookup failed.')
+    } finally {
+      setLookupBusy(false)
+      setResolving(false)
+      if (!openedCandidateModal) scanInputRef.current?.focus()
+    }
   }
 
   function handleCameraError(message: string) {
@@ -498,12 +523,13 @@ export default function ScanWorkspacePage() {
                   setResolveCandidates(null)
                   scanInputRef.current?.focus()
                 }}
-                title={unresolvedCode ? `Possible matches for ${unresolvedCode}` : 'Possible matches'}
+                title={resolveKind === 'photo' ? 'Possible matches for that photo' : unresolvedCode ? `Possible matches for ${unresolvedCode}` : 'Possible matches'}
               >
                 <div className="space-y-3">
                   <p className="text-sm text-zinc-600">
-                    This barcode isn&apos;t in your catalog yet. Here&apos;s what we found on the web — pick one, or add it manually
-                    below instead.
+                    {resolveKind === 'photo'
+                      ? "Here's what we identified from the photo — pick one, or add it manually below instead."
+                      : "This barcode isn't in your catalog yet. Here's what we found on the web — pick one, or add it manually below instead."}
                   </p>
                   {(resolveCandidates ?? []).map((candidate) => (
                     <div key={candidate.id} className="rounded-xl border border-zinc-200 p-3">
