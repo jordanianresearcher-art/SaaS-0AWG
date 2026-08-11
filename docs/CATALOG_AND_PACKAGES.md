@@ -113,11 +113,12 @@ against a configuration — e.g. "Truck 2×8 Starter" at $799 installed. Three
 ways one comes to exist (per the product spec; see IMPLEMENTATION_STATUS
 for which are wired to a UI today):
 
-1. **Fast visual package builder** — pick a vehicle type and a
-   configuration in `src/components/PackageBuilder.tsx`, drag (or tap)
-   catalog products into its slots, then tap "Save as package" in
-   `NewQuotePage.tsx`'s option editor. Calls `createPackageTemplate`
-   directly — this can happen before the quote itself is even saved, so
+1. **Fast visual package builder** — drag (or tap) catalog products
+   straight into a flat list in `src/components/PackageBuilder.tsx`, then
+   tap "Save as package" in `NewQuotePage.tsx`'s option editor (see that
+   section below for the current, flat-list design — no vehicle-type/
+   configuration picker anymore). Calls `createPackageTemplate` directly —
+   this can happen before the quote itself is even saved, so
    `sourceQuoteId`/`sourceQuoteOptionId` are left `null` (there's no quote
    yet to point at).
 2. **Staff saves an existing quote option as a package** — data/logic
@@ -138,84 +139,72 @@ IMPLEMENTATION_STATUS.md's recommended next step.
 
 ## Fast visual package builder (`src/components/PackageBuilder.tsx`)
 
+**Rewritten** — the original version (vehicle type → shell → configuration
+→ slot grid, described in older commit history) was removed after direct
+shop feedback: *"I don't want categories, or build types anymore... I want
+the drag and drop to be the default."* Staff had to click through three
+picker menus before a single product appeared; the flat version below
+replaces that entirely. `AUDIO_CONFIGURATIONS`/`ConfigSlot`/the
+vehicle-type-shell-configuration system in `src/lib/audioConfigs.ts` still
+exists (existing `configId` values on old quotes/packages stay valid,
+`PRODUCT_CATEGORY_INFO` is still the catalog's category taxonomy), it's
+just no longer wired into this UI.
+
 Lives inside `NewQuotePage.tsx`'s per-option editor behind a "Build with
 drag & drop" button that opens it in a wide (`Modal size="xl"`) dialog — it
 doesn't replace the existing free-text product list (still there
 underneath, untouched, once the dialog closes), it's an alternate way to
 fill it in:
 
-1. Pick a **vehicle type** (truck / car / sedan / hatchback / suv), then a
-   **configuration** (e.g. "Truck 2×8") — `configurationsForVehicleType()`
-   filters `AUDIO_CONFIGURATIONS` down to the relevant ones.
-2. Drag a product card from the tray onto a slot, or tap a slot then tap a
-   product (dnd-kit's `PointerSensor`/`KeyboardSensor` cover mouse, touch,
-   and keyboard — plain HTML5 drag-and-drop doesn't work on phones/tablets,
-   this app's primary target). **A drop is never rejected for a category
-   mismatch** — that check existed early on but got removed once real
-   catalog data showed how often a product's stored category is missing
-   or just wrong (an unrecognized Shopify `productType`, a manual entry
-   nobody categorized yet); rejecting the drop just punished staff for a
-   data-quality problem that isn't theirs to fix in the moment. Tap-to-add
-   never enforced this either, so drag now matches. On `lg`+ screens the
-   slot grid sits on the left and the product tray is a sticky scrollable
-   sidebar on the right, so dragging never means scrolling up and down
-   between the two; on phones/tablets it stacks (tray below the slots)
-   since there's no spare width to spend.
-3. Each slot's tray is filtered to that slot's category by default, which
-   can still miss a product with a missing/wrong category. A **"Search all
-   products"** checkbox appears once a slot is selected, dropping the
-   category filter entirely so every active/approved product in the
-   catalog is searchable and taggable to that slot — it resets to
-   unchecked (along with the search text itself) every time a different
-   slot is selected, so an override on one slot never silently carries
-   over to the next. If genuinely nothing in the catalog matches even with
-   that on, the empty-tray message points at the extra/custom items field
-   below instead of leaving staff stuck.
-4. Set an **installation labor price** in its own field — labor isn't a
-   catalog product, so `resolveBuilderCatalog()` folds it into the same
-   slot-assignment model as a synthetic, non-persisted `CatalogItem`
-   (`id: '__labor_charge__'`) purely so every other calculation (subtotal,
-   completeness) doesn't need a special case for it.
-5. The parts+labor subtotal is computed live; an **installed-price
-   override** field lets staff quote package pricing instead of a straight
-   parts markup.
-6. A **"Compatibility not verified"** checkbox must be checked before
-   applying. `requiresCompatibilityConfirmation()` always returns `true`
-   today — nothing in this system holds a real, owner-vetted compatibility
-   ruleset yet, so the builder never implies a compatibility check it can't
-   back up.
-7. **"Apply to this option"** copies the filled slots into that option's
-   real `items`, sets its `price` to the computed (or overridden) total,
-   and stamps its `configId` — then closes the builder so the now-populated
-   manual list is there for a final look before saving. Under-filled
-   required slots produce a warning, not a block — a shop might genuinely
-   be quoting a partial job.
-8. **"Save as package"** (shown once a configuration is picked) names the
-   current build and calls `createPackageTemplate` directly — independent
-   of react-hook-form, so it works even before the quote itself is saved.
-9. **Extra / custom items** — a plain name + price + quantity list, kept
-   deliberately outside the slot-assignment model entirely (`packageBuilder.ts`'s
-   `CustomBuilderItem`, `customItemsSubtotalCents`, `customItemsToQuoteItems`/
-   `customItemsToPackageItems`). For a one-off item that isn't worth adding
-   to the permanent catalog and doesn't belong to any of a configuration's
-   slot categories — a misc hardware charge, a shop-supplies fee. Counted
-   into the subtotal and merged into the applied/saved item list, but
-   never fills a slot and never affects completeness.
+1. **No picker gate.** The dialog opens straight into a dashed-border drop
+   zone (empty state: "Drag products here from the right, or tap one to
+   add it") on the left and a catalog tray on the right — nothing to
+   select first.
+2. **Catalog tray, image-first, ranked by real usage.** Cards default-sort
+   by `sortCatalogByUsage()` — most-used-first, computed by
+   `computeCatalogUsageCounts()` matching this shop's own past quote items
+   back to a catalog product by brand/model/name (there's no
+   `catalogItemId` stored on a quote item — it's a snapshot — so a text
+   match is the only link back). A sort `<select>` (Most used / Name A–Z /
+   Price low-to-high), category filter chips, and a search box
+   (`ProductSuggestField`, reused as-is) round it out — the same box
+   filters the local grid live *and* debounce-searches the web
+   (`resolve-product` Edge Function) as a fallback, so a miss on the local
+   catalog isn't a dead end.
+3. **Drag or tap — one target, not per-slot.** dnd-kit's
+   `PointerSensor`/`KeyboardSensor` cover mouse, touch, and keyboard;
+   there's a single droppable zone (`DROP_ZONE_ID`), so tapping a card adds
+   it immediately — no "select a slot first" step. Re-adding the same
+   catalog product bumps its quantity instead of adding a duplicate row
+   (`addCatalogItemToBuilder`). On `lg`+ screens the item list sits on the
+   left and the tray is a sticky scrollable sidebar on the right; on
+   phones/tablets it stacks.
+4. Set an **installation labor price** in its own field — priced
+   separately from the parts, added straight into the subtotal.
+5. The parts+labor+extras subtotal is computed live
+   (`computeBuilderItemsSubtotalCents` + `customItemsSubtotalCents`); an
+   **installed-price override** field lets staff quote package pricing
+   instead of a straight parts markup.
+6. **"Apply"** copies the item list into that option's real `items`
+   (including each item's `imageUrl`, snapshotted from the catalog product
+   it was added from — a real fix over the old version, which always wrote
+   `imageUrl: null` regardless) and sets its `price` to the computed (or
+   overridden) total, then closes the builder.
+7. **"Save as package"** names the current build and calls
+   `createPackageTemplate` directly (`configId: null`, `vehicleTypes: []` —
+   no configuration concept to attach anymore) — independent of
+   react-hook-form, so it works even before the quote itself is saved.
+8. **Extra / custom items** — unchanged: a plain name + price + quantity
+   list (`packageBuilder.ts`'s `CustomBuilderItem`) for a one-off item that
+   isn't worth adding to the permanent catalog — a misc hardware charge, a
+   shop-supplies fee.
 
 Only `active` + `approvalStatus: 'approved'` catalog items are offered in
-slots or the search tray (`catalogItemsForSlot`) — a shop's own
-not-yet-approved or deactivated products never get dragged into a quote by
-accident.
-
-**UI is icon-led, not text-led**: the requirement badge on each slot
-(required/recommended/optional) is a small icon with an accessible
-label/tooltip rather than a spelled-out word; an empty slot shows a plus
-icon instead of a full sentence; a product tray card's drag affordance is
-an icon in the corner (with a native tooltip) rather than a caption line.
-The border color coding (red = required and empty, green = filled) was
-already doing most of the communicating — the icons are there for the
-cases color alone doesn't cover (recommended vs. optional, or a note like
-"add when integrating with a factory radio").
+the tray — a shop's own not-yet-approved or deactivated products never get
+dragged into a quote by accident. There's no "compatibility not verified"
+confirmation checkbox anymore — that was tied to the old slot/configuration
+completeness concept, which no longer exists; staff pick real products
+directly, same trust level as the manual item list has always had.
 
 ## Shopify catalog import (`shopify-import-catalog` Edge Function)
 
@@ -410,8 +399,19 @@ isn't exposed in the UI yet — only the repository method supports it).
   subtotal, and `resolveBuilderCatalog`'s synthetic labor item (created
   when a price is set, absent at zero/blank, cleared when the price is
   removed, a no-op with no configuration picked yet).
-- A Playwright smoke pass against `vite preview` in demo mode covering the
-  builder end to end: pick vehicle type → configuration, drag a subwoofer
-  onto its slot, tap-add an enclosure/amp/wiring kit, set a labor price,
-  confirm compatibility, apply, and verify the option's product list,
-  price, and total all land correctly — then save the quote.
+
+  **Update — flat-list rewrite**: `packageBuilder.ts` was rewritten around
+  a flat `BuilderLineItem[]` list instead of slot assignments (see the
+  "Fast visual package builder" section above); `packageBuilder.test.ts`
+  now covers `addCatalogItemToBuilder`/`setBuilderItemQuantity`/
+  `removeBuilderItem`, `computeBuilderItemsSubtotalCents`,
+  `computeCatalogUsageCounts`/`sortCatalogByUsage`, and the
+  quote-item/package-item conversions — the slot/configuration-specific
+  tests above describe the builder's *original* design, kept here as
+  history rather than rewritten line-by-line.
+- A Playwright smoke pass against `vite preview` in demo mode covers the
+  current builder end to end: open it (no picker gate), type into the
+  labor price field to confirm the modal doesn't steal focus back on every
+  keystroke (a real bug this rewrite also fixed — see WORKLOG.md), tap a
+  catalog card to add it straight to the list, cancel, and confirm the
+  tint editor / quote save still work around it.

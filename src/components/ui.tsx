@@ -184,16 +184,30 @@ export function Modal({
   const resolvedSize = size ?? (wide ? 'wide' : 'default')
   const ref = useRef<HTMLDivElement>(null)
 
+  // Read the latest onClose through a ref rather than putting it in the
+  // effect's dependency array. Callers almost always pass an inline arrow
+  // (`onClose={() => setOpen(false)}`), which gets a new identity on every
+  // render of the parent — if that identity were a dependency here, typing
+  // into ANY input inside the modal (which re-renders the parent on every
+  // keystroke) would re-run this effect and yank focus back onto the dialog
+  // shell via `ref.current?.focus()`, dropping the keystroke and closing the
+  // on-screen keyboard. Depending on [open] alone means this only fires when
+  // the modal actually opens/closes, not on every unrelated re-render.
+  const onCloseRef = useRef(onClose)
+  useEffect(() => {
+    onCloseRef.current = onClose
+  })
+
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') onCloseRef.current()
     }
     document.addEventListener('keydown', onKey)
     // Move focus into the dialog so keyboard/screen-reader users land in it.
     ref.current?.focus()
     return () => document.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+  }, [open])
 
   if (!open) return null
   return (

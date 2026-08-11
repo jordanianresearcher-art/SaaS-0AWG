@@ -17,6 +17,7 @@ import {
 import { Search, Sparkles } from 'lucide-react'
 import { PRODUCT_CATEGORIES, PRODUCT_CATEGORY_INFO } from '../lib/audioConfigs'
 import { guessCategoryFromName } from '../lib/categorize'
+import { errorMessage } from '../lib/errors'
 import { formatCurrency } from '../lib/format'
 import { useToast } from './Toast'
 import { Button } from './ui'
@@ -58,8 +59,10 @@ export default function CatalogOrganizer({ items, onSetCategory }: CatalogOrgani
     try {
       await onSetCategory(itemId, category)
       setSelectedItemId(null)
-    } catch {
-      toast('error', 'Could not update that product. Please try again.')
+    } catch (err) {
+      console.error('setCategory failed', err)
+      const detail = errorMessage(err)
+      toast('error', detail ? `Could not update that product: ${detail}` : 'Could not update that product. Please try again.')
     }
   }
 
@@ -86,8 +89,11 @@ export default function CatalogOrganizer({ items, onSetCategory }: CatalogOrgani
       try {
         await onSetCategory(item.id, guess)
         categorized += 1
-      } catch {
-        // One failed update shouldn't stop the rest of the batch.
+      } catch (err) {
+        // One failed update shouldn't stop the rest of the batch — still
+        // worth a console trace so a systemic failure (e.g. every update
+        // failing) is diagnosable instead of just quietly categorizing zero.
+        console.error('auto-categorize item failed', item.id, err)
       }
     }
     setAutoRunning(false)

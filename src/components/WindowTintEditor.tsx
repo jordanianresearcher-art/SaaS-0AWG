@@ -1,10 +1,12 @@
-import type { TintType, TintWindowPosition, WindowTintWindow } from '../types'
+import type { SunroofType, TintType, WindowTintWindow } from '../types'
 import {
   BODY_STYLE_INFO,
   BODY_STYLE_ORDER,
+  SUNROOF_TYPE_INFO,
+  TINT_SLOT_LABEL,
+  TINT_SLOT_ORDER,
   TINT_TYPE_INFO,
   TINT_VLT_PERCENTS,
-  TINT_WINDOW_LABELS,
   computeWindowTintTotalCents,
   windowTintFormValuesToConfig,
   windowsForBodyStyle,
@@ -52,31 +54,34 @@ function PercentPills({
   )
 }
 
-function WindowRow({
-  window: w,
-  onChange,
+// One row per *visual* slot (front/rear/quarter/back glass), not per
+// physical window — driver and passenger side are tinted identically in
+// the overwhelming majority of jobs, so there's no reason to make staff
+// set (and look at) the same checkbox and percentage twice. Whichever
+// side(s) a slot has (see TINT_VISUAL_SLOT_POSITIONS) move together.
+function VisualSlotRow({
+  slot,
+  windows,
+  onToggle,
+  onSetPercent,
 }: {
-  window: WindowTintWindow
-  onChange: (patch: Partial<WindowTintWindow>) => void
+  slot: TintVisualSlot
+  windows: WindowTintWindow[]
+  onToggle: () => void
+  onSetPercent: (percent: number) => void
 }) {
+  const relevant = windows.filter((w) => TINT_VISUAL_SLOT_POSITIONS[slot].includes(w.position))
+  const included = relevant.some((w) => w.included)
+  const percent = relevant.find((w) => w.included && w.vltPercent !== null)?.vltPercent ?? null
   return (
     <div className="rounded-xl border border-zinc-200 p-3">
       <label className="flex items-center gap-2.5 text-base font-medium text-ink">
-        <input
-          type="checkbox"
-          className="h-5 w-5 accent-[#1d4ed8]"
-          checked={w.included}
-          onChange={(e) => onChange({ included: e.target.checked, vltPercent: e.target.checked ? w.vltPercent : null })}
-        />
-        {TINT_WINDOW_LABELS[w.position]}
+        <input type="checkbox" className="h-5 w-5 accent-[#1d4ed8]" checked={included} onChange={onToggle} />
+        {TINT_SLOT_LABEL[slot]}
       </label>
-      {w.included ? (
+      {included ? (
         <div className="mt-2">
-          <PercentPills
-            value={w.vltPercent}
-            onChange={(p) => onChange({ vltPercent: p })}
-            label={`${TINT_WINDOW_LABELS[w.position]} tint percentage`}
-          />
+          <PercentPills value={percent} onChange={onSetPercent} label={`${TINT_SLOT_LABEL[slot]} tint percentage`} />
         </div>
       ) : null}
     </div>
@@ -86,9 +91,19 @@ function WindowRow({
 export default function WindowTintEditor({ index, value, onChange }: WindowTintEditorProps) {
   const bodyStyle = value.bodyStyle
 
-  const updateWindow = (position: TintWindowPosition, patch: Partial<WindowTintWindow>) => {
-    onChange({ ...value, windows: value.windows.map((w) => (w.position === position ? { ...w, ...patch } : w)) })
+  // Set a percentage on every physical window within one visual slot at
+  // once (front/rear/quarter/back glass) — see VisualSlotRow above.
+  const setSlotPercent = (slot: TintVisualSlot, percent: number) => {
+    const positions = TINT_VISUAL_SLOT_POSITIONS[slot]
+    onChange({
+      ...value,
+      windows: value.windows.map((w) => (positions.includes(w.position) ? { ...w, included: true, vltPercent: percent } : w)),
+    })
   }
+
+  const presentSlots = TINT_SLOT_ORDER.filter((slot) =>
+    value.windows.some((w) => TINT_VISUAL_SLOT_POSITIONS[slot].includes(w.position)),
+  )
 
   // Toggling a slot on the diagram flips every physical window at that
   // visual position together (see TINT_VISUAL_SLOT_POSITIONS — a single
@@ -155,7 +170,7 @@ export default function WindowTintEditor({ index, value, onChange }: WindowTintE
         </div>
       </div>
 
-      <Field label="Tint job price" htmlFor={`tint-${index}-price`} hint="Covers all the windows you include below.">
+      <Field label="Tint job price" htmlFor={`tint-${index}-price`}>
         <Input
           id={`tint-${index}-price`}
           inputMode="decimal"
@@ -176,8 +191,14 @@ export default function WindowTintEditor({ index, value, onChange }: WindowTintE
       </div>
 
       <div className="space-y-2">
-        {value.windows.map((w) => (
-          <WindowRow key={w.position} window={w} onChange={(patch) => updateWindow(w.position, patch)} />
+        {presentSlots.map((slot) => (
+          <VisualSlotRow
+            key={slot}
+            slot={slot}
+            windows={value.windows}
+            onToggle={() => toggleSlot(slot)}
+            onSetPercent={(p) => setSlotPercent(slot, p)}
+          />
         ))}
       </div>
 
@@ -229,9 +250,6 @@ export default function WindowTintEditor({ index, value, onChange }: WindowTintE
           />
           Also tint the windshield?
         </label>
-        <p className="mt-1 text-sm text-zinc-500">
-          Most states treat windshield tint differently — often just a visor strip or a lighter %.
-        </p>
         {value.windshieldIncluded ? (
           <div className="mt-2 space-y-3">
             <PercentPills
@@ -247,6 +265,61 @@ export default function WindowTintEditor({ index, value, onChange }: WindowTintE
                   placeholder="$120"
                   value={value.windshieldPrice}
                   onChange={(e) => onChange({ ...value, windshieldPrice: e.target.value })}
+                />
+              </Field>
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="rounded-xl bg-zinc-50 p-3">
+        <label className="flex items-center gap-2.5 text-base font-medium text-ink">
+          <input
+            type="checkbox"
+            className="h-5 w-5 accent-[#1d4ed8]"
+            checked={value.sunroofIncluded}
+            onChange={(e) =>
+              onChange({
+                ...value,
+                sunroofIncluded: e.target.checked,
+                sunroofType: e.target.checked ? (value.sunroofType ?? 'single') : null,
+                sunroofVltPercent: e.target.checked ? value.sunroofVltPercent : null,
+                sunroofPrice: e.target.checked ? value.sunroofPrice : '',
+              })
+            }
+          />
+          Also tint the sunroof?
+        </label>
+        {value.sunroofIncluded ? (
+          <div className="mt-2 space-y-3">
+            <div className="flex flex-wrap gap-2" role="group" aria-label="Sunroof type">
+              {(Object.keys(SUNROOF_TYPE_INFO) as SunroofType[]).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  aria-pressed={value.sunroofType === t}
+                  onClick={() => onChange({ ...value, sunroofType: t })}
+                  className={`min-h-9 rounded-lg border-2 px-2.5 text-sm font-semibold transition-colors ${
+                    value.sunroofType === t ? 'border-brand bg-blue-50 text-ink' : 'border-zinc-200 text-zinc-600 hover:border-zinc-300'
+                  }`}
+                >
+                  {SUNROOF_TYPE_INFO[t].label}
+                </button>
+              ))}
+            </div>
+            <PercentPills
+              value={value.sunroofVltPercent}
+              onChange={(p) => onChange({ ...value, sunroofVltPercent: p })}
+              label="Sunroof tint percentage"
+            />
+            <div className="max-w-xs">
+              <Field label="Sunroof price" htmlFor={`tint-${index}-sunroof-price`}>
+                <Input
+                  id={`tint-${index}-sunroof-price`}
+                  inputMode="decimal"
+                  placeholder="$90"
+                  value={value.sunroofPrice}
+                  onChange={(e) => onChange({ ...value, sunroofPrice: e.target.value })}
                 />
               </Field>
             </div>

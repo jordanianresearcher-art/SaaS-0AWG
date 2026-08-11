@@ -161,6 +161,9 @@ export interface WindowTintWindow {
   vltPercent: number | null
 }
 
+/** 'single' = one panel, 'double' = a big panoramic/dual-panel sunroof. */
+export type SunroofType = 'single' | 'double'
+
 export interface WindowTintConfig {
   name: string
   bodyStyle: TintBodyStyle
@@ -173,6 +176,10 @@ export interface WindowTintConfig {
   windshieldIncluded: boolean
   windshieldVltPercent: number | null
   windshieldPriceCents: number | null
+  sunroofIncluded: boolean
+  sunroofType: SunroofType | null
+  sunroofVltPercent: number | null
+  sunroofPriceCents: number | null
 }
 
 export interface Shop {

@@ -263,7 +263,8 @@ export default function ScanWorkspacePage() {
       toast('success', `Saved "${saved.name}" to your catalog and added it to this order.`)
       setResolveCandidates(null)
       setUnresolvedCode(null)
-    } catch {
+    } catch (err) {
+      console.error('createCatalogItem (from resolved candidate) failed', err)
       toast('error', 'Could not save that product. Please try again.')
     }
   }
@@ -356,7 +357,8 @@ export default function ScanWorkspacePage() {
       const paid = await repo.markInvoicePaid(invoice.id, paymentMethod, amountCents)
       setInvoice(paid)
       toast('success', 'Invoice marked paid — stock updated.')
-    } catch {
+    } catch (err) {
+      console.error('markInvoicePaid failed', err)
       toast('error', 'Could not mark this invoice paid. Please try again.')
     } finally {
       setMarkingPaid(false)
@@ -369,7 +371,8 @@ export default function ScanWorkspacePage() {
     try {
       const result = await repo.sendInvoiceEmail(invoice.id, customerEmail.trim(), customerName.trim() || undefined)
       toast(result.ok ? 'success' : 'error', result.message)
-    } catch {
+    } catch (err) {
+      console.error('sendInvoiceEmail failed', err)
       toast('error', 'Could not email the invoice. Please try again.')
     } finally {
       setSendingEmail(false)

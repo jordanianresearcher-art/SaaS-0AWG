@@ -2363,3 +2363,179 @@ from the name field's own id.
   job-level toggle (not per-window) since the underlying data model
   already only tracks it that way — the diagram doesn't invent a
   per-window removed-vs-fresh visual the data can't back up.
+
+## Round 31 — Two real bugs, a flat drag-and-drop catalog builder, tint left/right collapse + sunroof, less text
+
+Direct follow-up feedback after Round 30 shipped, delivered as one batch:
+a screenshot of "Could not save the quote," a screenshot of a labor-price
+field that only accepted one keystroke at a time before losing focus, and
+four product asks — drop the package builder's vehicle-type/build-type
+pickers in favor of an always-visible drag-and-drop catalog panel, stop
+listing left/right tint windows separately, add a sunroof tint option,
+and strip more small helper text. (The car-diagram illustration-quality
+rejection from earlier in this window — "images of known cars... parked
+diagonally showing front and back" — is still outstanding; not touched
+this round given the size of everything above.)
+
+### Two real bugs
+
+- **Modal focus-steal, not a typing bug.** `Modal`'s `useEffect` in
+  `ui.tsx` depended on `[open, onClose]` and called `ref.current?.focus()`
+  on every run. Every caller passes an inline `onClose={() => setOpen(false)}`,
+  a new function identity on every render — and typing into *any* input
+  inside the modal re-renders the parent on every keystroke. So the effect
+  re-ran after each character and yanked focus back onto the dialog shell,
+  dropping the next keystroke. Not specific to the labor-price field;
+  every input in every modal in the app had this. Fixed by depending on
+  `[open]` only, reading `onClose` through a ref so the Escape-key handler
+  still sees the latest closure without needing it as a dependency.
+- **"Could not save the quote."** `customers.vehicle_year/vehicle_make/
+  vehicle_model` were already made nullable back in migration `0005` (the
+  form has treated vehicle info as fully optional since then), so that
+  wasn't it. The realistic cause is schema drift: migrations `0009`
+  through `0016` from recent rounds may not be applied to the live
+  Supabase project yet (this session has no Supabase credentials to check
+  or push them). Since the failure toast previously swallowed the actual
+  error (`catch { toast(...) }`, no binding, nothing logged), there was no
+  way to tell a real DB error from a network blip. Added
+  `src/lib/errors.ts` (`errorMessage(err)` — pulls `.message` off a real
+  `Error` or a Postgres-error-shaped plain object) and wired it into
+  `NewQuotePage`'s save/save-package flows plus `SettingsPage`,
+  `CatalogOrganizer`, `AdminPage`'s catalog/shop mutations, and
+  `EmailPreviewModal`'s send — every one now `console.error`s the real
+  error and (where useful) shows its actual message in the toast, so a
+  future "could not save" report comes with a real Postgres error string
+  instead of nothing. **If this keeps happening, run `supabase db push`
+  against the live project and re-check.**
+- While in there: `itemSchema.quantity` (`z.coerce.number().int().min(1)`)
+  had no `.catch()` — clearing the field coerces `''` to `0`, fails
+  `min(1)`, and react-hook-form silently refuses to call `onSubmit` at
+  all (no toast, no visible error, button just does nothing). Added
+  `.catch(1)` so a blank quantity falls back to 1 instead of blocking the
+  whole form, matching "nothing on this form is required."
+
+### Package builder rewrite — flat drag-and-drop, no picker gate
+
+Direct quote: *"I don't want categories, or build types anymore... I want
+the drag and drop to be the default, with most commonly built/used items
+of each category showing by image by default at the right side of the
+screen... scroll/sort/filter and little search functionality, and I want
+web search to be there too."*
+
+- `src/lib/packageBuilder.ts` rewritten around a flat `BuilderLineItem[]`
+  list instead of slot assignments keyed to a configuration — no more
+  `SlotAssignments`/`catalogItemsForSlot`/`isBuilderComplete`/
+  `requiresCompatibilityConfirmation`/`resolveBuilderCatalog`. New:
+  `addCatalogItemToBuilder` (bumps quantity on a repeat add instead of
+  duplicating the row), `addFreehandItemToBuilder` (a web-search pick),
+  `setBuilderItemQuantity`/`removeBuilderItem`,
+  `computeBuilderItemsSubtotalCents`, `builderItemsToQuoteItems`/
+  `builderItemsToPackageItems`, and the usage-ranking pair
+  `computeCatalogUsageCounts`/`sortCatalogByUsage` — since there's no
+  usage-analytics table, this reads real signal off data already in
+  memory: how often each catalog item's brand/model/name triple shows up
+  across the shop's own past quote items (a quote item has no
+  `catalogItemId`, it's a snapshot, so a text match is the only link
+  back). `packageBuilder.test.ts` rewritten to match (20 tests).
+- `src/components/PackageBuilder.tsx` rewritten: the dialog now opens
+  straight into a dashed-border drop zone + a catalog tray, no vehicle-
+  type → build-type → configuration menus in front of it. Tray defaults
+  to most-used-first, with a sort `<select>` (Most used / Name A–Z /
+  Price), category filter chips, and one search box doing double duty —
+  `ProductSuggestField` (already built, reused as-is) filters the local
+  grid live *and* debounce-searches the web via the existing
+  `resolve-product` Edge Function, so a catalog miss falls straight into
+  a web search rather than a dead end. One droppable zone instead of
+  per-slot ones, so tapping a card adds it immediately — no more "tap a
+  slot first, then tap a product." Bigger image-first cards.
+- Real side-effect fix while rewiring `NewQuotePage.tsx`'s `applyBuilder`:
+  the old version always wrote `imageUrl: null` for every builder-added
+  item (the slot-assignment conversion had no image field to carry one).
+  Now uses `builderItemsToPackageItems`, which does carry `imageUrl`, so
+  a product dragged in from the builder shows its real photo on the quote
+  detail page and in the customer email, same as one added via "From
+  catalog." "Save as package" now saves with `configId: null,
+  vehicleTypes: []` — no configuration to attach a saved package to
+  anymore (nothing currently reads either field back for filtering, so
+  this is a safe no-op change, not a regression).
+- `src/lib/audioConfigs.ts`'s vehicle-type/shell/configuration/slot system
+  is untouched and still exported — existing `configId` values on old
+  quotes/packages stay meaningful, and `PRODUCT_CATEGORY_INFO` (the
+  catalog's category taxonomy, unrelated to this) is still very much in
+  use elsewhere (`CatalogOrganizer`, the catalog tray's filter chips). It
+  just isn't wired into the builder's UI anymore.
+
+### Window tint: left/right collapse + sunroof
+
+- *"Left and right are usually same in tint, no need to separate them."*
+  `WindowTintEditor`'s checklist used to list `front_left`/`front_right`/
+  `rear_left`/`rear_right`/etc. as 5–7 separate rows, each with its own
+  checkbox and %-picker — on a sedan, two of those rows are almost always
+  set identically. Replaced with one row per *visual* slot (front / rear
+  / quarter / back glass — the same grouping `carDiagrams.ts` already
+  used for the diagram) that toggles/sets both physical sides together.
+  `summarizeWindowTint()` (the quote-detail/public-page/email-teaser
+  display, not just the editor) got the same treatment: groups into one
+  line per slot when both sides share a percent, and only falls back to
+  per-side lines on the rare quote where they genuinely differ — nothing
+  is ever hidden, just not needlessly doubled up. `TINT_SLOT_LABEL`
+  (`'Front windows'`/`'Rear windows'`/`'Rear quarter windows'`/`'Back
+  glass'`) moved from `TintDiagram.tsx` into `windowTint.ts` as the one
+  shared source now that both the diagram tooltips and the checklist use
+  it.
+- *"I need option to tint single sunroof, or big/double sunroof."* Added
+  `sunroofIncluded`/`sunroofType` (`'single' | 'double'`)/
+  `sunroofVltPercent`/`sunroofPriceCents` to `WindowTintConfig`, mirroring
+  the existing windshield fields exactly — a top-level add-on, not part
+  of the per-body-style window list or the car diagram (windshield never
+  was either; a sunroof is roof glass, not a side window, so it doesn't
+  belong on a side-silhouette diagram any more than the windshield does).
+  Editor UI mirrors the windshield section: checkbox, a single/double
+  type toggle, percent pills, price field. Shows up in the quote detail
+  and public-page summaries the same way windshield does; the email
+  teaser doesn't itemize windshield today either, so no email change was
+  needed.
+
+### Less small text
+
+Removed hint/description text the user's screenshots pointed at
+specifically, plus a pass over the rest of the create-quote flow: the
+package builder's "Installation labor price"/"Installed price to quote"
+hints, the windshield state-law disclaimer paragraph, the "Add-ons"
+section's descriptive subtitle, the tint section's intro paragraph, the
+"One-line description"/"Extra price"/"Phone"/"Good through" field hints.
+Kept the few hints that prevent a real mistake rather than just restating
+the label (internal notes' "never emailed" privacy note, next-follow-up's
+"leave blank, it's automatic").
+
+### Verification
+
+- `tsc -b --noEmit`, `npm run lint`, `npx vitest run` (288/288 — down
+  slightly from 291 net of the slot-system tests that no longer apply,
+  up from what remains plus new coverage: `packageBuilder.test.ts`
+  rewritten for the flat model, `windowTint.test.ts` gained sunroof
+  coverage and updated left/right-collapse expectations), `npm run build`
+  all clean.
+- New `smoke33-builder-tint-focus.mjs` (12/12): the labor-price field
+  now accepts a full multi-character value typed with real per-key
+  delays without losing focus (the regression test for the Modal bug);
+  no "Vehicle type"/"Build type" headings anywhere in the builder; the
+  catalog tray's search box and sort control render immediately, with no
+  picker gate in front of them; the empty drop zone is visible by
+  default; tapping a catalog card adds it straight to the product list;
+  the tint checklist shows one collapsed "Front windows" row instead of
+  separate left/right rows; checking the sunroof option reveals a
+  single/double type choice; the windshield disclaimer text is gone;
+  clearing an item's quantity field doesn't block or error the save; a
+  quote with a cleared quantity and no vehicle saves successfully.
+  Re-ran `smoke31-main-addons-tint.mjs` (21/21, one assertion updated
+  for the new "Rear quarter windows" collapsed label, scoped to the
+  checklist's `<label>` specifically since the same text now also
+  appears in each diagram's SVG `<title>`) and `smoke32-seeded-quotes.mjs`
+  (5/5, unaffected).
+- **Not independently verifiable this session**: the actual "Could not
+  save the quote" fix (better error surfacing) can't be confirmed against
+  demo mode, since `DemoRepository` has no Postgres constraints to
+  violate in the first place — the real test is on the user's live
+  Supabase project, where the improved toast should now show the actual
+  Postgres error text if the save still fails.

@@ -8,6 +8,7 @@ import { useToast } from '../../components/Toast'
 import { Button, Card, EmptyState, Field, Input, LoadingBlock, Modal, Select, Textarea } from '../../components/ui'
 import CatalogOrganizer from '../../components/CatalogOrganizer'
 import { ProductSuggestField } from '../../components/ProductSuggestField'
+import { errorMessage } from '../../lib/errors'
 import { formatCurrency, parseDollarsToCents } from '../../lib/format'
 import { PAYMENT_METHOD_INFO } from '../../lib/paymentMethods'
 import { PRODUCT_CATEGORIES, PRODUCT_CATEGORY_INFO } from '../../lib/audioConfigs'
@@ -112,8 +113,10 @@ export default function SettingsPage() {
       })
       await refresh()
       toast('success', 'Settings saved.')
-    } catch {
-      toast('error', 'Could not save settings. Please try again.')
+    } catch (err) {
+      console.error('updateShop failed', err)
+      const detail = errorMessage(err)
+      toast('error', detail ? `Could not save settings: ${detail}` : 'Could not save settings. Please try again.')
     }
   }
 
@@ -395,8 +398,10 @@ function CatalogSection({ reloadSignal }: { reloadSignal: number }) {
       }
       setEditing(null)
       await load()
-    } catch {
-      toast('error', 'Could not save that product. Please try again.')
+    } catch (err) {
+      console.error('save catalog item failed', err)
+      const detail = errorMessage(err)
+      toast('error', detail ? `Could not save that product: ${detail}` : 'Could not save that product. Please try again.')
     }
   }
 
@@ -405,8 +410,10 @@ function CatalogSection({ reloadSignal }: { reloadSignal: number }) {
       await repo.deleteCatalogItem(item.id)
       await load()
       toast('success', 'Removed from your catalog.')
-    } catch {
-      toast('error', 'Could not remove that product. Please try again.')
+    } catch (err) {
+      console.error('deleteCatalogItem failed', err)
+      const detail = errorMessage(err)
+      toast('error', detail ? `Could not remove that product: ${detail}` : 'Could not remove that product. Please try again.')
     }
   }
 

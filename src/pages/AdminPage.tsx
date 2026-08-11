@@ -48,6 +48,7 @@ export default function AdminPage() {
       setCreateOpen(false)
       setResult({ shopName: values.shopName, emailSent: created.emailSent, inviteLink: created.inviteLink })
     } catch (err) {
+      console.error('createShop failed', err)
       toast('error', err instanceof Error ? err.message : 'Could not create the shop.')
     }
   }
@@ -58,8 +59,9 @@ export default function AdminPage() {
       await adminRepo.setShopActive(shop.id, !shop.active)
       await load()
       toast('success', shop.active ? `${shop.name} suspended.` : `${shop.name} reactivated.`)
-    } catch {
-      toast('error', 'Could not update that shop. Please try again.')
+    } catch (err) {
+      console.error('setShopActive failed', err)
+      toast('error', err instanceof Error ? err.message : 'Could not update that shop. Please try again.')
     } finally {
       setBusyId(null)
     }

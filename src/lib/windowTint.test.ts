@@ -84,11 +84,17 @@ describe('windowTintConfigToFormValues', () => {
       windshieldIncluded: true,
       windshieldVltPercent: 70,
       windshieldPriceCents: 12000,
+      sunroofIncluded: true,
+      sunroofType: 'double',
+      sunroofVltPercent: 20,
+      sunroofPriceCents: 9000,
     }
     const form = windowTintConfigToFormValues(original)
     expect(form.price).toBe('450')
     expect(form.removeOldTintPrice).toBe('50')
     expect(form.windshieldPrice).toBe('120')
+    expect(form.sunroofPrice).toBe('90')
+    expect(form.sunroofType).toBe('double')
     const roundTripped = windowTintFormValuesToConfig(form)
     expect(roundTripped).toEqual(original)
   })
@@ -114,6 +120,10 @@ describe('computeWindowTintTotalCents', () => {
     windshieldIncluded: false,
     windshieldVltPercent: null,
     windshieldPriceCents: null,
+    sunroofIncluded: false,
+    sunroofType: null,
+    sunroofVltPercent: null,
+    sunroofPriceCents: null,
   }
 
   it('sums only the base price when no add-ons are active', () => {
@@ -130,7 +140,12 @@ describe('computeWindowTintTotalCents', () => {
     expect(computeWindowTintTotalCents({ ...base, windshieldIncluded: true, windshieldPriceCents: 12000 })).toBe(37000)
   })
 
-  it('sums all three when everything is active', () => {
+  it('adds sunroof price only when sunroofIncluded is true', () => {
+    expect(computeWindowTintTotalCents({ ...base, sunroofPriceCents: 9000 })).toBe(25000)
+    expect(computeWindowTintTotalCents({ ...base, sunroofIncluded: true, sunroofPriceCents: 9000 })).toBe(34000)
+  })
+
+  it('sums everything when every add-on is active', () => {
     expect(
       computeWindowTintTotalCents({
         ...base,
@@ -138,12 +153,16 @@ describe('computeWindowTintTotalCents', () => {
         removeOldTintPriceCents: 5000,
         windshieldIncluded: true,
         windshieldPriceCents: 12000,
+        sunroofIncluded: true,
+        sunroofPriceCents: 9000,
       }),
-    ).toBe(42000)
+    ).toBe(51000)
   })
 
   it('treats missing/null prices as zero, never throwing', () => {
-    expect(computeWindowTintTotalCents({ ...base, priceCents: null, removeOldTint: true, windshieldIncluded: true })).toBe(0)
+    expect(
+      computeWindowTintTotalCents({ ...base, priceCents: null, removeOldTint: true, windshieldIncluded: true, sunroofIncluded: true }),
+    ).toBe(0)
   })
 })
 
@@ -156,21 +175,30 @@ describe('summarizeWindowTint', () => {
     })
     const summary = summarizeWindowTint(config)
     expect(summary.uniformPercent).toBe(20)
-    expect(summary.windowLines).toHaveLength(5)
+    // A sedan's 5 physical windows (front L/R, rear L/R, back glass) group
+    // into 3 visual slots (front, rear, back glass) — left/right no longer
+    // get their own line since they're tinted identically here.
+    expect(summary.windowLines).toHaveLength(3)
+    expect(summary.windowLines.map((w) => w.label)).toEqual(['Front windows', 'Rear windows', 'Back glass'])
   })
 
-  it('returns per-window lines when percentages differ', () => {
+  it('returns per-window lines only for a slot whose two sides genuinely differ', () => {
     const form = createDefaultWindowTintFormValues('sedan')
     const config = windowTintFormValuesToConfig({
       ...form,
-      windows: form.windows.map((w, i) => ({ ...w, vltPercent: i === 0 ? 5 : 35 })),
+      // front_left and front_right disagree -> that slot splits back into
+      // two lines; rear stays collapsed since both sides match.
+      windows: form.windows.map((w) => ({
+        ...w,
+        vltPercent: w.position === 'front_left' ? 5 : w.position === 'front_right' ? 35 : 35,
+      })),
     })
     const summary = summarizeWindowTint(config)
     expect(summary.uniformPercent).toBeNull()
-    expect(summary.windowLines).toHaveLength(5)
+    expect(summary.windowLines.map((w) => w.label)).toEqual(['Front left', 'Front right', 'Rear windows', 'Back glass'])
   })
 
-  it('includes name, tint type, base price, removal, windshield, and a total', () => {
+  it('includes name, tint type, base price, removal, windshield, sunroof, and a total', () => {
     const config = windowTintFormValuesToConfig({
       ...createDefaultWindowTintFormValues('suv_6_window', 'Full vehicle'),
       tintType: 'ceramic',
@@ -180,6 +208,10 @@ describe('summarizeWindowTint', () => {
       windshieldIncluded: true,
       windshieldVltPercent: 70,
       windshieldPrice: '120',
+      sunroofIncluded: true,
+      sunroofType: 'double',
+      sunroofVltPercent: 20,
+      sunroofPrice: '90',
     })
     const summary = summarizeWindowTint(config)
     expect(summary.name).toBe('Full vehicle')
@@ -187,14 +219,16 @@ describe('summarizeWindowTint', () => {
     expect(summary.priceCents).toBe(45000)
     expect(summary.removeOldTint).toEqual({ priceCents: 5000 })
     expect(summary.windshield).toEqual({ vltPercent: 70, priceCents: 12000 })
-    expect(summary.totalCents).toBe(45000 + 5000 + 12000)
+    expect(summary.sunroof).toEqual({ typeLabel: 'Panoramic / double sunroof', vltPercent: 20, priceCents: 9000 })
+    expect(summary.totalCents).toBe(45000 + 5000 + 12000 + 9000)
   })
 
-  it('omits removal and windshield summaries when neither is active', () => {
+  it('omits removal, windshield, and sunroof summaries when none are active', () => {
     const config = windowTintFormValuesToConfig(createDefaultWindowTintFormValues('sedan'))
     const summary = summarizeWindowTint(config)
     expect(summary.removeOldTint).toBeNull()
     expect(summary.windshield).toBeNull()
+    expect(summary.sunroof).toBeNull()
     expect(summary.totalCents).toBe(0)
   })
 })

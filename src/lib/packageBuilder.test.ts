@@ -1,24 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import {
-  addToSlot,
-  assignmentsToPackageItems,
-  assignmentsToQuoteItems,
-  assignmentsToSlottableItems,
-  catalogItemsForSlot,
-  computeComponentSubtotalCents,
+  addCatalogItemToBuilder,
+  addFreehandItemToBuilder,
+  builderItemsToPackageItems,
+  builderItemsToQuoteItems,
+  computeBuilderItemsSubtotalCents,
+  computeCatalogUsageCounts,
   customItemsSubtotalCents,
   customItemsToPackageItems,
   customItemsToQuoteItems,
-  isBuilderComplete,
-  LABOR_CATALOG_ITEM_ID,
-  removeFromSlot,
-  requiresCompatibilityConfirmation,
-  resolveBuilderCatalog,
-  setSlotQuantity,
+  removeBuilderItem,
+  setBuilderItemQuantity,
+  sortCatalogByUsage,
+  type BuilderLineItem,
   type CustomBuilderItem,
-  type SlotAssignments,
 } from './packageBuilder'
-import { getConfiguration } from './audioConfigs'
 import type { CatalogItem } from '../types'
 
 function makeCatalogItem(overrides: Partial<CatalogItem> = {}): CatalogItem {
@@ -61,167 +57,135 @@ function makeCatalogItem(overrides: Partial<CatalogItem> = {}): CatalogItem {
   }
 }
 
-const catalog: CatalogItem[] = [
-  makeCatalogItem({ id: 'sub-1', category: 'subwoofer', defaultPriceCents: 9900 }),
-  makeCatalogItem({ id: 'sub-2', category: 'subwoofer', name: '8" other sub', defaultPriceCents: 12900 }),
-  makeCatalogItem({ id: 'sub-inactive', category: 'subwoofer', active: false }),
-  makeCatalogItem({ id: 'sub-pending', category: 'subwoofer', approvalStatus: 'pending_review' }),
-  makeCatalogItem({ id: 'enc-1', category: 'enclosure', name: 'Sealed dual 8" box', brand: null, model: null, defaultPriceCents: 8900 }),
-  makeCatalogItem({ id: 'amp-1', category: 'mono_amp', name: 'Mono amplifier', defaultPriceCents: 19900 }),
-  makeCatalogItem({ id: 'wire-1', category: 'wiring_kit', name: 'Wiring kit', defaultPriceCents: 5900 }),
-  makeCatalogItem({ id: 'labor-1', category: 'labor', name: 'Install labor', brand: null, model: null, defaultPriceCents: 15000 }),
-  makeCatalogItem({ id: 'other-1', category: 'door_speaker', name: 'Door speaker', defaultPriceCents: 12900 }),
-]
+const sub1 = makeCatalogItem({ id: 'sub-1', category: 'subwoofer', defaultPriceCents: 9900 })
+const sub2 = makeCatalogItem({ id: 'sub-2', category: 'subwoofer', name: '8" other sub', defaultPriceCents: 12900, position: 1 })
+const enc1 = makeCatalogItem({
+  id: 'enc-1',
+  category: 'enclosure',
+  name: 'Sealed dual 8" box',
+  brand: null,
+  model: null,
+  defaultPriceCents: 8900,
+  position: 2,
+})
+const catalog: CatalogItem[] = [sub1, sub2, enc1]
 
-const bass2x8 = getConfiguration('bass_2x8')!
-
-describe('catalogItemsForSlot', () => {
-  it('returns only active, approved products in the slot category', () => {
-    const subSlot = bass2x8.slots.find((s) => s.category === 'subwoofer')!
-    const eligible = catalogItemsForSlot(catalog, subSlot)
-    expect(eligible.map((i) => i.id).sort()).toEqual(['sub-1', 'sub-2'])
+describe('addCatalogItemToBuilder', () => {
+  it('adds a fresh row at quantity 1', () => {
+    const items = addCatalogItemToBuilder([], sub1)
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({ catalogItemId: 'sub-1', brand: 'Kicker', model: 'CWRT8', quantity: 1 })
   })
 
-  it('never suggests a product from another category', () => {
-    const encSlot = bass2x8.slots.find((s) => s.category === 'enclosure')!
-    expect(catalogItemsForSlot(catalog, encSlot).map((i) => i.id)).toEqual(['enc-1'])
+  it('bumps quantity instead of adding a duplicate row when the same product is added again', () => {
+    let items = addCatalogItemToBuilder([], sub1)
+    items = addCatalogItemToBuilder(items, sub1)
+    expect(items).toHaveLength(1)
+    expect(items[0].quantity).toBe(2)
+  })
+
+  it('adds a separate row for a different product', () => {
+    let items = addCatalogItemToBuilder([], sub1)
+    items = addCatalogItemToBuilder(items, enc1)
+    expect(items.map((i) => i.catalogItemId)).toEqual(['sub-1', 'enc-1'])
   })
 })
 
-describe('addToSlot / setSlotQuantity / removeFromSlot', () => {
-  it('adds a fresh assignment at quantity 1', () => {
-    const result = addToSlot({}, 'subwoofer', 'sub-1')
-    expect(result.subwoofer).toEqual([{ catalogItemId: 'sub-1', quantity: 1 }])
-  })
-
-  it('increments quantity when the same item is added again', () => {
-    let assignments: SlotAssignments = {}
-    assignments = addToSlot(assignments, 'subwoofer', 'sub-1')
-    assignments = addToSlot(assignments, 'subwoofer', 'sub-1')
-    expect(assignments.subwoofer).toEqual([{ catalogItemId: 'sub-1', quantity: 2 }])
-  })
-
-  it('sets an exact quantity, removing the row entirely at 0', () => {
-    let assignments = addToSlot({}, 'subwoofer', 'sub-1')
-    assignments = setSlotQuantity(assignments, 'subwoofer', 'sub-1', 5)
-    expect(assignments.subwoofer).toEqual([{ catalogItemId: 'sub-1', quantity: 5 }])
-    assignments = setSlotQuantity(assignments, 'subwoofer', 'sub-1', 0)
-    expect(assignments.subwoofer).toEqual([])
-  })
-
-  it('removes one assignment without touching others in the same slot', () => {
-    let assignments = addToSlot({}, 'subwoofer', 'sub-1')
-    assignments = addToSlot(assignments, 'subwoofer', 'sub-2')
-    assignments = removeFromSlot(assignments, 'subwoofer', 'sub-1')
-    expect(assignments.subwoofer).toEqual([{ catalogItemId: 'sub-2', quantity: 1 }])
-  })
-})
-
-describe('assignmentsToSlottableItems / isBuilderComplete', () => {
-  it('is incomplete with nothing assigned', () => {
-    expect(isBuilderComplete(bass2x8, {}, catalog)).toBe(false)
-  })
-
-  it('becomes complete once every required slot is filled to its minimum', () => {
-    let assignments: SlotAssignments = {}
-    assignments = setSlotQuantity(assignments, 'subwoofer', 'sub-1', 2) // bass_2x8 needs 2
-    assignments = addToSlot(assignments, 'enclosure', 'enc-1')
-    assignments = addToSlot(assignments, 'mono_amp', 'amp-1')
-    assignments = addToSlot(assignments, 'wiring_kit', 'wire-1')
-    assignments = addToSlot(assignments, 'labor', 'labor-1')
-    expect(isBuilderComplete(bass2x8, assignments, catalog)).toBe(true)
-  })
-
-  it('stays incomplete when a required slot is under-filled', () => {
-    let assignments: SlotAssignments = {}
-    assignments = addToSlot(assignments, 'subwoofer', 'sub-1') // only 1 of 2 needed
-    assignments = addToSlot(assignments, 'enclosure', 'enc-1')
-    assignments = addToSlot(assignments, 'mono_amp', 'amp-1')
-    assignments = addToSlot(assignments, 'wiring_kit', 'wire-1')
-    assignments = addToSlot(assignments, 'labor', 'labor-1')
-    expect(isBuilderComplete(bass2x8, assignments, catalog)).toBe(false)
-  })
-
-  it('never lets a dangling assignment (deleted catalog item) fill a slot', () => {
-    const assignments = addToSlot({}, 'subwoofer', 'sub-1')
-    const items = assignmentsToSlottableItems(assignments, [])
-    expect(items).toEqual([{ category: null, quantity: 1 }])
-  })
-})
-
-describe('assignmentsToQuoteItems', () => {
-  it('maps assigned catalog items into the option line-item shape', () => {
-    let assignments: SlotAssignments = {}
-    assignments = setSlotQuantity(assignments, 'subwoofer', 'sub-1', 2)
-    assignments = addToSlot(assignments, 'enclosure', 'enc-1')
-    const items = assignmentsToQuoteItems(assignments, catalog)
-    expect(items).toEqual(
-      expect.arrayContaining([
-        { brand: 'Kicker', model: 'CWRT8', name: '8" shallow subwoofer', quantity: 2, description: null, category: 'subwoofer' },
-        { brand: null, model: null, name: 'Sealed dual 8" box', quantity: 1, description: null, category: 'enclosure' },
-      ]),
-    )
-  })
-})
-
-describe('assignmentsToPackageItems', () => {
-  it('mirrors assignmentsToQuoteItems but also carries imageUrl, for saving a reusable package', () => {
-    const withImage = makeCatalogItem({ id: 'sub-img', category: 'subwoofer', name: 'Imaged sub', imageUrl: 'https://example.com/sub.jpg' })
-    const assignments = addToSlot({}, 'subwoofer', 'sub-img')
-    const items = assignmentsToPackageItems(assignments, [...catalog, withImage])
+describe('addFreehandItemToBuilder', () => {
+  it('adds a row with no catalogItemId, e.g. from a web-search pick', () => {
+    const items = addFreehandItemToBuilder([], { brand: 'JL Audio', model: 'XD600/6', name: '6-channel amp', category: null, imageUrl: null })
     expect(items).toEqual([
-      { brand: 'Kicker', model: 'CWRT8', name: 'Imaged sub', quantity: 1, description: null, category: 'subwoofer', imageUrl: 'https://example.com/sub.jpg' },
+      expect.objectContaining({ catalogItemId: null, brand: 'JL Audio', model: 'XD600/6', name: '6-channel amp', quantity: 1 }),
     ])
   })
 })
 
-describe('computeComponentSubtotalCents', () => {
-  it('sums price times quantity across every assigned slot', () => {
-    let assignments: SlotAssignments = {}
-    assignments = setSlotQuantity(assignments, 'subwoofer', 'sub-1', 2) // 9900 * 2
-    assignments = addToSlot(assignments, 'enclosure', 'enc-1') // 8900
-    assignments = addToSlot(assignments, 'mono_amp', 'amp-1') // 19900
-    expect(computeComponentSubtotalCents(assignments, catalog)).toBe(9900 * 2 + 8900 + 19900)
+describe('setBuilderItemQuantity / removeBuilderItem', () => {
+  it('sets an exact quantity', () => {
+    const items = addCatalogItemToBuilder([], sub1)
+    const updated = setBuilderItemQuantity(items, items[0].id, 5)
+    expect(updated[0].quantity).toBe(5)
   })
 
-  it('is zero with nothing assigned', () => {
-    expect(computeComponentSubtotalCents({}, catalog)).toBe(0)
-  })
-})
-
-describe('requiresCompatibilityConfirmation', () => {
-  it('is always true — no verified compatibility ruleset exists yet', () => {
-    expect(requiresCompatibilityConfirmation()).toBe(true)
-  })
-})
-
-describe('resolveBuilderCatalog', () => {
-  const laborSlot = bass2x8.slots.find((s) => s.category === 'labor')!
-
-  it('adds a synthetic labor catalog item filling the labor slot when a price is set', () => {
-    const resolved = resolveBuilderCatalog(bass2x8, catalog, {}, 15000)
-    const laborItem = resolved.catalog.find((i) => i.id === LABOR_CATALOG_ITEM_ID)
-    expect(laborItem?.defaultPriceCents).toBe(15000)
-    expect(resolved.assignments[laborSlot.key]).toEqual([{ catalogItemId: LABOR_CATALOG_ITEM_ID, quantity: 1 }])
+  it('removes the row entirely once quantity drops to 0', () => {
+    const items = addCatalogItemToBuilder([], sub1)
+    expect(setBuilderItemQuantity(items, items[0].id, 0)).toEqual([])
   })
 
-  it('never fabricates a labor entry when no price (or a zero/negative one) is set', () => {
-    expect(resolveBuilderCatalog(bass2x8, catalog, {}, null).assignments[laborSlot.key]).toBeUndefined()
-    expect(resolveBuilderCatalog(bass2x8, catalog, {}, 0).assignments[laborSlot.key]).toBeUndefined()
-  })
-
-  it('clears a previously-set labor assignment if the price is removed', () => {
-    const assignments: SlotAssignments = { [laborSlot.key]: [{ catalogItemId: LABOR_CATALOG_ITEM_ID, quantity: 1 }] }
-    const resolved = resolveBuilderCatalog(bass2x8, catalog, assignments, null)
-    expect(resolved.assignments[laborSlot.key]).toBeUndefined()
-  })
-
-  it('is a no-op when there is no configuration yet', () => {
-    expect(resolveBuilderCatalog(null, catalog, {}, 15000)).toEqual({ catalog, assignments: {} })
+  it('removes one row without touching the others', () => {
+    let items = addCatalogItemToBuilder([], sub1)
+    items = addCatalogItemToBuilder(items, sub2)
+    const kept = removeBuilderItem(items, items[0].id)
+    expect(kept).toHaveLength(1)
+    expect(kept[0].catalogItemId).toBe('sub-2')
   })
 })
 
-describe('custom items (one-off items with no catalog product or slot)', () => {
+describe('computeBuilderItemsSubtotalCents', () => {
+  it('sums catalog unit price × quantity across every row', () => {
+    let items = addCatalogItemToBuilder([], sub1) // 9900 x 1
+    items = setBuilderItemQuantity(items, items[0].id, 2) // 9900 x 2
+    items = addCatalogItemToBuilder(items, enc1) // 8900 x 1
+    expect(computeBuilderItemsSubtotalCents(items, catalog)).toBe(9900 * 2 + 8900)
+  })
+
+  it('is zero for a freehand row (no catalog product to price it from)', () => {
+    const items = addFreehandItemToBuilder([], { brand: null, model: null, name: 'Web result', category: null, imageUrl: null })
+    expect(computeBuilderItemsSubtotalCents(items, catalog)).toBe(0)
+  })
+
+  it('is zero with no rows', () => {
+    expect(computeBuilderItemsSubtotalCents([], catalog)).toBe(0)
+  })
+})
+
+describe('builderItemsToQuoteItems / builderItemsToPackageItems', () => {
+  const items: BuilderLineItem[] = [
+    { id: 'r1', catalogItemId: 'sub-1', brand: 'Kicker', model: 'CWRT8', name: '8" shallow subwoofer', quantity: 2, category: 'subwoofer', imageUrl: 'https://example.com/sub.jpg' },
+  ]
+
+  it('maps rows into the option line-item shape', () => {
+    expect(builderItemsToQuoteItems(items)).toEqual([
+      { brand: 'Kicker', model: 'CWRT8', name: '8" shallow subwoofer', quantity: 2, description: null, category: 'subwoofer' },
+    ])
+  })
+
+  it('mirrors that but also carries imageUrl, for saving a reusable package', () => {
+    expect(builderItemsToPackageItems(items)).toEqual([
+      { brand: 'Kicker', model: 'CWRT8', name: '8" shallow subwoofer', quantity: 2, description: null, category: 'subwoofer', imageUrl: 'https://example.com/sub.jpg' },
+    ])
+  })
+})
+
+describe('computeCatalogUsageCounts / sortCatalogByUsage', () => {
+  it('counts a past item toward its matching catalog product by brand/model/name', () => {
+    const counts = computeCatalogUsageCounts(catalog, [
+      { brand: 'Kicker', model: 'CWRT8', name: '8" shallow subwoofer' },
+      { brand: 'Kicker', model: 'CWRT8', name: '8" shallow subwoofer' },
+      { brand: null, model: null, name: 'Sealed dual 8" box' },
+    ])
+    expect(counts.get('sub-1')).toBe(2)
+    expect(counts.get('enc-1')).toBe(1)
+    expect(counts.get('sub-2')).toBeUndefined()
+  })
+
+  it('ignores a past item that matches no current catalog product', () => {
+    const counts = computeCatalogUsageCounts(catalog, [{ brand: 'Unknown', model: 'X', name: 'Discontinued thing' }])
+    expect(counts.size).toBe(0)
+  })
+
+  it('sorts most-used first, falling back to catalog position for ties', () => {
+    const counts = new Map([['enc-1', 3]])
+    const sorted = sortCatalogByUsage(catalog, counts)
+    expect(sorted.map((i) => i.id)).toEqual(['enc-1', 'sub-1', 'sub-2'])
+  })
+
+  it('keeps catalog position order when nothing has any usage yet', () => {
+    expect(sortCatalogByUsage(catalog, new Map()).map((i) => i.id)).toEqual(['sub-1', 'sub-2', 'enc-1'])
+  })
+})
+
+describe('custom items (one-off items with no catalog product)', () => {
   const items: CustomBuilderItem[] = [
     { id: 'c1', name: 'Shop supplies fee', price: '25', quantity: 1 },
     { id: 'c2', name: 'Extra fuse kit', price: '9.99', quantity: 2 },

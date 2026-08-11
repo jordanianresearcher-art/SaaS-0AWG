@@ -330,6 +330,7 @@ export default function PublicQuotePage() {
               const extras = [
                 summary.removeOldTint ? 'old tint removed' : null,
                 summary.windshield ? `windshield ${summary.windshield.vltPercent}%` : null,
+                summary.sunroof ? `sunroof ${summary.sunroof.vltPercent}%` : null,
               ].filter(Boolean)
               return (
                 <div key={i} className="flex flex-wrap items-center gap-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">

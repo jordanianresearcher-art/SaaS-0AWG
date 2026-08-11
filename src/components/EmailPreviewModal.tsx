@@ -65,7 +65,8 @@ export function EmailPreviewModal({
       } else {
         setSendError(result.message)
       }
-    } catch {
+    } catch (err) {
+      console.error('sendEmail failed', err)
       setSendError('Something went wrong while sending. The email was not sent.')
     } finally {
       setSending(false)

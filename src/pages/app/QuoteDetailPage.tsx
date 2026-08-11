@@ -334,6 +334,12 @@ export default function QuoteDetailPage() {
                           {summary.windshield.priceCents !== null ? ` — ${formatCurrency(summary.windshield.priceCents)}` : ''}
                         </p>
                       ) : null}
+                      {summary.sunroof ? (
+                        <p className="text-sm text-zinc-500">
+                          {summary.sunroof.typeLabel}: {summary.sunroof.vltPercent}%
+                          {summary.sunroof.priceCents !== null ? ` — ${formatCurrency(summary.sunroof.priceCents)}` : ''}
+                        </p>
+                      ) : null}
                       {summary.totalCents > 0 ? (
                         <p className="pt-1 font-bold text-ink">Total: {formatCurrency(summary.totalCents)}</p>
                       ) : null}

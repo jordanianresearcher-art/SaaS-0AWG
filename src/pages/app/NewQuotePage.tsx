@@ -12,24 +12,21 @@ import {
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { addDays, format } from 'date-fns'
-import { Check, LayoutGrid, Package, Plus, Sparkles, Star, Trash2, TriangleAlert } from 'lucide-react'
+import { Check, LayoutGrid, Package, Plus, Sparkles, Star, Trash2 } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
 import { Button, Card, Field, Input, Modal, Select, Textarea } from '../../components/ui'
 import { CategoryIcon } from '../../components/categoryIcon'
 import WindowTintEditor from '../../components/WindowTintEditor'
 import PackageBuilder, { createEmptyPackageBuilderValue, type PackageBuilderValue } from '../../components/PackageBuilder'
-import { getConfiguration } from '../../lib/audioConfigs'
 import {
-  assignmentsToPackageItems,
-  assignmentsToQuoteItems,
-  computeComponentSubtotalCents,
+  builderItemsToPackageItems,
+  computeBuilderItemsSubtotalCents,
+  computeCatalogUsageCounts,
   customItemsSubtotalCents,
   customItemsToPackageItems,
-  customItemsToQuoteItems,
-  isBuilderComplete,
-  resolveBuilderCatalog,
 } from '../../lib/packageBuilder'
+import { errorMessage } from '../../lib/errors'
 import { formatCurrency, parseDollarsToCents } from '../../lib/format'
 import { COMMON_MAKES, OTHER_MAKE, VEHICLE_YEARS, fetchModelsForMakeYear } from '../../lib/vehicleData'
 import { DEFAULT_DEPOSIT_PERCENT, PAYMENT_METHOD_INFO, computeDefaultDepositCents } from '../../lib/paymentMethods'
@@ -55,7 +52,10 @@ const itemSchema = z.object({
   // a blank name still lands as a real line item; QuoteDetailPage/
   // PublicQuotePage/emails all fall back to "Item" when name is empty.
   name: z.string(),
-  quantity: z.coerce.number().int().min(1, 'At least 1'),
+  // Falls back to 1 rather than blocking submit — nothing on this form is
+  // required, so a cleared quantity field (coerces to 0, which would fail
+  // min(1)) shouldn't silently refuse to save the whole quote.
+  quantity: z.coerce.number().int().min(1).catch(1),
   // Set when this row came from the drag-and-drop package builder, so it can fill a
   // configuration slot again later (e.g. duplicating the quote). Manual/catalog rows leave it null.
   category: z.string().nullable(),
@@ -150,6 +150,10 @@ const windowTintSchema = z.object({
   // Not required even when windshieldIncluded — a shop may not have decided yet.
   windshieldVltPercent: tintPercentSchema,
   windshieldPrice: optionalDollarSchema,
+  sunroofIncluded: z.boolean(),
+  sunroofType: z.enum(['single', 'double']).nullable(),
+  sunroofVltPercent: tintPercentSchema,
+  sunroofPrice: optionalDollarSchema,
 })
 
 const schema = z
@@ -313,6 +317,13 @@ export default function NewQuotePage() {
     }
   }, [bundles])
 
+  // Drives the package builder's catalog tray default sort — "most commonly
+  // built/used" first, from this shop's own real quote history.
+  const catalogUsageCounts = useMemo(
+    () => computeCatalogUsageCounts(catalogItems, bundles.flatMap((b) => b.options.flatMap((o) => o.items))),
+    [bundles, catalogItems],
+  )
+
   const defaultExpiration = format(addDays(new Date(), shop?.quoteExpirationDays ?? 30), 'yyyy-MM-dd')
 
   const {
@@ -466,8 +477,10 @@ export default function NewQuotePage() {
       await refresh()
       toast('success', 'Quote created. Review the email and send it.')
       navigate(`/app/quotes/${quote.id}`, { state: { openEmailPreview: true } })
-    } catch {
-      toast('error', 'Could not save the quote. Please try again.')
+    } catch (err) {
+      console.error('createQuote failed', err)
+      const detail = errorMessage(err)
+      toast('error', detail ? `Could not save the quote: ${detail}` : 'Could not save the quote. Please try again.')
     }
   }
 
@@ -511,7 +524,7 @@ export default function NewQuotePage() {
           <Field label="Email" htmlFor="q-email" error={errors.email?.message}>
             <Input id="q-email" type="email" inputMode="email" autoComplete="off" {...register('email')} />
           </Field>
-          <Field label="Phone" htmlFor="q-phone" hint="For click-to-call. We never text customers.">
+          <Field label="Phone" htmlFor="q-phone">
             <Input id="q-phone" type="tel" inputMode="tel" autoComplete="off" {...register('phone')} />
           </Field>
           <Field label="How did they find you?" htmlFor="q-source">
@@ -636,6 +649,7 @@ export default function NewQuotePage() {
             errors={errors}
             catalogItems={catalogItems}
             itemHistory={itemHistory}
+            usageCounts={catalogUsageCounts}
           />
         </Card>
 
@@ -644,7 +658,6 @@ export default function NewQuotePage() {
             <div className="flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-brand" aria-hidden="true" />
               <h2 className="text-xl font-bold text-ink">Add-ons</h2>
-              <span className="text-sm font-normal text-zinc-500">optional upgrades, priced on top of the main package</span>
             </div>
             {addonFields.length < 8 ? (
               <Button variant="secondary" onClick={() => appendAddon(emptyAddon())}>
@@ -699,10 +712,6 @@ export default function NewQuotePage() {
               </Button>
             ) : null}
           </div>
-          <p className="-mt-3 text-sm text-zinc-500">
-            Optional — describe any window tint work to include on the quote. Add more than one if you&apos;re pricing a
-            few different scenarios.
-          </p>
           {tintFields.length === 0 ? (
             <p className="text-sm text-zinc-500">No window tint options yet — add one if this quote includes tint.</p>
           ) : null}
@@ -729,7 +738,7 @@ export default function NewQuotePage() {
         <Card className="space-y-4 lg:col-span-2">
           <h2 className="text-xl font-bold text-ink">Quote details</h2>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Good through" htmlFor="q-exp" hint="Shown to the customer on the quote.">
+            <Field label="Good through" htmlFor="q-exp">
               <Input id="q-exp" type="date" {...register('expirationDate')} />
             </Field>
             <Field label="Next follow-up" htmlFor="q-follow" hint="Leave blank — it's set automatically when you email the quote.">
@@ -926,6 +935,7 @@ function MainOptionEditor({
   errors,
   catalogItems,
   itemHistory,
+  usageCounts,
 }: {
   control: Control<FormValues>
   register: UseFormRegister<FormValues>
@@ -933,6 +943,7 @@ function MainOptionEditor({
   errors: FieldErrors<FormValues>
   catalogItems: CatalogItem[]
   itemHistory: { brands: string[]; models: string[]; names: string[] }
+  usageCounts: Map<string, number>
 }) {
   const { replace } = useFieldArray({ control, name: 'main.items' })
   const mainErrors = errors.main
@@ -940,38 +951,27 @@ function MainOptionEditor({
   const toast = useToast()
 
   // The fast visual (drag-and-drop) package builder is a separate draft — it only
-  // touches this option's real items/price/configId once staff explicitly applies it,
-  // so an abandoned or half-filled builder session never silently changes the quote.
+  // touches this option's real items/price once staff explicitly applies it, so
+  // an abandoned or half-filled builder session never silently changes the quote.
   const [builderOpen, setBuilderOpen] = useState(false)
   const [builderValue, setBuilderValue] = useState<PackageBuilderValue>(createEmptyPackageBuilderValue)
   const [packageName, setPackageName] = useState('')
   const [savingPackage, setSavingPackage] = useState(false)
 
-  const builderConfig = builderValue.configId ? getConfiguration(builderValue.configId) : null
   const builderNamedCustomItemCount = builderValue.customItems.filter((i) => i.name.trim()).length
-  const builderItemCount =
-    Object.values(builderValue.assignments).reduce((n, list) => n + list.length, 0) + builderNamedCustomItemCount
-  const builderComplete = builderConfig ? isBuilderComplete(builderConfig, builderValue.assignments, catalogItems) : false
-  const canApplyBuilder = builderValue.confirmed && builderConfig !== null && builderItemCount > 0
+  const canApplyBuilder = builderValue.items.length > 0 || builderNamedCustomItemCount > 0
 
   function resolveBuilderOutput() {
-    const laborCents = builderValue.laborPrice.trim() ? parseDollarsToCents(builderValue.laborPrice) : null
-    const { catalog: resolvedCatalog, assignments: resolvedAssignments } = resolveBuilderCatalog(
-      builderConfig,
-      catalogItems,
-      builderValue.assignments,
-      laborCents,
-    )
-    const subtotalCents =
-      computeComponentSubtotalCents(resolvedAssignments, resolvedCatalog) + customItemsSubtotalCents(builderValue.customItems)
+    const laborCents = builderValue.laborPrice.trim() ? (parseDollarsToCents(builderValue.laborPrice) ?? 0) : 0
+    const subtotalCents = computeBuilderItemsSubtotalCents(builderValue.items, catalogItems) + laborCents + customItemsSubtotalCents(builderValue.customItems)
     const overrideCents = builderValue.priceOverride.trim() ? parseDollarsToCents(builderValue.priceOverride) : null
-    return { resolvedCatalog, resolvedAssignments, priceCents: overrideCents ?? subtotalCents }
+    const items = [...builderItemsToPackageItems(builderValue.items), ...customItemsToPackageItems(builderValue.customItems)]
+    return { items, priceCents: overrideCents ?? subtotalCents }
   }
 
   function applyBuilder() {
-    if (!canApplyBuilder || !builderConfig) return
-    const { resolvedAssignments, resolvedCatalog, priceCents } = resolveBuilderOutput()
-    const items = [...assignmentsToQuoteItems(resolvedAssignments, resolvedCatalog), ...customItemsToQuoteItems(builderValue.customItems)]
+    if (!canApplyBuilder) return
+    const { items, priceCents } = resolveBuilderOutput()
     if (items.length === 0) {
       toast('error', 'Add at least one product before applying.')
       return
@@ -983,23 +983,20 @@ function MainOptionEditor({
         name: item.name,
         quantity: item.quantity,
         category: item.category,
-        imageUrl: null,
+        imageUrl: item.imageUrl,
       })),
     )
     setValue('main.price', (priceCents / 100).toFixed(2), { shouldValidate: true, shouldDirty: true })
-    setValue('main.configId', builderConfig.id, { shouldValidate: true, shouldDirty: true })
     setBuilderOpen(false)
   }
 
   async function saveAsPackageTemplate() {
-    if (!builderConfig) return
     const trimmedName = packageName.trim()
     if (!trimmedName) {
       toast('error', 'Name this package before saving it.')
       return
     }
-    const { resolvedAssignments, resolvedCatalog, priceCents } = resolveBuilderOutput()
-    const items = [...assignmentsToPackageItems(resolvedAssignments, resolvedCatalog), ...customItemsToPackageItems(builderValue.customItems)]
+    const { items, priceCents } = resolveBuilderOutput()
     if (items.length === 0) {
       toast('error', 'Add at least one product before saving a package.')
       return
@@ -1009,8 +1006,8 @@ function MainOptionEditor({
       await repo.createPackageTemplate({
         name: trimmedName,
         description: '',
-        configId: builderConfig.id,
-        vehicleTypes: builderConfig.vehicleTypes,
+        configId: null,
+        vehicleTypes: [],
         installedPriceCents: priceCents,
         laborIncluded: builderValue.laborPrice.trim() !== '' && (parseDollarsToCents(builderValue.laborPrice) ?? 0) > 0,
         source: 'staff_saved',
@@ -1018,8 +1015,10 @@ function MainOptionEditor({
       })
       toast('success', `Saved "${trimmedName}" — pending manager approval before other staff can use it.`)
       setPackageName('')
-    } catch {
-      toast('error', 'Could not save this package. Please try again.')
+    } catch (err) {
+      console.error('createPackageTemplate failed', err)
+      const detail = errorMessage(err)
+      toast('error', detail ? `Could not save this package: ${detail}` : 'Could not save this package. Please try again.')
     } finally {
       setSavingPackage(false)
     }
@@ -1052,7 +1051,7 @@ function MainOptionEditor({
       <Field label="Package name" htmlFor="main-name" error={mainErrors?.name?.message}>
         <Input id="main-name" {...register('main.name')} />
       </Field>
-      <Field label="One-line description" htmlFor="main-desc" hint="What does the customer get?">
+      <Field label="One-line description" htmlFor="main-desc">
         <Input id="main-desc" {...register('main.description')} />
       </Field>
 
@@ -1068,12 +1067,7 @@ function MainOptionEditor({
 
         <Modal open={builderOpen} onClose={() => setBuilderOpen(false)} title="Build with drag & drop" size="xl">
           <div className="space-y-3">
-            <PackageBuilder catalogItems={catalogItems} value={builderValue} onChange={setBuilderValue} />
-            {builderConfig && !builderComplete ? (
-              <p className="flex items-center gap-1.5 text-sm font-medium text-amber-700">
-                <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden="true" /> Some required slots are empty
-              </p>
-            ) : null}
+            <PackageBuilder catalogItems={catalogItems} value={builderValue} onChange={setBuilderValue} usageCounts={usageCounts} />
             <div className="flex flex-wrap items-center gap-2 border-t border-zinc-100 pt-3">
               <Button type="button" onClick={applyBuilder} disabled={!canApplyBuilder}>
                 <Check className="h-5 w-5" aria-hidden="true" /> Apply
@@ -1082,21 +1076,19 @@ function MainOptionEditor({
                 Cancel
               </Button>
             </div>
-            {builderConfig ? (
-              <div className="flex flex-wrap items-end gap-2 border-t border-zinc-100 pt-3">
-                <Field label="Package name" htmlFor="main-pkg-name">
-                  <Input
-                    id="main-pkg-name"
-                    placeholder="e.g. Daily Bass 1×12"
-                    value={packageName}
-                    onChange={(e) => setPackageName(e.target.value)}
-                  />
-                </Field>
-                <Button type="button" variant="secondary" disabled={savingPackage || builderItemCount === 0} onClick={() => void saveAsPackageTemplate()}>
-                  {savingPackage ? 'Saving…' : 'Save as package'}
-                </Button>
-              </div>
-            ) : null}
+            <div className="flex flex-wrap items-end gap-2 border-t border-zinc-100 pt-3">
+              <Field label="Package name" htmlFor="main-pkg-name">
+                <Input
+                  id="main-pkg-name"
+                  placeholder="e.g. Daily Bass 1×12"
+                  value={packageName}
+                  onChange={(e) => setPackageName(e.target.value)}
+                />
+              </Field>
+              <Button type="button" variant="secondary" disabled={savingPackage || !canApplyBuilder} onClick={() => void saveAsPackageTemplate()}>
+                {savingPackage ? 'Saving…' : 'Save as package'}
+              </Button>
+            </div>
           </div>
         </Modal>
 
@@ -1195,7 +1187,7 @@ function AddonOptionEditor({
           catalogItems={catalogItems}
           listIdPrefix={`addon-${index}-items`}
         />
-        <Field label="Extra price" htmlFor={`addon-${index}-price`} error={addonErrors?.price?.message} hint="Added on top of the main package price.">
+        <Field label="Extra price" htmlFor={`addon-${index}-price`} error={addonErrors?.price?.message}>
           <Input id={`addon-${index}-price`} inputMode="decimal" placeholder="$300" {...register(`addons.${index}.price`)} />
         </Field>
         {addonPriceCents > 0 ? (
