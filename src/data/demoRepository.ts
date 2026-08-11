@@ -554,6 +554,7 @@ export class DemoRepository implements DataRepository {
       emailFollowUpAllowed: true,
       wonAmountCents: null,
       windowTints: input.quote.windowTints,
+      showFullAddonTotal: input.quote.showFullAddonTotal ?? false,
       createdAt: now,
       updatedAt: now,
     }
@@ -564,7 +565,7 @@ export class DemoRepository implements DataRepository {
       this.db.options.push({
         id: optionId,
         quoteId: quote.id,
-        tier: opt.tier,
+        optionKind: opt.optionKind,
         name: opt.name,
         description: opt.description,
         configId: opt.configId ?? null,
@@ -573,13 +574,13 @@ export class DemoRepository implements DataRepository {
         depositPaymentMethod: opt.depositPaymentMethod,
         depositPaymentHandle: opt.depositPaymentHandle,
         depositAmountCents: opt.depositAmountCents,
-        recommended: opt.recommended,
         position: i,
         items: opt.items.map((item, j) => ({
           id: newId(),
           quoteOptionId: optionId,
           ...item,
           category: item.category ?? null,
+          imageUrl: item.imageUrl ?? null,
           position: j,
         })),
       })
@@ -648,6 +649,13 @@ export class DemoRepository implements DataRepository {
   async updateInternalNotes(quoteId: string, notes: string | null): Promise<void> {
     const quote = this.quoteById(quoteId)
     quote.internalNotes = notes
+    this.touch(quote)
+    this.persist()
+  }
+
+  async setShowFullAddonTotal(quoteId: string, show: boolean): Promise<void> {
+    const quote = this.quoteById(quoteId)
+    quote.showFullAddonTotal = show
     this.touch(quote)
     this.persist()
   }
@@ -725,12 +733,13 @@ export class DemoRepository implements DataRepository {
       status: quote.status,
       expirationDate: quote.expirationDate,
       optedOut: customer.emailOptOutAt !== null,
+      showFullAddonTotal: quote.showFullAddonTotal,
       options: this.db.options
         .filter((o) => o.quoteId === quote.id)
-        .sort((a, b) => a.position - b.position)
+        .sort((a, b) => (a.optionKind === 'main' ? 0 : 1) - (b.optionKind === 'main' ? 0 : 1) || a.position - b.position)
         .map((o) => ({
           id: o.id,
-          tier: o.tier,
+          optionKind: o.optionKind,
           name: o.name,
           description: o.description,
           priceCents: o.priceCents,
@@ -738,13 +747,13 @@ export class DemoRepository implements DataRepository {
           depositPaymentMethod: o.depositPaymentMethod,
           depositPaymentHandle: o.depositPaymentHandle,
           depositAmountCents: o.depositAmountCents,
-          recommended: o.recommended,
           items: o.items.map((i) => ({
             brand: i.brand,
             model: i.model,
             name: i.name,
             quantity: i.quantity,
             description: i.description,
+            imageUrl: i.imageUrl,
           })),
         })),
     }

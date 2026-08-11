@@ -12,18 +12,54 @@ import type { TintBodyStyle, TintType, TintWindowPosition, WindowTintConfig, Win
 
 export const TINT_VLT_PERCENTS = [5, 20, 35, 50, 70] as const
 
+// 7 real body shapes (was a coarse 2-way sedan_coupe/suv_wagon_van split) —
+// each maps to its own diagram in src/lib/carDiagrams.ts and its own real
+// window layout, so the checklist actually matches what's parked outside.
 export const BODY_STYLE_INFO: Record<
   TintBodyStyle,
   { label: string; windowCountLabel: string; windows: TintWindowPosition[] }
 > = {
-  sedan_coupe: {
-    label: 'Sedan / Coupe',
+  coupe: {
+    label: 'Coupe',
+    windowCountLabel: '5 windows',
+    windows: ['front_left', 'front_right', 'rear_quarter_left', 'rear_quarter_right', 'back_glass'],
+  },
+  sedan: {
+    label: 'Sedan',
     windowCountLabel: '5 windows',
     windows: ['front_left', 'front_right', 'rear_left', 'rear_right', 'back_glass'],
   },
-  suv_wagon_van: {
-    label: 'SUV / Wagon / Van / Ext. cab',
-    windowCountLabel: '7 windows',
+  truck_single_cab: {
+    label: 'Truck — single cab',
+    windowCountLabel: '3 windows',
+    windows: ['front_left', 'front_right', 'back_glass'],
+  },
+  truck_crew_cab: {
+    label: 'Truck — crew/ext. cab',
+    windowCountLabel: '5 windows',
+    windows: ['front_left', 'front_right', 'rear_left', 'rear_right', 'back_glass'],
+  },
+  suv_4_window: {
+    label: 'SUV — 4 window',
+    windowCountLabel: '4 door windows + rear glass',
+    windows: ['front_left', 'front_right', 'rear_left', 'rear_right', 'back_glass'],
+  },
+  suv_6_window: {
+    label: 'SUV — 6 window',
+    windowCountLabel: '6 door windows + rear glass',
+    windows: [
+      'front_left',
+      'front_right',
+      'rear_left',
+      'rear_right',
+      'rear_quarter_left',
+      'rear_quarter_right',
+      'back_glass',
+    ],
+  },
+  minivan: {
+    label: 'Minivan',
+    windowCountLabel: '6 windows + rear glass',
     windows: [
       'front_left',
       'front_right',
@@ -35,6 +71,17 @@ export const BODY_STYLE_INFO: Record<
     ],
   },
 }
+
+/** Ordered for the body-style picker — roughly small-to-large, grouped by silhouette family. */
+export const BODY_STYLE_ORDER: TintBodyStyle[] = [
+  'coupe',
+  'sedan',
+  'truck_single_cab',
+  'truck_crew_cab',
+  'suv_4_window',
+  'suv_6_window',
+  'minivan',
+]
 
 export const TINT_WINDOW_LABELS: Record<TintWindowPosition, string> = {
   front_left: 'Front left',

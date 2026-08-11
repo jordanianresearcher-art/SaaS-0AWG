@@ -46,25 +46,21 @@ values
    'won', 'Came back after check-in email.', now() + interval '18 days',
    now() - interval '9 days', null, 319900);
 
-insert into quote_options (id, quote_id, tier, name, description, price_cents, recommended, position, deposit_payment_method, deposit_payment_handle, deposit_amount_cents)
+insert into quote_options (id, quote_id, option_kind, name, description, price_cents, position, deposit_payment_method, deposit_payment_handle, deposit_amount_cents)
 values
-  ('44444444-4444-4444-4444-444444444401', '33333333-3333-3333-3333-333333333301', 'good',
-   'Good', 'Solid daily-driver upgrade.', 189900, false, 0, 'link', 'https://pay.example.com/big-tex-audio/deposit', 28485),
-  ('44444444-4444-4444-4444-444444444402', '33333333-3333-3333-3333-333333333301', 'better',
-   'Better', 'Adds a hidden 10-inch sub under the rear seat.', 289900, true, 1, 'link', 'https://pay.example.com/big-tex-audio/deposit', 43485),
-  ('44444444-4444-4444-4444-444444444403', '33333333-3333-3333-3333-333333333301', 'insane',
-   'Insane', 'Full front-stage rebuild with DSP tune.', 549900, false, 2, 'link', 'https://pay.example.com/big-tex-audio/deposit', 82485),
-  ('44444444-4444-4444-4444-444444444404', '33333333-3333-3333-3333-333333333302', 'good',
-   'Good', 'Head unit + speaker refresh.', 149900, false, 0, null, null, null),
-  ('44444444-4444-4444-4444-444444444405', '33333333-3333-3333-3333-333333333302', 'better',
-   'Better', 'Adds amp + shallow sub behind the seat.', 259900, true, 1, null, null, null),
-  ('44444444-4444-4444-4444-444444444406', '33333333-3333-3333-3333-333333333303', 'better',
-   'Better', 'Full four-door speaker swap with amp and sub.', 319900, true, 0, null, null, null);
+  ('44444444-4444-4444-4444-444444444402', '33333333-3333-3333-3333-333333333301', 'main',
+   'Complete system', 'Adds a hidden 10-inch sub under the rear seat.', 289900, 0, 'link', 'https://pay.example.com/big-tex-audio/deposit', 43485),
+  ('44444444-4444-4444-4444-444444444403', '33333333-3333-3333-3333-333333333301', 'addon',
+   'DSP tune upgrade', 'Add a dedicated DSP amp and a full front-stage tune.', 65000, 1, null, null, null),
+  ('44444444-4444-4444-4444-444444444405', '33333333-3333-3333-3333-333333333302', 'main',
+   'Complete system', 'Adds amp + shallow sub behind the seat.', 259900, 0, null, null, null),
+  ('44444444-4444-4444-4444-444444444404', '33333333-3333-3333-3333-333333333302', 'addon',
+   'Head unit upgrade', 'CarPlay receiver instead of the factory deck.', 110000, 1, null, null, null),
+  ('44444444-4444-4444-4444-444444444406', '33333333-3333-3333-3333-333333333303', 'main',
+   'Complete system', 'Full four-door speaker swap with amp and sub.', 319900, 0, null, null, null);
 
 insert into quote_items (quote_option_id, brand, model, name, quantity, position)
 values
-  ('44444444-4444-4444-4444-444444444401', 'Kicker', 'KEY200.4', '4-channel smart amp', 1, 0),
-  ('44444444-4444-4444-4444-444444444401', 'Kicker', 'DS-Series', 'Front + rear speaker set', 1, 1),
   ('44444444-4444-4444-4444-444444444402', 'JL Audio', 'XD600/6v2', '6-channel amplifier', 1, 0),
   ('44444444-4444-4444-4444-444444444402', 'JL Audio', 'Stealthbox', 'Under-seat 10" subwoofer', 1, 1),
   ('44444444-4444-4444-4444-444444444402', 'Focal', 'PS 165', 'Front component speakers', 1, 2),

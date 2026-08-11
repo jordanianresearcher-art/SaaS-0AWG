@@ -37,7 +37,7 @@ export interface DemoDB {
   seedVersion: number
 }
 
-export const DEMO_SEED_VERSION = 13
+export const DEMO_SEED_VERSION = 14
 
 const SHOP_ID = 'demo-shop'
 
@@ -68,12 +68,12 @@ interface QuoteSeed {
     nextFollowUpInDays: number | null
     windowTints?: WindowTintConfig[]
   }
+  /** First entry is always the main package; any further entries are add-ons priced as the incremental cost on top of it (see OptionKind in types.ts). */
   options: Array<{
-    tier: QuoteOption['tier']
+    optionKind: QuoteOption['optionKind']
     name: string
     description: string
     priceCents: number
-    recommended: boolean
     items: Array<{ brand: string; model: string; name: string; quantity: number }>
   }>
   emails: Array<{ templateType: EmailMessage['templateType']; daysAgo: number; status: EmailMessage['status'] }>
@@ -95,10 +95,10 @@ const SEEDS: QuoteSeed[] = [
       createdDaysAgo: 4, expirationDaysAhead: 26, lastEmailedDaysAgo: 3, nextFollowUpInDays: 0,
       windowTints: [
         windowTintFormValuesToConfig({
-          ...createDefaultWindowTintFormValues('suv_wagon_van', 'Full vehicle'),
+          ...createDefaultWindowTintFormValues('truck_crew_cab', 'Full vehicle'),
           tintType: 'ceramic',
           price: '450',
-          windows: createDefaultWindowTintFormValues('suv_wagon_van').windows.map((w) => ({ ...w, vltPercent: 20 })),
+          windows: createDefaultWindowTintFormValues('truck_crew_cab').windows.map((w) => ({ ...w, vltPercent: 20 })),
           windshieldIncluded: true,
           windshieldVltPercent: 70,
           windshieldPrice: '120',
@@ -107,16 +107,8 @@ const SEEDS: QuoteSeed[] = [
     },
     options: [
       {
-        tier: 'good', name: 'Good', description: 'Solid daily-driver upgrade without touching the factory look.',
-        priceCents: 189900, recommended: false,
-        items: [
-          { brand: 'Kicker', model: 'KEY200.4', name: '4-channel smart amp', quantity: 1 },
-          { brand: 'Kicker', model: 'DS-Series', name: 'Front + rear speaker set', quantity: 1 },
-        ],
-      },
-      {
-        tier: 'better', name: 'Better', description: 'Adds real low end with a hidden 10" sub under the rear seat.',
-        priceCents: 289900, recommended: true,
+        optionKind: 'main', name: 'Complete system', description: 'Real low end with a hidden 10" sub under the rear seat.',
+        priceCents: 289900,
         items: [
           { brand: 'JL Audio', model: 'XD600/6v2', name: '6-channel amplifier', quantity: 1 },
           { brand: 'JL Audio', model: 'Stealthbox', name: 'Under-seat 10" subwoofer', quantity: 1 },
@@ -124,8 +116,8 @@ const SEEDS: QuoteSeed[] = [
         ],
       },
       {
-        tier: 'insane', name: 'Insane', description: 'Full front-stage rebuild with DSP tune. Show-truck sound.',
-        priceCents: 549900, recommended: false,
+        optionKind: 'addon', name: 'DSP tune + show-truck front stage', description: 'Full front-stage rebuild with a dedicated DSP tune.',
+        priceCents: 260000,
         items: [
           { brand: 'Audison', model: 'Forza AF M8.14 bit', name: 'DSP amplifier', quantity: 1 },
           { brand: 'Focal', model: 'ES 165 K2', name: 'K2 Power front stage', quantity: 1 },
@@ -155,16 +147,8 @@ const SEEDS: QuoteSeed[] = [
     },
     options: [
       {
-        tier: 'good', name: 'Good', description: 'Head unit + speaker refresh.',
-        priceCents: 149900, recommended: false,
-        items: [
-          { brand: 'Alpine', model: 'iLX-W670', name: 'CarPlay receiver', quantity: 1 },
-          { brand: 'Alpine', model: 'S-Series', name: 'Front speakers', quantity: 1 },
-        ],
-      },
-      {
-        tier: 'better', name: 'Better', description: 'Adds amp + shallow sub behind the seat.',
-        priceCents: 259900, recommended: true,
+        optionKind: 'main', name: 'Complete system', description: 'Amp + shallow sub behind the seat.',
+        priceCents: 259900,
         items: [
           { brand: 'Alpine', model: 'S-A55V', name: '5-channel amplifier', quantity: 1 },
           { brand: 'Alpine', model: 'SS-SB10', name: 'Shallow 10" loaded enclosure', quantity: 1 },
@@ -181,7 +165,7 @@ const SEEDS: QuoteSeed[] = [
       { type: 'customer_responded', daysAgo: 3, meta: { responseType: 'need_financing' } },
     ],
     responses: [
-      { type: 'need_financing', daysAgo: 3, message: 'Can I split this over a few months?', optionIndex: 1 },
+      { type: 'need_financing', daysAgo: 3, message: 'Can I split this over a few months?', optionIndex: 0 },
     ],
   },
   {
@@ -198,13 +182,8 @@ const SEEDS: QuoteSeed[] = [
     },
     options: [
       {
-        tier: 'good', name: 'Good', description: 'Amp + sub starter package.',
-        priceCents: 199900, recommended: false,
-        items: [{ brand: 'Rockford Fosgate', model: 'P300-12', name: 'Powered 12" subwoofer', quantity: 1 }],
-      },
-      {
-        tier: 'better', name: 'Better', description: 'Full four-door speaker swap with amp and sub.',
-        priceCents: 319900, recommended: true,
+        optionKind: 'main', name: 'Complete system', description: 'Full four-door speaker swap with amp and sub.',
+        priceCents: 319900,
         items: [
           { brand: 'Rockford Fosgate', model: 'T400X4ad', name: '4-channel amplifier', quantity: 1 },
           { brand: 'Rockford Fosgate', model: 'T1650', name: 'Power series speakers', quantity: 2 },
@@ -226,7 +205,7 @@ const SEEDS: QuoteSeed[] = [
       { type: 'deposit_paid', daysAgo: 7 },
       { type: 'marked_won', daysAgo: 5, meta: { wonAmountCents: 319900 } },
     ],
-    responses: [{ type: 'ready_to_book', daysAgo: 8, message: 'Saturday work for the install?', optionIndex: 1 }],
+    responses: [{ type: 'ready_to_book', daysAgo: 8, message: 'Saturday work for the install?', optionIndex: 0 }],
   },
   {
     key: 'sierra-pat',
@@ -242,21 +221,16 @@ const SEEDS: QuoteSeed[] = [
     },
     options: [
       {
-        tier: 'good', name: 'Good', description: 'Fix the flat factory sound.',
-        priceCents: 129900, recommended: false,
-        items: [{ brand: 'Kicker', model: 'CS-Series', name: 'Front + rear speakers', quantity: 1 }],
-      },
-      {
-        tier: 'better', name: 'Better', description: 'Speakers plus hideaway sub and amp.',
-        priceCents: 219900, recommended: true,
+        optionKind: 'main', name: 'Complete system', description: 'Speakers plus hideaway sub and amp.',
+        priceCents: 219900,
         items: [
           { brand: 'Kicker', model: 'Hideaway HS10', name: 'Compact powered sub', quantity: 1 },
           { brand: 'Kicker', model: 'KEY500.1', name: 'Mono amplifier', quantity: 1 },
         ],
       },
       {
-        tier: 'insane', name: 'Insane', description: 'Full custom system with DSP.',
-        priceCents: 469900, recommended: false,
+        optionKind: 'addon', name: 'Full custom system with DSP', description: 'Upgrade to a DSP 5-channel amp and a custom build.',
+        priceCents: 250000,
         items: [{ brand: 'JL Audio', model: 'VX1000/5i', name: 'DSP 5-channel amp + custom build', quantity: 1 }],
       },
     ],
@@ -281,8 +255,8 @@ const SEEDS: QuoteSeed[] = [
     },
     options: [
       {
-        tier: 'good', name: 'Good', description: 'Powered sub that fits under the seat.',
-        priceCents: 99900, recommended: true,
+        optionKind: 'main', name: 'Complete system', description: 'Powered sub that fits under the seat.',
+        priceCents: 99900,
         items: [{ brand: 'JL Audio', model: 'ACP110LG-TW1', name: 'Powered 10" Stealthbox', quantity: 1 }],
       },
     ],
@@ -304,16 +278,16 @@ const SEEDS: QuoteSeed[] = [
     },
     options: [
       {
-        tier: 'good', name: 'Good', description: 'Replace blown factory speakers, add clean power.',
-        priceCents: 164900, recommended: true,
+        optionKind: 'main', name: 'Complete system', description: 'Replace blown factory speakers, add clean power.',
+        priceCents: 164900,
         items: [
           { brand: 'Pioneer', model: 'TS-A652F', name: 'Front + rear speakers', quantity: 1 },
           { brand: 'Pioneer', model: 'GM-D8704', name: '4-channel amplifier', quantity: 1 },
         ],
       },
       {
-        tier: 'better', name: 'Better', description: 'Adds a 12" sub and sound deadening.',
-        priceCents: 264900, recommended: false,
+        optionKind: 'addon', name: '12" sub + sound deadening', description: 'Adds a loaded 12" enclosure and sound deadening.',
+        priceCents: 100000,
         items: [{ brand: 'Pioneer', model: 'TS-WX1210AH', name: 'Loaded 12" enclosure', quantity: 1 }],
       },
     ],
@@ -345,8 +319,8 @@ const SEEDS: QuoteSeed[] = [
     },
     options: [
       {
-        tier: 'good', name: 'Good', description: 'Basic sub + amp package.',
-        priceCents: 119900, recommended: true,
+        optionKind: 'main', name: 'Complete system', description: 'Basic sub + amp package.',
+        priceCents: 119900,
         items: [{ brand: 'MTX', model: 'TNP212D2', name: 'Dual 12" package with amp', quantity: 1 }],
       },
     ],
@@ -378,12 +352,12 @@ const SEEDS: QuoteSeed[] = [
       // showcases a quote carrying more than one tint entry.
       windowTints: [
         windowTintFormValuesToConfig({
-          ...createDefaultWindowTintFormValues('sedan_coupe', 'Full vehicle, ceramic'),
+          ...createDefaultWindowTintFormValues('coupe', 'Full vehicle, ceramic'),
           tintType: 'ceramic',
           price: '380',
           removeOldTint: true,
           removeOldTintPrice: '50',
-          windows: createDefaultWindowTintFormValues('sedan_coupe').windows.map((w) => ({
+          windows: createDefaultWindowTintFormValues('coupe').windows.map((w) => ({
             ...w,
             vltPercent: w.position === 'back_glass' ? 5 : 35,
           })),
@@ -392,10 +366,10 @@ const SEEDS: QuoteSeed[] = [
           windshieldPrice: '',
         }),
         windowTintFormValuesToConfig({
-          ...createDefaultWindowTintFormValues('sedan_coupe', 'Front two only, normal film'),
+          ...createDefaultWindowTintFormValues('coupe', 'Front two only, normal film'),
           tintType: 'normal',
           price: '150',
-          windows: createDefaultWindowTintFormValues('sedan_coupe').windows.map((w) => ({
+          windows: createDefaultWindowTintFormValues('coupe').windows.map((w) => ({
             ...w,
             included: w.position === 'front_left' || w.position === 'front_right',
             vltPercent: w.position === 'front_left' || w.position === 'front_right' ? 35 : null,
@@ -405,16 +379,16 @@ const SEEDS: QuoteSeed[] = [
     },
     options: [
       {
-        tier: 'better', name: 'Better', description: 'Keep the factory dash, upgrade everything behind it.',
-        priceCents: 234900, recommended: true,
+        optionKind: 'main', name: 'Complete system', description: 'Keep the factory dash, upgrade everything behind it.',
+        priceCents: 234900,
         items: [
           { brand: 'Morel', model: 'Maximo Ultra 602', name: 'Component front stage', quantity: 1 },
           { brand: 'Helix', model: 'M FOUR DSP', name: 'DSP amplifier', quantity: 1 },
         ],
       },
       {
-        tier: 'insane', name: 'Insane', description: 'Competition-grade front stage and twin 10s.',
-        priceCents: 499900, recommended: false,
+        optionKind: 'addon', name: 'Competition-grade front stage', description: 'Upgrade to a flagship front stage build with twin 10s.',
+        priceCents: 265000,
         items: [{ brand: 'Focal', model: 'Utopia M', name: 'Flagship front stage build', quantity: 1 }],
       },
     ],
@@ -498,6 +472,7 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
       emailFollowUpAllowed: seed.quote.emailFollowUpAllowed,
       wonAmountCents: seed.quote.wonAmountCents,
       windowTints: seed.quote.windowTints ?? [],
+      showFullAddonTotal: false,
       createdAt: created,
       updatedAt: created,
     })
@@ -507,7 +482,7 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
       options.push({
         id: optionId,
         quoteId,
-        tier: opt.tier,
+        optionKind: opt.optionKind,
         name: opt.name,
         description: opt.description,
         configId: null,
@@ -516,7 +491,6 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
         depositPaymentMethod: shop.defaultPaymentMethod,
         depositPaymentHandle: shop.defaultPaymentHandle,
         depositAmountCents: computeDefaultDepositCents(opt.priceCents),
-        recommended: opt.recommended,
         position: i,
         items: opt.items.map((item, j) => ({
           id: `demo-item-${seed.key}-${i}-${j}`,
@@ -527,6 +501,7 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
           quantity: item.quantity,
           description: null,
           category: null,
+          imageUrl: null,
           position: j,
         })),
       })

@@ -48,7 +48,8 @@ have) — see each phase below for what's ported vs. built new.
   at once — a plain client-side read-then-write would race.
 - **`invoices`/`invoice_items` and `outgoing_orders`/`outgoing_order_items`
   tables** (schema only this phase — no UI yet, that's Phase 2/3):
-  - `invoices` is flat (no tiers, unlike `quotes`/`quote_options`) since by
+  - `invoices` is flat (a single priced line-item list, not even a main
+    package + add-ons the way `quotes`/`quote_options` now works) since by
     the time something is an invoice, staff have already decided what's
     being sold. Sequential, human-friendly `invoice_number` per shop
     (assigned by a trigger using an advisory lock so concurrent inserts

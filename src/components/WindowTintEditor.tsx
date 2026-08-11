@@ -1,6 +1,7 @@
-import type { TintBodyStyle, TintType, TintWindowPosition, WindowTintWindow } from '../types'
+import type { TintType, TintWindowPosition, WindowTintWindow } from '../types'
 import {
   BODY_STYLE_INFO,
+  BODY_STYLE_ORDER,
   TINT_TYPE_INFO,
   TINT_VLT_PERCENTS,
   TINT_WINDOW_LABELS,
@@ -9,6 +10,8 @@ import {
   windowsForBodyStyle,
   type WindowTintFormValues,
 } from '../lib/windowTint'
+import { TINT_VISUAL_SLOT_POSITIONS, type TintVisualSlot } from '../lib/carDiagrams'
+import { TintDiagram } from './TintDiagram'
 import { formatCurrency } from '../lib/format'
 import { Field, Input } from './ui'
 
@@ -19,39 +22,7 @@ interface WindowTintEditorProps {
   onChange: (next: WindowTintFormValues) => void
 }
 
-const BODY_STYLES = Object.keys(BODY_STYLE_INFO) as TintBodyStyle[]
 const TINT_TYPES = Object.keys(TINT_TYPE_INFO) as TintType[]
-
-// Rough, illustrative top-down outlines — not to scale. Purely a visual
-// backdrop for the window tiles, so the diagram reads as "a car" at a
-// glance rather than a precise technical drawing.
-const CAR_PATHS: Record<TintBodyStyle, string> = {
-  sedan_coupe:
-    'M40 60 Q40 30 70 28 L130 28 Q160 30 165 55 Q170 60 165 68 L160 90 Q155 100 140 100 L60 100 Q45 100 40 90 Z',
-  suv_wagon_van: 'M30 55 Q30 25 60 24 L145 24 Q175 26 178 55 L178 92 Q178 100 168 100 L38 100 Q30 100 30 90 Z',
-}
-
-// Percent coordinates within the diagram's viewBox, per window position —
-// presentation-only, kept out of src/lib/windowTint.ts which stays
-// framework-agnostic.
-const WINDOW_LAYOUT: Record<TintBodyStyle, Partial<Record<TintWindowPosition, { top: string; left: string }>>> = {
-  sedan_coupe: {
-    front_left: { top: '30%', left: '20%' },
-    front_right: { top: '30%', left: '80%' },
-    rear_left: { top: '58%', left: '16%' },
-    rear_right: { top: '58%', left: '84%' },
-    back_glass: { top: '82%', left: '50%' },
-  },
-  suv_wagon_van: {
-    front_left: { top: '28%', left: '18%' },
-    front_right: { top: '28%', left: '82%' },
-    rear_left: { top: '50%', left: '14%' },
-    rear_right: { top: '50%', left: '86%' },
-    rear_quarter_left: { top: '72%', left: '18%' },
-    rear_quarter_right: { top: '72%', left: '82%' },
-    back_glass: { top: '90%', left: '50%' },
-  },
-}
 
 function PercentPills({
   value,
@@ -119,6 +90,23 @@ export default function WindowTintEditor({ index, value, onChange }: WindowTintE
     onChange({ ...value, windows: value.windows.map((w) => (w.position === position ? { ...w, ...patch } : w)) })
   }
 
+  // Toggling a slot on the diagram flips every physical window at that
+  // visual position together (see TINT_VISUAL_SLOT_POSITIONS — a single
+  // silhouette can't show driver vs. passenger side separately). All-on
+  // wins ties: if any window at this position is currently included, the
+  // click turns them all off; otherwise it turns them all on, keeping
+  // whatever % each one already had.
+  const toggleSlot = (slot: TintVisualSlot) => {
+    const positions = TINT_VISUAL_SLOT_POSITIONS[slot]
+    const anyIncluded = value.windows.some((w) => positions.includes(w.position) && w.included)
+    onChange({
+      ...value,
+      windows: value.windows.map((w) =>
+        positions.includes(w.position) ? { ...w, included: !anyIncluded, vltPercent: !anyIncluded ? w.vltPercent : null } : w,
+      ),
+    })
+  }
+
   const applyToAll = (percent: number) => {
     onChange({ ...value, windows: value.windows.map((w) => (w.included ? { ...w, vltPercent: percent } : w)) })
   }
@@ -129,27 +117,22 @@ export default function WindowTintEditor({ index, value, onChange }: WindowTintE
     <div className="space-y-4">
       <div>
         <p className="mb-1.5 text-sm font-semibold text-ink">What kind of vehicle is this?</p>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {BODY_STYLES.map((style) => (
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+          {BODY_STYLE_ORDER.map((style) => (
             <button
               key={style}
               type="button"
               onClick={() => onChange({ ...value, bodyStyle: style, windows: windowsForBodyStyle(style) })}
               aria-pressed={bodyStyle === style}
-              className={`rounded-xl border-2 p-4 text-left transition-colors ${
+              className={`rounded-xl border-2 p-2 text-center transition-colors ${
                 bodyStyle === style ? 'border-brand bg-blue-50' : 'border-zinc-200 hover:border-zinc-300'
               }`}
             >
-              <p className="text-base font-bold text-ink">{BODY_STYLE_INFO[style].label}</p>
-              <p className="text-sm text-zinc-500">{BODY_STYLE_INFO[style].windowCountLabel}</p>
+              <TintDiagram bodyStyle={style} windows={windowsForBodyStyle(style)} className="h-10 w-full" />
+              <p className="mt-1 text-xs font-bold text-ink">{BODY_STYLE_INFO[style].label}</p>
             </button>
           ))}
         </div>
-        {bodyStyle === 'sedan_coupe' ? (
-          <p className="mt-2 text-sm text-zinc-500">
-            Some 2-door vehicles don&apos;t have all these windows — leave the ones that don&apos;t apply toggled off.
-          </p>
-        ) : null}
       </div>
 
       <div>
@@ -187,32 +170,9 @@ export default function WindowTintEditor({ index, value, onChange }: WindowTintE
         <PercentPills value={null} onChange={applyToAll} label="Apply one percentage to all windows" />
       </div>
 
-      <div className="relative mx-auto hidden aspect-[16/10] w-full max-w-sm sm:block">
-        <svg viewBox="0 0 200 120" className="absolute inset-0 h-full w-full" aria-hidden="true">
-          <path d={CAR_PATHS[bodyStyle]} fill="#f4f4f5" stroke="#d4d4d8" strokeWidth="2" />
-        </svg>
-        {value.windows.map((w) => {
-          const pos = WINDOW_LAYOUT[bodyStyle][w.position]
-          if (!pos) return null
-          return (
-            <button
-              key={w.position}
-              type="button"
-              onClick={() => updateWindow(w.position, { included: !w.included, vltPercent: !w.included ? w.vltPercent : null })}
-              aria-pressed={w.included}
-              aria-label={`${TINT_WINDOW_LABELS[w.position]} — ${w.included ? 'included' : 'not included'}`}
-              title={TINT_WINDOW_LABELS[w.position]}
-              style={{
-                top: pos.top,
-                left: pos.left,
-                opacity: w.included ? 1 - (w.vltPercent ?? 0) / 100 / 1.4 : 0.25,
-              }}
-              className="absolute flex h-9 w-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-md border-2 border-white bg-brand text-[11px] font-bold text-white shadow"
-            >
-              {w.included && w.vltPercent ? w.vltPercent : ''}
-            </button>
-          )
-        })}
+      <div>
+        <p className="mb-1.5 text-sm font-semibold text-ink">Tap a window to include or skip it</p>
+        <TintDiagram bodyStyle={bodyStyle} windows={value.windows} onToggleSlot={toggleSlot} className="mx-auto block max-h-56 w-full max-w-md" />
       </div>
 
       <div className="space-y-2">

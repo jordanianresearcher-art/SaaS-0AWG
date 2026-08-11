@@ -72,7 +72,7 @@ describe('DemoRepository', () => {
       quote: { internalNotes: null, expirationDate: null, nextFollowUpAt: null, windowTints: [] },
       options: [
         {
-          tier: 'good',
+          optionKind: 'main',
           name: 'Good',
           description: '',
           configId: 'bass_2x8',
@@ -81,8 +81,7 @@ describe('DemoRepository', () => {
           depositPaymentMethod: null,
           depositPaymentHandle: null,
           depositAmountCents: null,
-          recommended: true,
-          items: [{ brand: 'Kicker', model: 'X', name: 'Sub', quantity: 2, description: null, category: 'subwoofer' }],
+          items: [{ brand: 'Kicker', model: 'X', name: 'Sub', quantity: 2, description: null, category: 'subwoofer', imageUrl: null }],
         },
       ],
     })

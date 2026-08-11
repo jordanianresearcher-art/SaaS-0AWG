@@ -1,13 +1,35 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
-import { MapPin, Phone, Mail, BadgeCheck, CreditCard, Check } from 'lucide-react'
+import { MapPin, Phone, Mail, CreditCard, Check } from 'lucide-react'
 import type { PublicQuote, ResponseType } from '../types'
 import { resolvePublicQuoteApi, type PublicQuoteApi } from '../data/publicQuote'
 import { RESPONSE_CONFIG } from '../lib/status'
 import { formatCurrency, formatDate } from '../lib/format'
 import { buildPaymentUrl, paymentInstructions } from '../lib/paymentMethods'
 import { summarizeWindowTint } from '../lib/windowTint'
+import { addonOptions, computeAddonBreakdown, fullTotalCents, mainOption } from '../lib/quotePricing'
+import { TintDiagram } from '../components/TintDiagram'
 import { Button, LoadingBlock } from '../components/ui'
+
+/** A row of small product thumbnails/names — no per-item price (see docs/QUOTE_TRACKING.md's email section: the shop wants the customer to see pictures of what they're getting without a line-by-line price breakdown, just the option total). */
+function ItemPreviewList({ items }: { items: PublicQuote['options'][number]['items'] }) {
+  if (items.length === 0) return null
+  return (
+    <ul className="mt-3 flex flex-wrap gap-2 border-t border-zinc-100 pt-3">
+      {items.map((item, i) => (
+        <li key={i} className="flex items-center gap-2 rounded-full border border-zinc-200 py-1 pr-3 pl-1 text-sm text-zinc-700">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-zinc-100">
+            {item.imageUrl ? <img src={item.imageUrl} alt="" className="h-full w-full object-cover" /> : null}
+          </span>
+          {item.quantity > 1 ? `${item.quantity}× ` : ''}
+          {[item.brand, item.model].filter(Boolean).join(' ')}
+          {item.brand || item.model ? ' — ' : ''}
+          {item.name.trim() || 'Item'}
+        </li>
+      ))}
+    </ul>
+  )
+}
 
 // What the customer sees. No login, no jargon, big buttons.
 
@@ -141,6 +163,17 @@ export default function PublicQuotePage() {
     return <CenteredNote title="Something went wrong" body="We couldn't load your quote right now. Please try again in a minute, or call the shop." />
   }
 
+  const main = mainOption(quote.options)
+  const addons = addonOptions(quote.options)
+  const addonBreakdown = computeAddonBreakdown(quote.options)
+  const mainDepositUrl =
+    main?.depositPaymentMethod && main.depositPaymentHandle
+      ? buildPaymentUrl(main.depositPaymentMethod, main.depositPaymentHandle, main.depositAmountCents)
+      : null
+  const mainDepositInstructions =
+    main?.depositPaymentMethod && main.depositPaymentHandle ? paymentInstructions(main.depositPaymentMethod, main.depositPaymentHandle) : null
+  const mainDepositAmountLabel = main?.depositAmountCents != null ? formatCurrency(main.depositAmountCents) : null
+
   return (
     <div className="min-h-screen bg-zinc-50 pb-16">
       {/* Shop header */}
@@ -180,108 +213,81 @@ export default function PublicQuotePage() {
           ) : null}
         </section>
 
-        {/* Options */}
-        <section aria-label="Quote options" className="space-y-4">
+        {/* Main package + optional add-ons — replaces the old good/better/insane
+            tier grid with one main price plus named upsells, each priced as
+            the incremental cost on top of it (see src/lib/quotePricing.ts). */}
+        <section aria-label="Your quote" className="space-y-4">
           {quote.options.length === 0 ? (
             <p className="text-center text-base text-zinc-500">Pricing for this quote is coming soon.</p>
           ) : null}
-          {quote.options.map((option) => {
-            const depositUrl =
-              option.depositPaymentMethod && option.depositPaymentHandle
-                ? buildPaymentUrl(option.depositPaymentMethod, option.depositPaymentHandle, option.depositAmountCents)
-                : null
-            const depositInstructions =
-              option.depositPaymentMethod && option.depositPaymentHandle
-                ? paymentInstructions(option.depositPaymentMethod, option.depositPaymentHandle)
-                : null
-            const depositAmountLabel = option.depositAmountCents != null ? formatCurrency(option.depositAmountCents) : null
-
-            return (
-              <div
-                key={option.id}
-                className="rounded-2xl border bg-white p-5 shadow-sm"
-                style={option.recommended ? { borderColor: color, borderWidth: 2 } : { borderColor: '#e4e4e7' }}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h2 className="text-xl font-black text-ink">{option.name.trim() || 'Option'}</h2>
-                      {option.recommended ? (
-                        <span
-                          className="flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold text-white"
-                          style={{ backgroundColor: color }}
-                        >
-                          <BadgeCheck className="h-3.5 w-3.5" aria-hidden="true" /> Shop pick
-                        </span>
-                      ) : null}
-                    </div>
-                    {option.description ? <p className="mt-1 text-base text-zinc-600">{option.description}</p> : null}
-                  </div>
-                  <p className="shrink-0 text-2xl font-black text-ink">{formatCurrency(option.priceCents)}</p>
+          {main ? (
+            <div className="rounded-2xl border-2 bg-white p-5 shadow-sm" style={{ borderColor: color }}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-black text-ink">{main.name.trim() || 'Complete system'}</h2>
+                  {main.description ? <p className="mt-1 text-base text-zinc-600">{main.description}</p> : null}
                 </div>
-                <ul className="mt-3 space-y-1.5 border-t border-zinc-100 pt-3">
-                  {option.items.map((item, i) => (
-                    <li key={i} className="text-base text-zinc-700">
-                      {item.quantity > 1 ? `${item.quantity}× ` : ''}
-                      {[item.brand, item.model].filter(Boolean).join(' ')}
-                      {item.brand || item.model ? ' — ' : ''}
-                      {item.name.trim() || 'Item'}
-                    </li>
-                  ))}
-                </ul>
-                <p className="mt-2 text-sm font-medium text-zinc-500">
-                  {option.laborIncluded ? '✓ Professional installation included' : 'Installation billed separately'}
-                </p>
-                {quote.options.length > 1 ? (
-                  selectedOption === option.id ? (
-                    <p
-                      className="mt-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border-2 text-base font-bold"
-                      style={{ borderColor: color, color }}
-                    >
-                      <Check className="h-5 w-5" aria-hidden="true" /> Selected
-                    </p>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setSelectedOption(option.id)}
-                      className="mt-3 min-h-12 w-full rounded-xl border-2 border-zinc-300 text-base font-bold text-ink hover:border-zinc-400"
-                    >
-                      Choose this option
-                    </button>
-                  )
-                ) : null}
-                {depositUrl ? (
-                  <div className="mt-3 space-y-1.5">
-                    {depositAmountLabel ? (
-                      <p className="text-sm font-semibold text-zinc-600">
-                        {depositAmountLabel} deposit
-                        {option.depositPaymentMethod === 'venmo'
-                          ? " — tap Pay, then enter the amount if it isn't already filled in"
-                          : ''}
-                      </p>
-                    ) : null}
-                    <a
-                      href={depositUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex min-h-12 w-full items-center justify-center rounded-xl text-base font-bold text-white"
-                      style={{ backgroundColor: color }}
-                    >
-                      Hold my spot with a deposit
-                    </a>
-                  </div>
-                ) : depositInstructions ? (
-                  <div
-                    className="mt-3 rounded-xl border-2 p-3 text-center text-base font-semibold"
-                    style={{ borderColor: color, color }}
-                  >
-                    {depositAmountLabel ? `${depositAmountLabel} deposit — ` : ''}
-                    {depositInstructions}
-                  </div>
-                ) : null}
+                <p className="shrink-0 text-2xl font-black text-ink">{formatCurrency(main.priceCents)}</p>
               </div>
-            )
-          })}
+              <ItemPreviewList items={main.items} />
+              <p className="mt-2 text-sm font-medium text-zinc-500">
+                {main.laborIncluded ? '✓ Professional installation included' : 'Installation billed separately'}
+              </p>
+              {mainDepositUrl ? (
+                <div className="mt-3 space-y-1.5">
+                  {mainDepositAmountLabel ? (
+                    <p className="text-sm font-semibold text-zinc-600">
+                      {mainDepositAmountLabel} deposit
+                      {main.depositPaymentMethod === 'venmo' ? " — tap Pay, then enter the amount if it isn't already filled in" : ''}
+                    </p>
+                  ) : null}
+                  <a
+                    href={mainDepositUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex min-h-12 w-full items-center justify-center rounded-xl text-base font-bold text-white"
+                    style={{ backgroundColor: color }}
+                  >
+                    Hold my spot with a deposit
+                  </a>
+                </div>
+              ) : mainDepositInstructions ? (
+                <div className="mt-3 rounded-xl border-2 p-3 text-center text-base font-semibold" style={{ borderColor: color, color }}>
+                  {mainDepositAmountLabel ? `${mainDepositAmountLabel} deposit — ` : ''}
+                  {mainDepositInstructions}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {addons.length > 0 ? (
+            <div className="space-y-3">
+              <h3 className="text-lg font-black text-ink">Optional add-ons</h3>
+              {addonBreakdown.map(({ option, addonPriceCents, totalWithAddonCents }) => (
+                <div key={option.id} className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-base font-bold text-ink">{option.name.trim() || 'Add-on'}</p>
+                      {option.description ? <p className="text-sm text-zinc-600">{option.description}</p> : null}
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="text-lg font-black text-ink">+{formatCurrency(addonPriceCents)}</p>
+                      <p className="text-xs font-medium text-zinc-500">total {formatCurrency(totalWithAddonCents)}</p>
+                    </div>
+                  </div>
+                  <ItemPreviewList items={option.items} />
+                </div>
+              ))}
+              {quote.showFullAddonTotal ? (
+                <div className="rounded-2xl border-2 p-4 text-center" style={{ borderColor: color }}>
+                  <p className="text-sm font-bold tracking-wide text-zinc-600 uppercase">Everything included</p>
+                  <p className="text-2xl font-black" style={{ color }}>
+                    {formatCurrency(fullTotalCents(quote.options))}
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </section>
 
         {/* Financing — a real, extremely-easy, one-tap action. Not buried
@@ -326,16 +332,19 @@ export default function PublicQuotePage() {
                 summary.windshield ? `windshield ${summary.windshield.vltPercent}%` : null,
               ].filter(Boolean)
               return (
-                <div key={i} className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-                  <p className="text-base font-bold text-ink">{summary.name}</p>
-                  <p className="mt-0.5 text-sm text-zinc-600">
-                    {summary.bodyStyleLabel} &middot; {summary.tintTypeLabel}
-                    {percentLabel ? ` · ${percentLabel}` : ''}
-                    {extras.length > 0 ? ` · ${extras.join(', ')}` : ''}
-                  </p>
-                  {summary.totalCents > 0 ? (
-                    <p className="mt-1 text-sm font-semibold text-zinc-700">Tint total: {formatCurrency(summary.totalCents)}</p>
-                  ) : null}
+                <div key={i} className="flex flex-wrap items-center gap-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                  <TintDiagram bodyStyle={tint.bodyStyle} windows={tint.windows} className="h-20 w-32 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-base font-bold text-ink">{summary.name}</p>
+                    <p className="mt-0.5 text-sm text-zinc-600">
+                      {summary.bodyStyleLabel} &middot; {summary.tintTypeLabel}
+                      {percentLabel ? ` · ${percentLabel}` : ''}
+                      {extras.length > 0 ? ` · ${extras.join(', ')}` : ''}
+                    </p>
+                    {summary.totalCents > 0 ? (
+                      <p className="mt-1 text-sm font-semibold text-zinc-700">Tint total: {formatCurrency(summary.totalCents)}</p>
+                    ) : null}
+                  </div>
                 </div>
               )
             })}

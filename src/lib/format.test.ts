@@ -86,22 +86,21 @@ describe('customerDisplayName', () => {
 })
 
 describe('quoteValueCents', () => {
-  it('uses the recommended option', () => {
+  it('uses the main option, ignoring addon prices', () => {
     expect(
       quoteValueCents([
-        { priceCents: 100, recommended: false },
-        { priceCents: 200, recommended: true },
-        { priceCents: 500, recommended: false },
+        { priceCents: 200, optionKind: 'main' },
+        { priceCents: 500, optionKind: 'addon' },
       ]),
     ).toBe(200)
   })
-  it('falls back to the highest price when nothing is recommended', () => {
+  it('falls back to the first option when nothing is marked main', () => {
     expect(
       quoteValueCents([
-        { priceCents: 100, recommended: false },
-        { priceCents: 500, recommended: false },
+        { priceCents: 100, optionKind: 'addon' },
+        { priceCents: 500, optionKind: 'addon' },
       ]),
-    ).toBe(500)
+    ).toBe(100)
   })
   it('returns 0 for no options', () => {
     expect(quoteValueCents([])).toBe(0)

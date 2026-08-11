@@ -12,10 +12,11 @@ import {
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { addDays, format } from 'date-fns'
-import { Check, LayoutGrid, Package, Plus, Trash2, TriangleAlert } from 'lucide-react'
+import { Check, LayoutGrid, Package, Plus, Sparkles, Star, Trash2, TriangleAlert } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
 import { Button, Card, Field, Input, Modal, Select, Textarea } from '../../components/ui'
+import { CategoryIcon } from '../../components/categoryIcon'
 import WindowTintEditor from '../../components/WindowTintEditor'
 import PackageBuilder, { createEmptyPackageBuilderValue, type PackageBuilderValue } from '../../components/PackageBuilder'
 import { getConfiguration } from '../../lib/audioConfigs'
@@ -29,7 +30,7 @@ import {
   isBuilderComplete,
   resolveBuilderCatalog,
 } from '../../lib/packageBuilder'
-import { parseDollarsToCents } from '../../lib/format'
+import { formatCurrency, parseDollarsToCents } from '../../lib/format'
 import { COMMON_MAKES, OTHER_MAKE, VEHICLE_YEARS, fetchModelsForMakeYear } from '../../lib/vehicleData'
 import { DEFAULT_DEPOSIT_PERCENT, PAYMENT_METHOD_INFO, computeDefaultDepositCents } from '../../lib/paymentMethods'
 import {
@@ -39,7 +40,7 @@ import {
   windowTintFormValuesToConfig,
 } from '../../lib/windowTint'
 import type { NewQuoteInput } from '../../data/repository'
-import type { CatalogItem, PaymentMethod, ProductCategory, QuoteBundle, Tier } from '../../types'
+import type { CatalogItem, PaymentMethod, ProductCategory, QuoteBundle } from '../../types'
 
 const PAYMENT_METHODS = Object.keys(PAYMENT_METHOD_INFO) as PaymentMethod[]
 
@@ -58,30 +59,29 @@ const itemSchema = z.object({
   // Set when this row came from the drag-and-drop package builder, so it can fill a
   // configuration slot again later (e.g. duplicating the quote). Manual/catalog rows leave it null.
   category: z.string().nullable(),
+  // Snapshotted from the catalog item/candidate this was added from — lets
+  // the customer email show a picture of what they're getting. Null for a
+  // freehand-typed row; never user-editable directly on this form.
+  imageUrl: z.string().nullable(),
 })
 
-const optionSchema = z
+const depositFields = {
+  depositAmount: z.string().refine((v) => v.trim() === '' || parseDollarsToCents(v) !== null, 'Enter a valid dollar amount'),
+  depositOverride: z.boolean(),
+  depositMethod: z.enum(['none', 'link', 'zelle', 'cashapp', 'venmo', 'paypal']),
+  depositHandle: z.string(),
+}
+
+// The one main package on the quote — full treatment: deposit config, the
+// drag-and-drop builder, a configId link back to a universal configuration.
+const mainOptionSchema = z
   .object({
-    tier: z.enum(['good', 'better', 'insane', 'custom']),
-    // Blank falls back to the tier's default label ("Good"/"Better"/…) at
-    // display time — see optionDisplayName below.
     name: z.string(),
     description: z.string(),
-    // Optional like everything else here — blank is treated as $0 downstream
-    // (see onSubmit's parseDollarsToCents(opt.price) ?? 0), same as the
-    // deposit-amount field already did.
     price: optionalDollarSchema,
     laborIncluded: z.boolean(),
-    depositAmount: z
-      .string()
-      .refine((v) => v.trim() === '' || parseDollarsToCents(v) !== null, 'Enter a valid dollar amount'),
-    depositOverride: z.boolean(),
-    depositMethod: z.enum(['none', 'link', 'zelle', 'cashapp', 'venmo', 'paypal']),
-    depositHandle: z.string(),
-    // No minimum — an option can be saved with zero line items (e.g. a
-    // flat-fee/labor-only quote) and products added later.
+    ...depositFields,
     items: z.array(itemSchema),
-    // Which universal configuration (e.g. 'bass_2x8') this option was built against, if any.
     configId: z.string().nullable(),
   })
   .superRefine((values, ctx) => {
@@ -102,6 +102,18 @@ const optionSchema = z
       }
     }
   })
+
+// An optional named upsell — priced as the *incremental* cost on top of
+// the main package (see OptionKind in types.ts), not a full alternative
+// price the way an old "tier" was. Deliberately lighter than the main
+// option: no deposit config, no drag-and-drop builder — just what it is,
+// what it costs extra, and (optionally) the products behind it.
+const addonOptionSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  price: optionalDollarSchema,
+  items: z.array(itemSchema),
+})
 
 const tintPercentSchema = z
   .number()
@@ -128,7 +140,7 @@ const windowTintSchema = z.object({
   // Blank falls back to a generic "Tint option" label at display time —
   // not required, matching how little else on this form is required.
   name: z.string(),
-  bodyStyle: z.enum(['sedan_coupe', 'suv_wagon_van']),
+  bodyStyle: z.enum(['coupe', 'sedan', 'truck_single_cab', 'truck_crew_cab', 'suv_4_window', 'suv_6_window', 'minivan']),
   tintType: z.enum(['normal', 'ceramic']),
   windows: z.array(tintWindowSchema),
   price: optionalDollarSchema,
@@ -163,8 +175,9 @@ const schema = z
     expirationDate: z.string(),
     internalNotes: z.string(),
     nextFollowUpAt: z.string(),
-    options: z.array(optionSchema).max(3, 'No more than three options'),
-    recommendedIndex: z.coerce.number().int().min(0),
+    main: mainOptionSchema,
+    addons: z.array(addonOptionSchema).max(8, 'No more than eight add-ons'),
+    showFullAddonTotal: z.boolean(),
     windowTints: z.array(windowTintSchema).max(3, 'No more than three tint options'),
   })
   .superRefine((values, ctx) => {
@@ -183,18 +196,15 @@ const schema = z
   })
 
 type FormValues = z.infer<typeof schema>
+type ItemFormValues = FormValues['main']['items'][number]
 
-const TIER_DEFAULTS: Array<{ tier: Tier; name: string }> = [
-  { tier: 'good', name: 'Good' },
-  { tier: 'better', name: 'Better' },
-  { tier: 'insane', name: 'Insane' },
-]
+function emptyItem(): ItemFormValues {
+  return { brand: '', model: '', name: '', quantity: 1, category: null, imageUrl: null }
+}
 
-function emptyOption(index: number): FormValues['options'][number] {
-  const preset = TIER_DEFAULTS[index] ?? { tier: 'custom' as Tier, name: 'Option' }
+function emptyMainOption(): FormValues['main'] {
   return {
-    tier: preset.tier,
-    name: preset.name,
+    name: 'Complete system',
     description: '',
     price: '',
     laborIncluded: true,
@@ -202,51 +212,65 @@ function emptyOption(index: number): FormValues['options'][number] {
     depositOverride: false,
     depositMethod: 'none',
     depositHandle: '',
-    items: [{ brand: '', model: '', name: '', quantity: 1, category: null }],
+    items: [emptyItem()],
     configId: null,
   }
 }
 
-function optionsFromBundle(bundle: QuoteBundle): FormValues['options'] {
-  return bundle.options.map((o) => ({
-    tier: o.tier,
-    name: o.name,
-    description: o.description,
-    price: (o.priceCents / 100).toString(),
-    laborIncluded: o.laborIncluded,
-    depositAmount: o.depositAmountCents != null ? (o.depositAmountCents / 100).toString() : '',
+function emptyAddon(): FormValues['addons'][number] {
+  return { name: '', description: '', price: '', items: [] }
+}
+
+function itemsFromBundle(items: QuoteBundle['options'][number]['items']): ItemFormValues[] {
+  return items.map((i) => ({ brand: i.brand ?? '', model: i.model ?? '', name: i.name, quantity: i.quantity, category: i.category, imageUrl: i.imageUrl }))
+}
+
+function mainFromBundle(bundle: QuoteBundle): FormValues['main'] {
+  const main = bundle.options.find((o) => o.optionKind === 'main') ?? bundle.options[0]
+  if (!main) return emptyMainOption()
+  return {
+    name: main.name,
+    description: main.description,
+    price: (main.priceCents / 100).toString(),
+    laborIncluded: main.laborIncluded,
+    depositAmount: main.depositAmountCents != null ? (main.depositAmountCents / 100).toString() : '',
     // Verbatim carryover, matching today's behavior: a resolved deposit method
     // always wins over the shop's *current* default when duplicating; if the
     // original had none, leave it unchecked so submit-time resolution falls
     // back to the shop's live current default (not a frozen historical one).
-    depositOverride: o.depositPaymentMethod !== null,
-    depositMethod: o.depositPaymentMethod ?? 'none',
-    depositHandle: o.depositPaymentHandle ?? '',
-    items: o.items.map((i) => ({ brand: i.brand ?? '', model: i.model ?? '', name: i.name, quantity: i.quantity, category: i.category })),
-    configId: o.configId,
-  }))
+    depositOverride: main.depositPaymentMethod !== null,
+    depositMethod: main.depositPaymentMethod ?? 'none',
+    depositHandle: main.depositPaymentHandle ?? '',
+    items: itemsFromBundle(main.items),
+    configId: main.configId,
+  }
 }
 
-/** Router state shape the scan workspace hands off when staff turn a scan session into a quote instead of an invoice — see ScanWorkspacePage's sendCartToQuote. */
+function addonsFromBundle(bundle: QuoteBundle): FormValues['addons'] {
+  const main = bundle.options.find((o) => o.optionKind === 'main') ?? bundle.options[0]
+  return bundle.options
+    .filter((o) => o !== main)
+    .map((o) => ({ name: o.name, description: o.description, price: (o.priceCents / 100).toString(), items: itemsFromBundle(o.items) }))
+}
+
+/** Router state shape the scan workspace hands off when staff turn a scan session into a quote instead of an invoice. */
 export interface ScanQuotePrefill {
-  items: Array<{ brand: string | null; model: string | null; name: string; quantity: number; category: ProductCategory | null }>
-  /** The cart's subtotal, seeded into the option's price field as a starting point — staff can still adjust it before saving. */
+  items: Array<{ brand: string | null; model: string | null; name: string; quantity: number; category: ProductCategory | null; imageUrl?: string | null }>
+  /** The cart's subtotal, seeded into the main option's price field as a starting point — staff can still adjust it before saving. */
   priceCents: number
 }
 
-function optionsFromScan(prefill: ScanQuotePrefill): FormValues['options'] {
-  const base = emptyOption(0)
-  return [
-    {
-      ...base,
-      name: 'Scanned items',
-      price: (prefill.priceCents / 100).toString(),
-      items:
-        prefill.items.length > 0
-          ? prefill.items.map((i) => ({ brand: i.brand ?? '', model: i.model ?? '', name: i.name, quantity: i.quantity, category: i.category }))
-          : base.items,
-    },
-  ]
+function mainFromScan(prefill: ScanQuotePrefill): FormValues['main'] {
+  const base = emptyMainOption()
+  return {
+    ...base,
+    name: 'Scanned items',
+    price: (prefill.priceCents / 100).toString(),
+    items:
+      prefill.items.length > 0
+        ? prefill.items.map((i) => ({ brand: i.brand ?? '', model: i.model ?? '', name: i.name, quantity: i.quantity, category: i.category, imageUrl: i.imageUrl ?? null }))
+        : base.items,
+  }
 }
 
 export default function NewQuotePage() {
@@ -314,8 +338,9 @@ export default function NewQuotePage() {
           expirationDate: defaultExpiration,
           internalNotes: '',
           nextFollowUpAt: '',
-          options: optionsFromBundle(duplicateFrom),
-          recommendedIndex: Math.max(0, duplicateFrom.options.findIndex((o) => o.recommended)),
+          main: mainFromBundle(duplicateFrom),
+          addons: addonsFromBundle(duplicateFrom),
+          showFullAddonTotal: duplicateFrom.quote.showFullAddonTotal,
           windowTints: duplicateFrom.quote.windowTints.map(windowTintConfigToFormValues),
         }
       : {
@@ -331,13 +356,14 @@ export default function NewQuotePage() {
           expirationDate: defaultExpiration,
           internalNotes: '',
           nextFollowUpAt: '',
-          options: fromScan ? optionsFromScan(fromScan) : [],
-          recommendedIndex: 0,
+          main: fromScan ? mainFromScan(fromScan) : emptyMainOption(),
+          addons: [],
+          showFullAddonTotal: false,
           windowTints: [],
         },
   })
 
-  const { fields: optionFields, append, remove } = useFieldArray({ control, name: 'options' })
+  const { fields: addonFields, append: appendAddon, remove: removeAddon } = useFieldArray({ control, name: 'addons' })
   const { fields: tintFields, append: appendTint, remove: removeTint } = useFieldArray({ control, name: 'windowTints' })
 
   const watchedMake = watch('vehicleMake')
@@ -347,7 +373,31 @@ export default function NewQuotePage() {
   const [vehicleOpen, setVehicleOpen] = useState(() =>
     Boolean(duplicateFrom && (duplicateFrom.customer.vehicleYear || duplicateFrom.customer.vehicleMake || duplicateFrom.customer.vehicleModel)),
   )
+
+  const mainPriceValue = useWatch({ control, name: 'main.price' })
+  const addonFieldValues = useWatch({ control, name: 'addons' })
+  const mainPriceCentsLive = parseDollarsToCents(mainPriceValue) ?? 0
+  const fullTotalCentsLive = mainPriceCentsLive + (addonFieldValues ?? []).reduce((sum, a) => sum + (parseDollarsToCents(a.price) ?? 0), 0)
+
   const onSubmit = async (values: FormValues) => {
+    const mainPriceCents = parseDollarsToCents(values.main.price) ?? 0
+    const resolvedMethod: PaymentMethod | null = values.main.depositOverride
+      ? values.main.depositMethod === 'none'
+        ? null
+        : values.main.depositMethod
+      : (shop?.defaultPaymentMethod ?? null)
+    const resolvedHandle: string | null = values.main.depositOverride
+      ? values.main.depositMethod === 'none'
+        ? null
+        : values.main.depositHandle.trim()
+      : (shop?.defaultPaymentHandle ?? null)
+    const resolvedAmount =
+      resolvedMethod === null
+        ? null
+        : values.main.depositAmount.trim()
+          ? parseDollarsToCents(values.main.depositAmount)
+          : computeDefaultDepositCents(mainPriceCents)
+
     const input: NewQuoteInput = {
       customer: {
         firstName: values.firstName.trim(),
@@ -366,46 +416,50 @@ export default function NewQuotePage() {
         expirationDate: values.expirationDate ? new Date(`${values.expirationDate}T12:00:00`).toISOString() : null,
         nextFollowUpAt: values.nextFollowUpAt ? new Date(`${values.nextFollowUpAt}T09:00:00`).toISOString() : null,
         windowTints: values.windowTints.map(windowTintFormValuesToConfig),
+        showFullAddonTotal: values.showFullAddonTotal,
       },
-      options: values.options.map((opt, i) => {
-        const priceCents = parseDollarsToCents(opt.price) ?? 0
-        const resolvedMethod: PaymentMethod | null = opt.depositOverride
-          ? opt.depositMethod === 'none'
-            ? null
-            : opt.depositMethod
-          : (shop?.defaultPaymentMethod ?? null)
-        const resolvedHandle: string | null = opt.depositOverride
-          ? opt.depositMethod === 'none'
-            ? null
-            : opt.depositHandle.trim()
-          : (shop?.defaultPaymentHandle ?? null)
-        const resolvedAmount =
-          resolvedMethod === null
-            ? null
-            : opt.depositAmount.trim()
-              ? parseDollarsToCents(opt.depositAmount)
-              : computeDefaultDepositCents(priceCents)
-        return {
-          tier: opt.tier,
-          name: opt.name.trim(),
-          description: opt.description.trim(),
-          priceCents,
-          laborIncluded: opt.laborIncluded,
+      options: [
+        {
+          optionKind: 'main',
+          name: values.main.name.trim(),
+          description: values.main.description.trim(),
+          priceCents: mainPriceCents,
+          laborIncluded: values.main.laborIncluded,
           depositPaymentMethod: resolvedMethod,
           depositPaymentHandle: resolvedHandle,
           depositAmountCents: resolvedAmount,
-          recommended: i === Number(values.recommendedIndex),
-          configId: opt.configId,
-          items: opt.items.map((item) => ({
+          configId: values.main.configId,
+          items: values.main.items.map((item) => ({
             brand: item.brand.trim() || null,
             model: item.model.trim() || null,
             name: item.name.trim(),
             quantity: item.quantity,
             description: null,
             category: item.category as ProductCategory | null,
+            imageUrl: item.imageUrl,
           })),
-        }
-      }),
+        },
+        ...values.addons.map((addon) => ({
+          optionKind: 'addon' as const,
+          name: addon.name.trim(),
+          description: addon.description.trim(),
+          priceCents: parseDollarsToCents(addon.price) ?? 0,
+          laborIncluded: true,
+          depositPaymentMethod: null,
+          depositPaymentHandle: null,
+          depositAmountCents: null,
+          configId: null,
+          items: addon.items.map((item) => ({
+            brand: item.brand.trim() || null,
+            model: item.model.trim() || null,
+            name: item.name.trim(),
+            quantity: item.quantity,
+            description: null,
+            category: item.category as ProductCategory | null,
+            imageUrl: item.imageUrl,
+          })),
+        })),
+      ],
     }
     try {
       const quote = await repo.createQuote(input)
@@ -434,8 +488,8 @@ export default function NewQuotePage() {
 
       {fromScan ? (
         <div className="rounded-xl bg-blue-50 p-4 text-base font-medium text-ink">
-          Brought over {fromScan.items.length} scanned item{fromScan.items.length === 1 ? '' : 's'} into the "Scanned
-          items" option below — add the customer's info to finish.
+          Brought over {fromScan.items.length} scanned item{fromScan.items.length === 1 ? '' : 's'} into the main package
+          below — add the customer's info to finish.
         </div>
       ) : null}
 
@@ -571,49 +625,65 @@ export default function NewQuotePage() {
         </Card>
 
         <Card className="space-y-5 lg:col-span-2">
+          <div className="flex items-center gap-2">
+            <Star className="h-5 w-5 text-brand" aria-hidden="true" />
+            <h2 className="text-xl font-bold text-ink">Main package</h2>
+          </div>
+          <MainOptionEditor
+            control={control}
+            register={register}
+            setValue={setValue}
+            errors={errors}
+            catalogItems={catalogItems}
+            itemHistory={itemHistory}
+          />
+        </Card>
+
+        <Card className="space-y-5 lg:col-span-2">
           <div className="flex items-center justify-between">
-            <h2 className="text-xl font-bold text-ink">Options</h2>
-            {optionFields.length < 3 ? (
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  const wasEmpty = optionFields.length === 0
-                  append(emptyOption(optionFields.length))
-                  if (wasEmpty) setValue('recommendedIndex', 0)
-                }}
-              >
-                <Plus className="h-5 w-5" aria-hidden="true" /> Add option
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-brand" aria-hidden="true" />
+              <h2 className="text-xl font-bold text-ink">Add-ons</h2>
+              <span className="text-sm font-normal text-zinc-500">optional upgrades, priced on top of the main package</span>
+            </div>
+            {addonFields.length < 8 ? (
+              <Button variant="secondary" onClick={() => appendAddon(emptyAddon())}>
+                <Plus className="h-5 w-5" aria-hidden="true" /> Add add-on
               </Button>
             ) : null}
           </div>
-          <p className="-mt-3 text-sm text-zinc-500">
-            One option is fine if you don&apos;t do tiers. Three (Good / Better / Insane) sells best. Optional — you
-            can save a bare quote and price it later.
-          </p>
-          {optionFields.length === 0 ? (
-            <p className="text-sm text-zinc-500">No pricing options yet — add one when you&apos;re ready.</p>
-          ) : null}
-          <div className="flex flex-col gap-4 lg:flex-row lg:flex-nowrap lg:items-start">
-            {optionFields.map((field, index) => (
-              <div key={field.id} className="lg:min-w-0 lg:flex-1 lg:basis-72">
-                <OptionEditor
+          {addonFields.length === 0 ? (
+            <p className="text-sm text-zinc-500">No add-ons yet — add one for an optional upgrade like ceramic tint or a backup camera.</p>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {addonFields.map((field, index) => (
+                <AddonOptionEditor
+                  key={field.id}
                   index={index}
                   control={control}
                   register={register}
-                  setValue={setValue}
                   errors={errors}
-                  canRemove={true}
-                  onRemove={() => remove(index)}
+                  mainPriceCents={mainPriceCentsLive}
+                  onRemove={() => removeAddon(index)}
                   catalogItems={catalogItems}
                   itemHistory={itemHistory}
                 />
-              </div>
-            ))}
-          </div>
-          {typeof errors.options?.message === 'string' ? (
+              ))}
+            </div>
+          )}
+          {typeof errors.addons?.message === 'string' ? (
             <p role="alert" className="text-sm font-medium text-red-700">
-              {errors.options.message}
+              {errors.addons.message}
             </p>
+          ) : null}
+          {addonFields.length > 0 ? (
+            <label className="flex items-center justify-between gap-3 rounded-xl bg-zinc-50 p-3 text-base font-medium text-ink">
+              <span className="flex items-center gap-2.5">
+                <input type="checkbox" className="h-5 w-5 accent-[#1d4ed8]" {...register('showFullAddonTotal')} />
+                Show a total with everything included
+              </span>
+              <span className="shrink-0 text-sm font-semibold text-zinc-500">{formatCurrency(fullTotalCentsLive)}</span>
+            </label>
           ) : null}
         </Card>
 
@@ -623,7 +693,7 @@ export default function NewQuotePage() {
             {tintFields.length < 3 ? (
               <Button
                 variant="secondary"
-                onClick={() => appendTint(createDefaultWindowTintFormValues('sedan_coupe', `Tint option ${tintFields.length + 1}`))}
+                onClick={() => appendTint(createDefaultWindowTintFormValues('sedan', `Tint option ${tintFields.length + 1}`))}
               >
                 <Plus className="h-5 w-5" aria-hidden="true" /> Add tint option
               </Button>
@@ -730,30 +800,142 @@ function ModelField({
   )
 }
 
-function OptionEditor({
-  index,
+/** Shared item-rows editor — the brand/model/name/qty grid, "Add product"/"From catalog" controls, and the catalog-insert modal. Used by both the main option (full treatment) and each add-on (same items UI, just without the drag-and-drop builder around it). `basePath` is the field-array's dotted path, e.g. "main.items" or `addons.${index}.items`. */
+function ItemRows({
+  basePath,
+  control,
+  register,
+  itemHistory,
+  catalogItems,
+  listIdPrefix,
+}: {
+  basePath: 'main.items' | `addons.${number}.items`
+  control: Control<FormValues>
+  register: UseFormRegister<FormValues>
+  itemHistory: { brands: string[]; models: string[]; names: string[] }
+  catalogItems: CatalogItem[]
+  listIdPrefix: string
+}) {
+  const { fields, append, remove } = useFieldArray({ control, name: basePath })
+  const [catalogOpen, setCatalogOpen] = useState(false)
+  const items = useWatch({ control, name: basePath })
+  const brandListId = `${listIdPrefix}-brand`
+  const modelListId = `${listIdPrefix}-model`
+  const nameListId = `${listIdPrefix}-name`
+
+  return (
+    <>
+      <datalist id={brandListId}>
+        {itemHistory.brands.map((b) => (
+          <option key={b} value={b} />
+        ))}
+      </datalist>
+      <datalist id={modelListId}>
+        {itemHistory.models.map((m) => (
+          <option key={m} value={m} />
+        ))}
+      </datalist>
+      <datalist id={nameListId}>
+        {itemHistory.names.map((n) => (
+          <option key={n} value={n} />
+        ))}
+      </datalist>
+      <div className="space-y-2">
+        {fields.map((item, j) => (
+          <div key={item.id} className="grid grid-cols-[auto_1fr_1fr_auto] gap-2 sm:grid-cols-[auto_1fr_1fr_2fr_4.5rem_auto]">
+            <span className="flex h-12 w-8 shrink-0 items-center justify-center text-zinc-400" title="Product category">
+              <CategoryIcon category={(items?.[j]?.category as ProductCategory | null) ?? null} className="h-4.5 w-4.5" />
+            </span>
+            <Input aria-label="Brand" placeholder="Brand" list={brandListId} {...register(`${basePath}.${j}.brand`)} />
+            <Input aria-label="Model" placeholder="Model #" list={modelListId} {...register(`${basePath}.${j}.model`)} />
+            <Input
+              aria-label="Item name"
+              placeholder="What is it? (e.g. 12-inch subwoofer)"
+              list={nameListId}
+              className="col-span-2 sm:col-span-1"
+              {...register(`${basePath}.${j}.name`)}
+            />
+            <Input aria-label="Quantity" type="number" min={1} inputMode="numeric" {...register(`${basePath}.${j}.quantity`)} />
+            <button
+              type="button"
+              aria-label="Remove item"
+              onClick={() => remove(j)}
+              className="flex h-12 w-12 items-center justify-center rounded-xl text-zinc-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-30"
+            >
+              <Trash2 className="h-5 w-5" aria-hidden="true" />
+            </button>
+          </div>
+        ))}
+        {fields.length === 0 ? <p className="text-sm text-zinc-500">No products yet — add one, or skip if this is a flat-fee/labor-only line.</p> : null}
+      </div>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <Button variant="ghost" onClick={() => append(emptyItem())}>
+          <Plus className="h-5 w-5" aria-hidden="true" /> Add product
+        </Button>
+        {catalogItems.length > 0 ? (
+          <Button variant="ghost" onClick={() => setCatalogOpen(true)}>
+            <Package className="h-5 w-5" aria-hidden="true" /> From catalog
+          </Button>
+        ) : null}
+      </div>
+
+      <Modal open={catalogOpen} onClose={() => setCatalogOpen(false)} title="Insert from catalog">
+        <ul className="divide-y divide-zinc-100">
+          {catalogItems.map((catalogItem) => (
+            <li key={catalogItem.id}>
+              <button
+                type="button"
+                onClick={() => {
+                  append({
+                    brand: catalogItem.brand ?? '',
+                    model: catalogItem.model ?? '',
+                    name: catalogItem.name,
+                    quantity: 1,
+                    category: catalogItem.category,
+                    imageUrl: catalogItem.imageUrl,
+                  })
+                  setCatalogOpen(false)
+                }}
+                className="flex min-h-14 w-full items-center gap-3 py-2.5 text-left hover:bg-zinc-50"
+              >
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-blue-50 text-brand">
+                  {catalogItem.imageUrl ? (
+                    <img src={catalogItem.imageUrl} alt="" className="h-full w-full object-contain" />
+                  ) : (
+                    <CategoryIcon category={catalogItem.category} className="h-5 w-5" />
+                  )}
+                </span>
+                <span className="text-base font-semibold text-ink">
+                  {[catalogItem.brand, catalogItem.model].filter(Boolean).join(' ')}
+                  {catalogItem.brand || catalogItem.model ? ' — ' : ''}
+                  {catalogItem.name}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </Modal>
+    </>
+  )
+}
+
+function MainOptionEditor({
   control,
   register,
   setValue,
   errors,
-  canRemove,
-  onRemove,
   catalogItems,
   itemHistory,
 }: {
-  index: number
   control: Control<FormValues>
   register: UseFormRegister<FormValues>
   setValue: UseFormSetValue<FormValues>
   errors: FieldErrors<FormValues>
-  canRemove: boolean
-  onRemove: () => void
   catalogItems: CatalogItem[]
   itemHistory: { brands: string[]; models: string[]; names: string[] }
 }) {
-  const { fields: itemFields, append, remove, replace } = useFieldArray({ control, name: `options.${index}.items` })
-  const optionErrors = errors.options?.[index]
-  const [catalogOpen, setCatalogOpen] = useState(false)
+  const { replace } = useFieldArray({ control, name: 'main.items' })
+  const mainErrors = errors.main
   const repo = useRepo()
   const toast = useToast()
 
@@ -794,9 +976,18 @@ function OptionEditor({
       toast('error', 'Add at least one product before applying.')
       return
     }
-    replace(items.map((item) => ({ brand: item.brand ?? '', model: item.model ?? '', name: item.name, quantity: item.quantity, category: item.category })))
-    setValue(`options.${index}.price`, (priceCents / 100).toFixed(2), { shouldValidate: true, shouldDirty: true })
-    setValue(`options.${index}.configId`, builderConfig.id, { shouldValidate: true, shouldDirty: true })
+    replace(
+      items.map((item) => ({
+        brand: item.brand ?? '',
+        model: item.model ?? '',
+        name: item.name,
+        quantity: item.quantity,
+        category: item.category,
+        imageUrl: null,
+      })),
+    )
+    setValue('main.price', (priceCents / 100).toFixed(2), { shouldValidate: true, shouldDirty: true })
+    setValue('main.configId', builderConfig.id, { shouldValidate: true, shouldDirty: true })
     setBuilderOpen(false)
   }
 
@@ -834,16 +1025,12 @@ function OptionEditor({
     }
   }
 
-  const brandListId = `brand-suggestions-${index}`
-  const modelListId = `model-suggestions-${index}`
-  const nameListId = `name-suggestions-${index}`
-
   // Deposit amount auto-fills at 15% of the price above, live, unless the
   // staff has manually edited it — tracked by comparing against the last
   // value this effect itself wrote, so a later price tweak never clobbers a
   // manual override.
-  const priceValue = useWatch({ control, name: `options.${index}.price` })
-  const depositAmountValue = useWatch({ control, name: `options.${index}.depositAmount` })
+  const priceValue = useWatch({ control, name: 'main.price' })
+  const depositAmountValue = useWatch({ control, name: 'main.depositAmount' })
   const lastAutoDepositRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -851,257 +1038,175 @@ function OptionEditor({
     if (cents === null) return
     const suggested = (computeDefaultDepositCents(cents) / 100).toFixed(2)
     if (depositAmountValue === '' || depositAmountValue === lastAutoDepositRef.current) {
-      setValue(`options.${index}.depositAmount`, suggested)
+      setValue('main.depositAmount', suggested)
       lastAutoDepositRef.current = suggested
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only recompute when price changes, not on every depositAmount keystroke
   }, [priceValue])
 
-  const depositOverride = useWatch({ control, name: `options.${index}.depositOverride` })
-  const depositMethod = useWatch({ control, name: `options.${index}.depositMethod` })
+  const depositOverride = useWatch({ control, name: 'main.depositOverride' })
+  const depositMethod = useWatch({ control, name: 'main.depositMethod' })
 
   return (
-    <fieldset className="rounded-xl border border-zinc-200 p-4">
-      <legend className="px-1 text-base font-bold text-charcoal">Option {index + 1}</legend>
-      <div className="space-y-4">
-        <div className="grid gap-4 sm:grid-cols-[8rem_1fr]">
-          <Field label="Tier" htmlFor={`opt-${index}-tier`}>
-            <Select id={`opt-${index}-tier`} {...register(`options.${index}.tier`)}>
-              <option value="good">Good</option>
-              <option value="better">Better</option>
-              <option value="insane">Insane</option>
-              <option value="custom">Custom</option>
-            </Select>
-          </Field>
-          <Field label="Option name" htmlFor={`opt-${index}-name`} error={optionErrors?.name?.message}>
-            <Input id={`opt-${index}-name`} {...register(`options.${index}.name`)} />
-          </Field>
-        </div>
-        <Field label="One-line description" htmlFor={`opt-${index}-desc`} hint="What does the customer get with this option?">
-          <Input id={`opt-${index}-desc`} {...register(`options.${index}.description`)} />
-        </Field>
+    <div className="space-y-4">
+      <Field label="Package name" htmlFor="main-name" error={mainErrors?.name?.message}>
+        <Input id="main-name" {...register('main.name')} />
+      </Field>
+      <Field label="One-line description" htmlFor="main-desc" hint="What does the customer get?">
+        <Input id="main-desc" {...register('main.description')} />
+      </Field>
 
-        <div>
-          <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
-            <p className="text-base font-semibold text-ink">Products</p>
-            {catalogItems.length > 0 ? (
-              <Button variant="ghost" onClick={() => setBuilderOpen(true)}>
-                <LayoutGrid className="h-5 w-5" aria-hidden="true" /> Build with drag & drop
-              </Button>
-            ) : null}
-          </div>
-
-          <Modal open={builderOpen} onClose={() => setBuilderOpen(false)} title="Build with drag & drop" size="xl">
-            <div className="space-y-3">
-              <PackageBuilder catalogItems={catalogItems} value={builderValue} onChange={setBuilderValue} />
-              {builderConfig && !builderComplete ? (
-                <p className="flex items-center gap-1.5 text-sm font-medium text-amber-700">
-                  <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden="true" /> Some required slots are empty
-                </p>
-              ) : null}
-              <div className="flex flex-wrap items-center gap-2 border-t border-zinc-100 pt-3">
-                <Button type="button" onClick={applyBuilder} disabled={!canApplyBuilder}>
-                  <Check className="h-5 w-5" aria-hidden="true" /> Apply
-                </Button>
-                <Button type="button" variant="ghost" onClick={() => setBuilderOpen(false)}>
-                  Cancel
-                </Button>
-              </div>
-              {builderConfig ? (
-                <div className="flex flex-wrap items-end gap-2 border-t border-zinc-100 pt-3">
-                  <Field label="Package name" htmlFor={`opt-${index}-pkg-name`}>
-                    <Input
-                      id={`opt-${index}-pkg-name`}
-                      placeholder="e.g. Daily Bass 1×12"
-                      value={packageName}
-                      onChange={(e) => setPackageName(e.target.value)}
-                    />
-                  </Field>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={savingPackage || builderItemCount === 0}
-                    onClick={() => void saveAsPackageTemplate()}
-                  >
-                    {savingPackage ? 'Saving…' : 'Save as package'}
-                  </Button>
-                </div>
-              ) : null}
-            </div>
-          </Modal>
-
-          <>
-            <datalist id={brandListId}>
-              {itemHistory.brands.map((b) => (
-                <option key={b} value={b} />
-              ))}
-            </datalist>
-            <datalist id={modelListId}>
-              {itemHistory.models.map((m) => (
-                <option key={m} value={m} />
-              ))}
-            </datalist>
-            <datalist id={nameListId}>
-              {itemHistory.names.map((n) => (
-                <option key={n} value={n} />
-              ))}
-            </datalist>
-            <div className="space-y-2">
-                {itemFields.map((item, j) => (
-                  <div key={item.id} className="grid grid-cols-[1fr_1fr_auto] gap-2 sm:grid-cols-[1fr_1fr_2fr_4.5rem_auto]">
-                    <Input
-                      aria-label="Brand"
-                      placeholder="Brand"
-                      list={brandListId}
-                      {...register(`options.${index}.items.${j}.brand`)}
-                    />
-                    <Input
-                      aria-label="Model"
-                      placeholder="Model #"
-                      list={modelListId}
-                      {...register(`options.${index}.items.${j}.model`)}
-                    />
-                    <Input
-                      aria-label="Item name"
-                      placeholder="What is it? (e.g. 12-inch subwoofer)"
-                      list={nameListId}
-                      className="col-span-2 sm:col-span-1"
-                      {...register(`options.${index}.items.${j}.name`)}
-                    />
-                    <Input
-                      aria-label="Quantity"
-                      type="number"
-                      min={1}
-                      inputMode="numeric"
-                      {...register(`options.${index}.items.${j}.quantity`)}
-                    />
-                    <button
-                      type="button"
-                      aria-label="Remove item"
-                      onClick={() => remove(j)}
-                      className="flex h-12 w-12 items-center justify-center rounded-xl text-zinc-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-30"
-                    >
-                      <Trash2 className="h-5 w-5" aria-hidden="true" />
-                    </button>
-                  </div>
-                ))}
-                {itemFields.length === 0 ? <p className="text-sm text-zinc-500">No products yet — add one, or skip if this is a flat-fee/labor-only option.</p> : null}
-              </div>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <Button variant="ghost" onClick={() => append({ brand: '', model: '', name: '', quantity: 1, category: null })}>
-                  <Plus className="h-5 w-5" aria-hidden="true" /> Add product
-                </Button>
-                {catalogItems.length > 0 ? (
-                  <Button variant="ghost" onClick={() => setCatalogOpen(true)}>
-                    <Package className="h-5 w-5" aria-hidden="true" /> From catalog
-                  </Button>
-                ) : null}
-              </div>
-            </>
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Price (installed)" htmlFor={`opt-${index}-price`} error={optionErrors?.price?.message}>
-            <Input id={`opt-${index}-price`} inputMode="decimal" placeholder="$2,899" {...register(`options.${index}.price`)} />
-          </Field>
-          <Field
-            label="Deposit amount"
-            htmlFor={`opt-${index}-deposit-amount`}
-            error={optionErrors?.depositAmount?.message}
-            hint={`Auto-filled at ${DEFAULT_DEPOSIT_PERCENT}% of the price above — change it if you want a different amount.`}
-          >
-            <Input
-              id={`opt-${index}-deposit-amount`}
-              inputMode="decimal"
-              placeholder="$435"
-              {...register(`options.${index}.depositAmount`)}
-            />
-          </Field>
-        </div>
-        <label className="flex items-center gap-2.5 text-base font-medium text-ink">
-          <input
-            type="checkbox"
-            className="h-5 w-5 accent-[#1d4ed8]"
-            {...register(`options.${index}.depositOverride`)}
-          />
-          Use a different payment method for this deposit
-        </label>
-        {depositOverride ? (
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Payment method" htmlFor={`opt-${index}-deposit-method`}>
-              <Select id={`opt-${index}-deposit-method`} {...register(`options.${index}.depositMethod`)}>
-                <option value="none">No deposit for this option</option>
-                {PAYMENT_METHODS.map((m) => (
-                  <option key={m} value={m}>
-                    {PAYMENT_METHOD_INFO[m].label}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            {depositMethod && depositMethod !== 'none' ? (
-              <Field
-                label={PAYMENT_METHOD_INFO[depositMethod].handleLabel}
-                htmlFor={`opt-${index}-deposit-handle`}
-                error={optionErrors?.depositHandle?.message}
-                hint={PAYMENT_METHOD_INFO[depositMethod].hint}
-              >
-                <Input
-                  id={`opt-${index}-deposit-handle`}
-                  placeholder={PAYMENT_METHOD_INFO[depositMethod].placeholder}
-                  {...register(`options.${index}.depositHandle`)}
-                />
-              </Field>
-            ) : null}
-          </div>
-        ) : null}
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-          <label className="flex items-center gap-2.5 text-base font-medium text-ink">
-            <input type="checkbox" className="h-5 w-5 accent-[#1d4ed8]" {...register(`options.${index}.laborIncluded`)} />
-            Labor included
-          </label>
-          <label className="flex items-center gap-2.5 text-base font-medium text-ink">
-            <input type="radio" value={index} className="h-5 w-5 accent-[#1d4ed8]" {...register('recommendedIndex')} />
-            Recommend this option
-          </label>
-          {canRemove ? (
-            <Button variant="danger" onClick={onRemove}>
-              <Trash2 className="h-5 w-5" aria-hidden="true" /> Remove option
+      <div>
+        <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-base font-semibold text-ink">Products</p>
+          {catalogItems.length > 0 ? (
+            <Button variant="ghost" onClick={() => setBuilderOpen(true)}>
+              <LayoutGrid className="h-5 w-5" aria-hidden="true" /> Build with drag & drop
             </Button>
           ) : null}
         </div>
+
+        <Modal open={builderOpen} onClose={() => setBuilderOpen(false)} title="Build with drag & drop" size="xl">
+          <div className="space-y-3">
+            <PackageBuilder catalogItems={catalogItems} value={builderValue} onChange={setBuilderValue} />
+            {builderConfig && !builderComplete ? (
+              <p className="flex items-center gap-1.5 text-sm font-medium text-amber-700">
+                <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden="true" /> Some required slots are empty
+              </p>
+            ) : null}
+            <div className="flex flex-wrap items-center gap-2 border-t border-zinc-100 pt-3">
+              <Button type="button" onClick={applyBuilder} disabled={!canApplyBuilder}>
+                <Check className="h-5 w-5" aria-hidden="true" /> Apply
+              </Button>
+              <Button type="button" variant="ghost" onClick={() => setBuilderOpen(false)}>
+                Cancel
+              </Button>
+            </div>
+            {builderConfig ? (
+              <div className="flex flex-wrap items-end gap-2 border-t border-zinc-100 pt-3">
+                <Field label="Package name" htmlFor="main-pkg-name">
+                  <Input
+                    id="main-pkg-name"
+                    placeholder="e.g. Daily Bass 1×12"
+                    value={packageName}
+                    onChange={(e) => setPackageName(e.target.value)}
+                  />
+                </Field>
+                <Button type="button" variant="secondary" disabled={savingPackage || builderItemCount === 0} onClick={() => void saveAsPackageTemplate()}>
+                  {savingPackage ? 'Saving…' : 'Save as package'}
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        </Modal>
+
+        <ItemRows basePath="main.items" control={control} register={register} itemHistory={itemHistory} catalogItems={catalogItems} listIdPrefix="main-items" />
       </div>
 
-      <Modal open={catalogOpen} onClose={() => setCatalogOpen(false)} title="Insert from catalog">
-        <ul className="divide-y divide-zinc-100">
-          {catalogItems.map((catalogItem) => (
-            <li key={catalogItem.id}>
-              <button
-                type="button"
-                onClick={() => {
-                  append({
-                    brand: catalogItem.brand ?? '',
-                    model: catalogItem.model ?? '',
-                    name: catalogItem.name,
-                    quantity: 1,
-                    category: catalogItem.category,
-                  })
-                  setCatalogOpen(false)
-                }}
-                className="flex min-h-14 w-full items-center gap-3 py-2.5 text-left hover:bg-zinc-50"
-              >
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-brand">
-                  <Package className="h-5 w-5" aria-hidden="true" />
-                </span>
-                <span className="text-base font-semibold text-ink">
-                  {[catalogItem.brand, catalogItem.model].filter(Boolean).join(' ')}
-                  {catalogItem.brand || catalogItem.model ? ' — ' : ''}
-                  {catalogItem.name}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </Modal>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Price (installed)" htmlFor="main-price" error={mainErrors?.price?.message}>
+          <Input id="main-price" inputMode="decimal" placeholder="$2,899" {...register('main.price')} />
+        </Field>
+        <Field
+          label="Deposit amount"
+          htmlFor="main-deposit-amount"
+          error={mainErrors?.depositAmount?.message}
+          hint={`Auto-filled at ${DEFAULT_DEPOSIT_PERCENT}% of the price above — change it if you want a different amount.`}
+        >
+          <Input id="main-deposit-amount" inputMode="decimal" placeholder="$435" {...register('main.depositAmount')} />
+        </Field>
+      </div>
+      <label className="flex items-center gap-2.5 text-base font-medium text-ink">
+        <input type="checkbox" className="h-5 w-5 accent-[#1d4ed8]" {...register('main.depositOverride')} />
+        Use a different payment method for this deposit
+      </label>
+      {depositOverride ? (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Payment method" htmlFor="main-deposit-method">
+            <Select id="main-deposit-method" {...register('main.depositMethod')}>
+              <option value="none">No deposit</option>
+              {PAYMENT_METHODS.map((m) => (
+                <option key={m} value={m}>
+                  {PAYMENT_METHOD_INFO[m].label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          {depositMethod && depositMethod !== 'none' ? (
+            <Field
+              label={PAYMENT_METHOD_INFO[depositMethod].handleLabel}
+              htmlFor="main-deposit-handle"
+              error={mainErrors?.depositHandle?.message}
+              hint={PAYMENT_METHOD_INFO[depositMethod].hint}
+            >
+              <Input id="main-deposit-handle" placeholder={PAYMENT_METHOD_INFO[depositMethod].placeholder} {...register('main.depositHandle')} />
+            </Field>
+          ) : null}
+        </div>
+      ) : null}
+      <label className="flex items-center gap-2.5 text-base font-medium text-ink">
+        <input type="checkbox" className="h-5 w-5 accent-[#1d4ed8]" {...register('main.laborIncluded')} />
+        Labor included
+      </label>
+    </div>
+  )
+}
+
+function AddonOptionEditor({
+  index,
+  control,
+  register,
+  errors,
+  mainPriceCents,
+  onRemove,
+  catalogItems,
+  itemHistory,
+}: {
+  index: number
+  control: Control<FormValues>
+  register: UseFormRegister<FormValues>
+  errors: FieldErrors<FormValues>
+  mainPriceCents: number
+  onRemove: () => void
+  catalogItems: CatalogItem[]
+  itemHistory: { brands: string[]; models: string[]; names: string[] }
+}) {
+  const addonErrors = errors.addons?.[index]
+  const priceValue = useWatch({ control, name: `addons.${index}.price` })
+  const addonPriceCents = parseDollarsToCents(priceValue) ?? 0
+
+  return (
+    <fieldset className="rounded-xl border border-zinc-200 p-4">
+      <legend className="flex items-center gap-1.5 px-1 text-base font-bold text-charcoal">
+        <Sparkles className="h-4 w-4 text-brand" aria-hidden="true" /> Add-on {index + 1}
+      </legend>
+      <div className="space-y-3">
+        <Field label="Name" htmlFor={`addon-${index}-name`} error={addonErrors?.name?.message}>
+          <Input id={`addon-${index}-name`} placeholder="e.g. Ceramic tint upgrade" {...register(`addons.${index}.name`)} />
+        </Field>
+        <Field label="One-line description" htmlFor={`addon-${index}-desc`}>
+          <Input id={`addon-${index}-desc`} {...register(`addons.${index}.description`)} />
+        </Field>
+        <ItemRows
+          basePath={`addons.${index}.items`}
+          control={control}
+          register={register}
+          itemHistory={itemHistory}
+          catalogItems={catalogItems}
+          listIdPrefix={`addon-${index}-items`}
+        />
+        <Field label="Extra price" htmlFor={`addon-${index}-price`} error={addonErrors?.price?.message} hint="Added on top of the main package price.">
+          <Input id={`addon-${index}-price`} inputMode="decimal" placeholder="$300" {...register(`addons.${index}.price`)} />
+        </Field>
+        {addonPriceCents > 0 ? (
+          <p className="text-sm font-semibold text-zinc-600">
+            +{formatCurrency(addonPriceCents)} → total {formatCurrency(mainPriceCents + addonPriceCents)}
+          </p>
+        ) : null}
+        <Button variant="danger" onClick={onRemove}>
+          <Trash2 className="h-5 w-5" aria-hidden="true" /> Remove add-on
+        </Button>
+      </div>
     </fieldset>
   )
 }

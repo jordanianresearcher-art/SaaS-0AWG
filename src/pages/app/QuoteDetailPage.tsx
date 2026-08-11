@@ -14,6 +14,8 @@ import {
   Mail,
   Phone,
   Printer,
+  Sparkles,
+  Star,
   Trophy,
   XCircle,
 } from 'lucide-react'
@@ -33,6 +35,8 @@ import {
   quoteValueCents,
 } from '../../lib/format'
 import { summarizeWindowTint } from '../../lib/windowTint'
+import { addonOptions, computeAddonBreakdown, fullTotalCents, mainOption } from '../../lib/quotePricing'
+import { TintDiagram } from '../../components/TintDiagram'
 import type { QuoteBundle, TemplateType } from '../../types'
 
 export default function QuoteDetailPage() {
@@ -92,6 +96,9 @@ export default function QuoteDetailPage() {
   if (!bundle) return <LoadingBlock label="Loading quote…" />
 
   const { quote, customer, options, events, responses, emails } = bundle
+  const main = mainOption(options)
+  const addons = addonOptions(options)
+  const addonBreakdown = computeAddonBreakdown(options)
   const statusConfig = STATUS_CONFIG[quote.status]
   const lastResponse = responses[0] ?? null
   const suggested = suggestNextTemplate(emails, lastResponse?.responseType ?? null)
@@ -237,36 +244,55 @@ export default function QuoteDetailPage() {
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        {/* Options */}
+        {/* Main package + add-ons */}
         <div className="space-y-3">
           <h2 className="text-xl font-bold text-ink">Options</h2>
           {options.length === 0 ? (
             <p className="text-base text-zinc-500">No pricing options on this quote yet.</p>
           ) : null}
-          {options.map((option) => (
-            <Card key={option.id} className={option.recommended ? 'border-brand' : ''}>
+          {main ? (
+            <Card className="border-brand">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
-                  <h3 className="text-lg font-bold text-ink">{option.name.trim() || 'Option'}</h3>
-                  {option.recommended ? <Badge className="bg-blue-50 text-brand">Recommended</Badge> : null}
+                  <Star className="h-4 w-4 shrink-0 text-brand" aria-hidden="true" />
+                  <h3 className="text-lg font-bold text-ink">{main.name.trim() || 'Complete system'}</h3>
                 </div>
-                <p className="text-xl font-black text-ink">{formatCurrency(option.priceCents)}</p>
+                <p className="text-xl font-black text-ink">{formatCurrency(main.priceCents)}</p>
               </div>
-              {option.description ? <p className="mt-1 text-base text-zinc-600">{option.description}</p> : null}
-              <ul className="mt-3 space-y-1.5">
-                {option.items.map((item) => (
-                  <li key={item.id} className="flex items-baseline justify-between gap-3 text-base">
-                    <span className="text-zinc-700">
-                      {item.quantity > 1 ? `${item.quantity}× ` : ''}
-                      {[item.brand, item.model].filter(Boolean).join(' ')}{item.brand || item.model ? ' — ' : ''}
-                      {item.name.trim() || 'Item'}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              <p className="mt-2 text-sm text-zinc-500">{option.laborIncluded ? 'Labor included' : 'Labor billed separately'}</p>
+              {main.description ? <p className="mt-1 text-base text-zinc-600">{main.description}</p> : null}
+              <ItemList items={main.items} />
+              <p className="mt-2 text-sm text-zinc-500">{main.laborIncluded ? 'Labor included' : 'Labor billed separately'}</p>
             </Card>
-          ))}
+          ) : null}
+          {addons.length > 0 ? (
+            <>
+              <h3 className="pt-1 text-base font-bold text-charcoal">Add-ons</h3>
+              {addonBreakdown.map(({ option, addonPriceCents, totalWithAddonCents }) => (
+                <Card key={option.id}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 shrink-0 text-brand" aria-hidden="true" />
+                      <h3 className="text-base font-bold text-ink">{option.name.trim() || 'Add-on'}</h3>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-lg font-black text-ink">+{formatCurrency(addonPriceCents)}</p>
+                      <p className="text-xs text-zinc-500">total {formatCurrency(totalWithAddonCents)}</p>
+                    </div>
+                  </div>
+                  {option.description ? <p className="mt-1 text-sm text-zinc-600">{option.description}</p> : null}
+                  <ItemList items={option.items} />
+                </Card>
+              ))}
+              {quote.showFullAddonTotal ? (
+                <Card className="border-brand bg-blue-50">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-bold tracking-wide text-brand uppercase">Everything included</p>
+                    <p className="text-xl font-black text-ink">{formatCurrency(fullTotalCents(options))}</p>
+                  </div>
+                </Card>
+              ) : null}
+            </>
+          ) : null}
 
           {quote.windowTints.length > 0 ? (
             <>
@@ -274,41 +300,44 @@ export default function QuoteDetailPage() {
               {quote.windowTints.map((tint, i) => {
                 const summary = summarizeWindowTint(tint)
                 return (
-                  <Card key={i} className="space-y-1.5 text-base">
-                    <p className="font-bold text-ink">
-                      {summary.name} — {summary.bodyStyleLabel} &middot; {summary.tintTypeLabel}
-                    </p>
-                    {summary.uniformPercent !== null ? (
-                      <p className="text-zinc-700">All included windows at {summary.uniformPercent}%</p>
-                    ) : summary.windowLines.length > 0 ? (
-                      <ul className="space-y-0.5 text-zinc-700">
-                        {summary.windowLines.map((w) => (
-                          <li key={w.label}>
-                            {w.label}: {w.vltPercent}%
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="text-zinc-500">No tint percentages chosen yet.</p>
-                    )}
-                    {summary.priceCents !== null ? (
-                      <p className="text-sm text-zinc-500">Tint job: {formatCurrency(summary.priceCents)}</p>
-                    ) : null}
-                    {summary.removeOldTint ? (
-                      <p className="text-sm text-zinc-500">
-                        Remove old tint
-                        {summary.removeOldTint.priceCents !== null ? `: ${formatCurrency(summary.removeOldTint.priceCents)}` : ''}
+                  <Card key={i} className="flex flex-wrap items-start gap-4">
+                    <TintDiagram bodyStyle={tint.bodyStyle} windows={tint.windows} className="h-20 w-32 shrink-0" />
+                    <div className="min-w-0 flex-1 space-y-1.5 text-base">
+                      <p className="font-bold text-ink">
+                        {summary.name} — {summary.bodyStyleLabel} &middot; {summary.tintTypeLabel}
                       </p>
-                    ) : null}
-                    {summary.windshield ? (
-                      <p className="text-sm text-zinc-500">
-                        Windshield: {summary.windshield.vltPercent}%
-                        {summary.windshield.priceCents !== null ? ` — ${formatCurrency(summary.windshield.priceCents)}` : ''}
-                      </p>
-                    ) : null}
-                    {summary.totalCents > 0 ? (
-                      <p className="pt-1 font-bold text-ink">Total: {formatCurrency(summary.totalCents)}</p>
-                    ) : null}
+                      {summary.uniformPercent !== null ? (
+                        <p className="text-zinc-700">All included windows at {summary.uniformPercent}%</p>
+                      ) : summary.windowLines.length > 0 ? (
+                        <ul className="space-y-0.5 text-zinc-700">
+                          {summary.windowLines.map((w) => (
+                            <li key={w.label}>
+                              {w.label}: {w.vltPercent}%
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-zinc-500">No tint percentages chosen yet.</p>
+                      )}
+                      {summary.priceCents !== null ? (
+                        <p className="text-sm text-zinc-500">Tint job: {formatCurrency(summary.priceCents)}</p>
+                      ) : null}
+                      {summary.removeOldTint ? (
+                        <p className="text-sm text-zinc-500">
+                          Remove old tint
+                          {summary.removeOldTint.priceCents !== null ? `: ${formatCurrency(summary.removeOldTint.priceCents)}` : ''}
+                        </p>
+                      ) : null}
+                      {summary.windshield ? (
+                        <p className="text-sm text-zinc-500">
+                          Windshield: {summary.windshield.vltPercent}%
+                          {summary.windshield.priceCents !== null ? ` — ${formatCurrency(summary.windshield.priceCents)}` : ''}
+                        </p>
+                      ) : null}
+                      {summary.totalCents > 0 ? (
+                        <p className="pt-1 font-bold text-ink">Total: {formatCurrency(summary.totalCents)}</p>
+                      ) : null}
+                    </div>
                   </Card>
                 )
               })}
@@ -454,6 +483,28 @@ export default function QuoteDetailPage() {
         }}
       />
     </div>
+  )
+}
+
+/** Products under an option — a small image (when the item carries one, e.g. added from the catalog) plus name, no per-item price (this app prices per option, not per line). */
+function ItemList({ items }: { items: QuoteBundle['options'][number]['items'] }) {
+  if (items.length === 0) return null
+  return (
+    <ul className="mt-3 space-y-1.5">
+      {items.map((item) => (
+        <li key={item.id} className="flex items-center gap-2.5 text-base">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-zinc-100">
+            {item.imageUrl ? <img src={item.imageUrl} alt="" className="h-full w-full object-contain" /> : null}
+          </span>
+          <span className="text-zinc-700">
+            {item.quantity > 1 ? `${item.quantity}× ` : ''}
+            {[item.brand, item.model].filter(Boolean).join(' ')}
+            {item.brand || item.model ? ' — ' : ''}
+            {item.name.trim() || 'Item'}
+          </span>
+        </li>
+      ))}
+    </ul>
   )
 }
 

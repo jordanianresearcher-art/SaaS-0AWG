@@ -415,7 +415,7 @@ export default function ScanWorkspacePage() {
         quote: { internalNotes: null, expirationDate: null, nextFollowUpAt: null, windowTints: [] },
         options: [
           {
-            tier: 'good',
+            optionKind: 'main',
             name: 'Quote',
             description: '',
             priceCents: cartSubtotalCents(cart),
@@ -423,7 +423,6 @@ export default function ScanWorkspacePage() {
             depositPaymentMethod: null,
             depositPaymentHandle: null,
             depositAmountCents: null,
-            recommended: true,
             configId: null,
             items: cartToQuoteItemInputs(cart).map((item) => ({ ...item, description: null })),
           },

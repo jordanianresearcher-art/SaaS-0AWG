@@ -10,8 +10,8 @@ import {
 import type { WindowTintConfig } from '../types'
 
 describe('createDefaultWindowTintFormValues', () => {
-  it('produces 5 windows for sedan/coupe, all included with no percent yet', () => {
-    const form = createDefaultWindowTintFormValues('sedan_coupe')
+  it('produces 5 windows for a sedan, all included with no percent yet', () => {
+    const form = createDefaultWindowTintFormValues('sedan')
     expect(form.windows).toHaveLength(5)
     expect(form.windows.every((w) => w.included && w.vltPercent === null)).toBe(true)
     expect(form.name).toBe('')
@@ -21,30 +21,30 @@ describe('createDefaultWindowTintFormValues', () => {
     expect(form.windshieldIncluded).toBe(false)
   })
 
-  it('produces 7 windows for suv/wagon/van', () => {
-    const form = createDefaultWindowTintFormValues('suv_wagon_van')
+  it('produces 7 windows for a 6-window SUV', () => {
+    const form = createDefaultWindowTintFormValues('suv_6_window')
     expect(form.windows).toHaveLength(7)
     expect(form.windows.map((w) => w.position)).toContain('rear_quarter_left')
   })
 
   it('accepts a name for the entry', () => {
-    const form = createDefaultWindowTintFormValues('sedan_coupe', 'Front two only')
+    const form = createDefaultWindowTintFormValues('sedan', 'Front two only')
     expect(form.name).toBe('Front two only')
   })
 })
 
 describe('windowsForBodyStyle', () => {
   it('resets to a fresh window list for the given body style, independent of any existing entry', () => {
-    expect(windowsForBodyStyle('sedan_coupe')).toHaveLength(5)
-    expect(windowsForBodyStyle('suv_wagon_van')).toHaveLength(7)
-    expect(windowsForBodyStyle('sedan_coupe').every((w) => w.included && w.vltPercent === null)).toBe(true)
+    expect(windowsForBodyStyle('sedan')).toHaveLength(5)
+    expect(windowsForBodyStyle('suv_6_window')).toHaveLength(7)
+    expect(windowsForBodyStyle('sedan').every((w) => w.included && w.vltPercent === null)).toBe(true)
   })
 })
 
 describe('windowTintFormValuesToConfig', () => {
   it('parses dollar strings to cents for every priced situation', () => {
     const form = {
-      ...createDefaultWindowTintFormValues('sedan_coupe', '  Full vehicle  '),
+      ...createDefaultWindowTintFormValues('sedan', '  Full vehicle  '),
       tintType: 'ceramic' as const,
       price: '450',
       removeOldTint: true,
@@ -62,7 +62,7 @@ describe('windowTintFormValuesToConfig', () => {
   })
 
   it('leaves a price null when blank, and ignores prices for unchecked add-ons', () => {
-    const form = createDefaultWindowTintFormValues('sedan_coupe')
+    const form = createDefaultWindowTintFormValues('sedan')
     const config = windowTintFormValuesToConfig({ ...form, removeOldTintPrice: '50', windshieldPrice: '80' })
     expect(config.priceCents).toBeNull()
     // removeOldTint/windshieldIncluded are both false, so their prices are dropped even though typed
@@ -75,9 +75,9 @@ describe('windowTintConfigToFormValues', () => {
   it('round-trips through form values and back to an equivalent config', () => {
     const original: WindowTintConfig = {
       name: 'Full vehicle',
-      bodyStyle: 'suv_wagon_van',
+      bodyStyle: 'suv_6_window',
       tintType: 'ceramic',
-      windows: createDefaultWindowTintFormValues('suv_wagon_van').windows.map((w) => ({ ...w, vltPercent: 20 })),
+      windows: createDefaultWindowTintFormValues('suv_6_window').windows.map((w) => ({ ...w, vltPercent: 20 })),
       priceCents: 45000,
       removeOldTint: true,
       removeOldTintPriceCents: 5000,
@@ -94,7 +94,7 @@ describe('windowTintConfigToFormValues', () => {
   })
 
   it('defaults name, tintType, and removeOldTint for a pre-pricing config missing those keys', () => {
-    const legacy = { bodyStyle: 'sedan_coupe', windows: [], windshieldIncluded: false, windshieldVltPercent: null } as unknown as WindowTintConfig
+    const legacy = { bodyStyle: 'sedan', windows: [], windshieldIncluded: false, windshieldVltPercent: null } as unknown as WindowTintConfig
     const form = windowTintConfigToFormValues(legacy)
     expect(form.name).toBe('')
     expect(form.tintType).toBe('normal')
@@ -105,7 +105,7 @@ describe('windowTintConfigToFormValues', () => {
 describe('computeWindowTintTotalCents', () => {
   const base: WindowTintConfig = {
     name: 'Full vehicle',
-    bodyStyle: 'sedan_coupe',
+    bodyStyle: 'sedan',
     tintType: 'normal',
     windows: [],
     priceCents: 25000,
@@ -149,7 +149,7 @@ describe('computeWindowTintTotalCents', () => {
 
 describe('summarizeWindowTint', () => {
   it('collapses to a uniform percent when every included window shares one', () => {
-    const form = createDefaultWindowTintFormValues('sedan_coupe')
+    const form = createDefaultWindowTintFormValues('sedan')
     const config = windowTintFormValuesToConfig({
       ...form,
       windows: form.windows.map((w) => ({ ...w, vltPercent: 20 })),
@@ -160,7 +160,7 @@ describe('summarizeWindowTint', () => {
   })
 
   it('returns per-window lines when percentages differ', () => {
-    const form = createDefaultWindowTintFormValues('sedan_coupe')
+    const form = createDefaultWindowTintFormValues('sedan')
     const config = windowTintFormValuesToConfig({
       ...form,
       windows: form.windows.map((w, i) => ({ ...w, vltPercent: i === 0 ? 5 : 35 })),
@@ -172,7 +172,7 @@ describe('summarizeWindowTint', () => {
 
   it('includes name, tint type, base price, removal, windshield, and a total', () => {
     const config = windowTintFormValuesToConfig({
-      ...createDefaultWindowTintFormValues('suv_wagon_van', 'Full vehicle'),
+      ...createDefaultWindowTintFormValues('suv_6_window', 'Full vehicle'),
       tintType: 'ceramic',
       price: '450',
       removeOldTint: true,
@@ -191,7 +191,7 @@ describe('summarizeWindowTint', () => {
   })
 
   it('omits removal and windshield summaries when neither is active', () => {
-    const config = windowTintFormValuesToConfig(createDefaultWindowTintFormValues('sedan_coupe'))
+    const config = windowTintFormValuesToConfig(createDefaultWindowTintFormValues('sedan'))
     const summary = summarizeWindowTint(config)
     expect(summary.removeOldTint).toBeNull()
     expect(summary.windshield).toBeNull()

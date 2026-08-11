@@ -110,6 +110,7 @@ function mapQuote(r: Row): Quote {
     emailFollowUpAllowed: r.email_follow_up_allowed,
     wonAmountCents: r.won_amount_cents,
     windowTints: Array.isArray(r.window_tints) ? r.window_tints : [],
+    showFullAddonTotal: r.show_full_addon_total ?? false,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }
@@ -125,6 +126,7 @@ function mapItem(r: Row): QuoteItem {
     quantity: r.quantity,
     description: r.description,
     category: r.category ?? null,
+    imageUrl: r.image_url ?? null,
     position: r.position,
   }
 }
@@ -133,7 +135,7 @@ function mapOption(r: Row): QuoteOption {
   return {
     id: r.id,
     quoteId: r.quote_id,
-    tier: r.tier,
+    optionKind: r.option_kind,
     name: r.name,
     description: r.description ?? '',
     configId: r.config_id ?? null,
@@ -142,7 +144,6 @@ function mapOption(r: Row): QuoteOption {
     depositPaymentMethod: r.deposit_payment_method,
     depositPaymentHandle: r.deposit_payment_handle,
     depositAmountCents: r.deposit_amount_cents,
-    recommended: r.recommended,
     position: r.position,
     items: ((r.quote_items as Row[]) ?? []).map(mapItem).sort((a, b) => a.position - b.position),
   }
@@ -888,6 +889,7 @@ export class SupabaseRepository implements DataRepository {
         expiration_date: input.quote.expirationDate,
         next_follow_up_at: input.quote.nextFollowUpAt,
         window_tints: input.quote.windowTints,
+        show_full_addon_total: input.quote.showFullAddonTotal ?? false,
       })
       .select('*')
       .single()
@@ -898,7 +900,7 @@ export class SupabaseRepository implements DataRepository {
         .from('quote_options')
         .insert({
           quote_id: quote.id,
-          tier: opt.tier,
+          option_kind: opt.optionKind,
           name: opt.name,
           description: opt.description,
           price_cents: opt.priceCents,
@@ -906,7 +908,6 @@ export class SupabaseRepository implements DataRepository {
           deposit_payment_method: opt.depositPaymentMethod,
           deposit_payment_handle: opt.depositPaymentHandle,
           deposit_amount_cents: opt.depositAmountCents,
-          recommended: opt.recommended,
           config_id: opt.configId ?? null,
           position: i,
         })
@@ -923,6 +924,7 @@ export class SupabaseRepository implements DataRepository {
             quantity: item.quantity,
             description: item.description,
             category: item.category ?? null,
+            image_url: item.imageUrl ?? null,
             position: j,
           })),
         )
@@ -991,6 +993,11 @@ export class SupabaseRepository implements DataRepository {
 
   async updateInternalNotes(quoteId: string, notes: string | null): Promise<void> {
     const { error } = await this.supabase.from('quotes').update({ internal_notes: notes }).eq('id', quoteId)
+    if (error) throw error
+  }
+
+  async setShowFullAddonTotal(quoteId: string, show: boolean): Promise<void> {
+    const { error } = await this.supabase.from('quotes').update({ show_full_addon_total: show }).eq('id', quoteId)
     if (error) throw error
   }
 

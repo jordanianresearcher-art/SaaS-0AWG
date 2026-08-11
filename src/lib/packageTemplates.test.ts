@@ -7,7 +7,7 @@ function makeOption(overrides: Partial<QuoteOption> = {}): QuoteOption {
   return {
     id: 'opt-1',
     quoteId: 'quote-1',
-    tier: 'good',
+    optionKind: 'main',
     name: 'Good',
     description: 'Punchier bass, clean install.',
     configId: 'bass_2x8',
@@ -16,14 +16,13 @@ function makeOption(overrides: Partial<QuoteOption> = {}): QuoteOption {
     depositPaymentMethod: null,
     depositPaymentHandle: null,
     depositAmountCents: null,
-    recommended: true,
     position: 0,
     items: [
-      { id: 'i1', quoteOptionId: 'opt-1', brand: 'Kicker', model: 'CompR', name: '8" sub', quantity: 2, description: null, category: 'subwoofer', position: 0 },
-      { id: 'i2', quoteOptionId: 'opt-1', brand: 'Q-Power', model: 'QBOMB', name: 'Ported box', quantity: 1, description: null, category: 'enclosure', position: 1 },
-      { id: 'i3', quoteOptionId: 'opt-1', brand: 'Rockford', model: 'R500X1D', name: 'Mono amp', quantity: 1, description: null, category: 'mono_amp', position: 2 },
-      { id: 'i4', quoteOptionId: 'opt-1', brand: 'Rockford', model: 'RFK4X', name: 'Wiring kit', quantity: 1, description: null, category: 'wiring_kit', position: 3 },
-      { id: 'i5', quoteOptionId: 'opt-1', brand: null, model: null, name: 'Install labor', quantity: 1, description: null, category: 'labor', position: 4 },
+      { id: 'i1', quoteOptionId: 'opt-1', brand: 'Kicker', model: 'CompR', name: '8" sub', quantity: 2, description: null, category: 'subwoofer', imageUrl: null, position: 0 },
+      { id: 'i2', quoteOptionId: 'opt-1', brand: 'Q-Power', model: 'QBOMB', name: 'Ported box', quantity: 1, description: null, category: 'enclosure', imageUrl: null, position: 1 },
+      { id: 'i3', quoteOptionId: 'opt-1', brand: 'Rockford', model: 'R500X1D', name: 'Mono amp', quantity: 1, description: null, category: 'mono_amp', imageUrl: null, position: 2 },
+      { id: 'i4', quoteOptionId: 'opt-1', brand: 'Rockford', model: 'RFK4X', name: 'Wiring kit', quantity: 1, description: null, category: 'wiring_kit', imageUrl: null, position: 3 },
+      { id: 'i5', quoteOptionId: 'opt-1', brand: null, model: null, name: 'Install labor', quantity: 1, description: null, category: 'labor', imageUrl: null, position: 4 },
     ],
     ...overrides,
   }
@@ -60,6 +59,14 @@ describe('quoteOptionToPackageTemplateDraft', () => {
     option.name = 'Renamed after the fact'
     option.items[0].quantity = 999
     expect(draft.items[0].quantity).toBe(2)
+  })
+
+  it('carries a quote item image through to the package draft — a real snapshot, not discarded', () => {
+    const option = makeOption()
+    option.items[0].imageUrl = 'https://example.com/sub.jpg'
+    const draft = quoteOptionToPackageTemplateDraft(option, { name: 'Truck 2x8 Starter' })
+    expect(draft.items[0].imageUrl).toBe('https://example.com/sub.jpg')
+    expect(draft.items[1].imageUrl).toBeNull()
   })
 
   it('defaults vehicleTypes to empty when not given', () => {

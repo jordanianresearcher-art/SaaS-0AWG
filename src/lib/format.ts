@@ -74,10 +74,9 @@ export function formatDateTime(iso: string | null | undefined): string {
   }).format(new Date(iso))
 }
 
-/** Total value of a quote = price of the recommended option, else the highest-priced option. */
-export function quoteValueCents(options: Array<{ priceCents: number; recommended: boolean }>): number {
+/** Total value of a quote = the main package price alone (add-ons are incremental upsells, not part of the baseline value a shop reports on). See src/lib/quotePricing.ts for the full main+addon pricing math. */
+export function quoteValueCents(options: Array<{ priceCents: number; optionKind: 'main' | 'addon' }>): number {
   if (options.length === 0) return 0
-  const recommended = options.find((o) => o.recommended)
-  if (recommended) return recommended.priceCents
-  return Math.max(...options.map((o) => o.priceCents))
+  const main = options.find((o) => o.optionKind === 'main')
+  return (main ?? options[0]).priceCents
 }

@@ -40,11 +40,10 @@ export function quoteOptionToPackageTemplateDraft(
       quantity: item.quantity,
       description: item.description,
       category: item.category,
-      // Quote items don't currently carry a source image (they're free-typed
-      // or copied from a catalog item without keeping that link) — nothing
-      // to snapshot yet. A future phase linking quote items back to their
-      // originating catalog product could populate this.
-      imageUrl: null,
+      // Carried straight through — a quote item snapshots its image at
+      // add-time (see QuoteItem.imageUrl), so this is a real image, not a
+      // live reference. Still just null for a freehand-typed item.
+      imageUrl: item.imageUrl,
     })),
   }
 }

@@ -14,6 +14,7 @@ export interface ScanCartQuoteItemInput {
   name: string
   quantity: number
   category: ProductCategory | null
+  imageUrl: string | null
 }
 
 /** One row in the scan cart. Mirrors the shape an invoice_item ultimately needs. */
@@ -91,5 +92,6 @@ export function cartToQuoteItemInputs(cart: ScannedCartItem[]): ScanCartQuoteIte
     name: item.name,
     quantity: item.quantity,
     category: item.category,
+    imageUrl: item.imageUrl,
   }))
 }

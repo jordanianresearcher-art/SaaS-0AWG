@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { renderEmail, type EmailContext } from './emailTemplates'
+import { formatCurrency } from './format'
 import { buildDemoData } from '../data/demoData'
 import type { TemplateType } from '../types'
+
+/** Mirrors emailTemplates.ts's own escapeHtml — item/option names can contain quotes ("), and the rendered HTML escapes them. */
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
 
 function makeContext(): EmailContext {
   const db = buildDemoData(new Date('2026-07-17T12:00:00Z'))
@@ -81,5 +87,68 @@ describe('renderEmail', () => {
     const ctxNoTint = { ...ctx, quote: { ...ctx.quote, windowTints: [] } }
     const initialNoTint = renderEmail('initial', ctxNoTint)
     expect(initialNoTint.text).not.toContain('Includes window tint')
+  })
+
+  it('shows the main package name and a product image for each item, only on the initial email', () => {
+    const ctx = makeContext()
+    const main = ctx.options.find((o) => o.optionKind === 'main')!
+    expect(main.items.length).toBeGreaterThan(0) // fixture: the seeded F-150 main package has items
+
+    const initial = renderEmail('initial', ctx)
+    expect(initial.html).toContain(main.name)
+    for (const item of main.items) {
+      expect(initial.html).toContain(escapeHtml(item.name))
+    }
+
+    // Follow-ups stay short — no picture gallery on anything but the first email.
+    const checkIn = renderEmail('check_in', ctx)
+    expect(checkIn.html).not.toContain(main.items[0].name)
+  })
+
+  it('renders an <img> for an item that carries an image, and a blank placeholder for one that does not', () => {
+    const ctx = makeContext()
+    const main = ctx.options.find((o) => o.optionKind === 'main')!
+    ctx.options = ctx.options.map((o) =>
+      o === main
+        ? { ...o, items: [{ ...o.items[0], imageUrl: 'https://cdn.example.com/sub.jpg' }, { ...o.items[0], id: 'no-image', imageUrl: null }] }
+        : o,
+    )
+    const email = renderEmail('initial', ctx)
+    expect(email.html).toContain('<img src="https://cdn.example.com/sub.jpg"')
+  })
+
+  it('shows each add-on\'s own price and the running total with just that add-on — never a per-item price breakdown', () => {
+    const ctx = makeContext()
+    const main = ctx.options.find((o) => o.optionKind === 'main')!
+    const addon = { ...main, id: 'addon-1', optionKind: 'addon' as const, name: 'Ceramic tint upgrade', priceCents: 30000, items: [] }
+    ctx.options = [main, addon]
+
+    const email = renderEmail('initial', ctx)
+    expect(email.html).toContain('Ceramic tint upgrade')
+    expect(email.html).toContain('+$300')
+    expect(email.html).toContain(`total ${formatCurrency(main.priceCents + 30000)}`)
+  })
+
+  it('shows an "everything included" total only when the shop opted in', () => {
+    const ctx = makeContext()
+    const main = ctx.options.find((o) => o.optionKind === 'main')!
+    const addon = { ...main, id: 'addon-1', optionKind: 'addon' as const, name: 'Add-on', priceCents: 10000, items: [] }
+    ctx.options = [main, addon]
+
+    const off = renderEmail('initial', { ...ctx, quote: { ...ctx.quote, showFullAddonTotal: false } })
+    expect(off.html).not.toContain('Everything included')
+
+    const on = renderEmail('initial', { ...ctx, quote: { ...ctx.quote, showFullAddonTotal: true } })
+    expect(on.html).toContain('Everything included')
+  })
+
+  it('embeds a tint diagram as an inline SVG data image, only on the initial email', () => {
+    const ctx = makeContext()
+    const initial = renderEmail('initial', ctx)
+    expect(initial.html).toContain('data:image/svg+xml;base64,')
+    expect(initial.html).toContain('tint diagram') // the <img alt="…tint diagram">
+
+    const checkIn = renderEmail('check_in', ctx)
+    expect(checkIn.html).not.toContain('data:image/svg+xml;base64,')
   })
 })

@@ -6,6 +6,7 @@ import type {
   ImportSource,
   Invoice,
   InvoicePaymentMethod,
+  OptionKind,
   PackageTemplate,
   PackageTemplateSource,
   PaymentMethod,
@@ -25,7 +26,6 @@ import type {
   StockMovement,
   StockMovementType,
   TemplateType,
-  Tier,
   VehicleType,
   WindowTintConfig,
 } from '../types'
@@ -51,17 +51,20 @@ export interface NewQuoteInput {
     expirationDate: string | null
     nextFollowUpAt: string | null
     windowTints: WindowTintConfig[]
+    /** Staff opt-in: show one extra "everything included" total line (main + every add-on). Off by default. */
+    showFullAddonTotal?: boolean
   }
+  /** Exactly one entry should carry optionKind 'main' — every write path (NewQuotePage, ScanWorkspacePage, demo seeds) guarantees this; see src/lib/quotePricing.ts for how a missing main is tolerated downstream. */
   options: Array<{
-    tier: Tier
+    optionKind: OptionKind
     name: string
     description: string
+    /** Full price for a 'main' option; the *incremental* price on top of the main package for an 'addon'. */
     priceCents: number
     laborIncluded: boolean
     depositPaymentMethod: PaymentMethod | null
     depositPaymentHandle: string | null
     depositAmountCents: number | null
-    recommended: boolean
     /** Which universal configuration (e.g. 'bass_2x8') this was built against, if any. Optional — the fast/visual builder that sets this is a later phase. */
     configId?: string | null
     items: Array<{
@@ -72,6 +75,8 @@ export interface NewQuoteInput {
       description: string | null
       /** Optional — lets this item fill a configuration slot (see src/lib/audioConfigs.ts). */
       category?: ProductCategory | null
+      /** Snapshotted from the catalog item/candidate this was added from, if any. */
+      imageUrl?: string | null
     }>
   }>
 }
@@ -388,6 +393,8 @@ export interface DataRepository {
   setFollowUpAllowed(quoteId: string, allowed: boolean): Promise<void>
   markContacted(quoteId: string): Promise<void>
   updateInternalNotes(quoteId: string, notes: string | null): Promise<void>
+  /** Staff opt-in toggle: show a "main + every add-on" grand total alongside the per-add-on incremental pricing. */
+  setShowFullAddonTotal(quoteId: string, show: boolean): Promise<void>
 
   /** Sends (or demo-sends) an email after eligibility passes. Never fakes real delivery. */
   sendEmail(quoteId: string, templateType: TemplateType): Promise<SendEmailResult>

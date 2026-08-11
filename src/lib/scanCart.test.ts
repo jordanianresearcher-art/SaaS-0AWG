@@ -117,6 +117,7 @@ describe('cartToQuoteItemInputs', () => {
       name: '12" subwoofer',
       quantity: 1,
       category: 'subwoofer',
+      imageUrl: null,
     })
     expect(input).not.toHaveProperty('id')
     expect(input).not.toHaveProperty('catalogItemId')

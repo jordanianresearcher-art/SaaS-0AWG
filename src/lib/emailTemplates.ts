@@ -1,5 +1,8 @@
 import type { Customer, Quote, QuoteOption, Shop, TemplateType } from '../types'
-import { formatCurrency, formatDate, formatVehicle, quoteValueCents } from './format'
+import { formatCurrency, formatDate, formatVehicle } from './format'
+import { addonOptions, computeAddonBreakdown, fullTotalCents, mainOption } from './quotePricing'
+import { summarizeWindowTint } from './windowTint'
+import { tintDiagramDataUri } from './carDiagrams'
 
 // All five manual email templates. Emails stay short and drive the customer to
 // the public quote page — the full quote never rides inside the email.
@@ -83,20 +86,107 @@ const COPY: Record<TemplateType, TemplateCopy> = {
   },
 }
 
+/** One item row: a small product photo (when the line carries one) + name, deliberately no per-item price — the shop wants the customer to see pictures of what they're getting without a line-by-line breakdown, just the option total below. Table-based, not flex/grid, so it renders the same in Outlook as everywhere else. */
+function itemRowsHtml(items: QuoteOption['items']): string {
+  if (items.length === 0) return ''
+  return items
+    .map((item) => {
+      const label = [
+        item.quantity > 1 ? `${item.quantity}× ` : '',
+        [item.brand, item.model].filter(Boolean).join(' '),
+        item.brand || item.model ? ' — ' : '',
+        item.name.trim() || 'Item',
+      ].join('')
+      const img = item.imageUrl
+        ? `<img src="${escapeHtml(item.imageUrl)}" width="36" height="36" alt="" style="display:block;width:36px;height:36px;border-radius:8px;object-fit:contain;background:#f4f4f5;" />`
+        : `<div style="width:36px;height:36px;border-radius:8px;background:#f4f4f5;"></div>`
+      return (
+        `<tr>` +
+        `<td style="padding:4px 10px 4px 0;vertical-align:middle;">${img}</td>` +
+        `<td style="padding:4px 0;vertical-align:middle;font-size:14px;color:#3f3f46;">${escapeHtml(label)}</td>` +
+        `</tr>`
+      )
+    })
+    .join('')
+}
+
+/** "What's included" (main package items) + a compact add-on price list — the customer-facing summary this file was rewritten for: pictures of the products, one clear total, no itemized pricing. */
+function packageSummaryHtml(ctx: EmailContext, color: string): string {
+  const main = mainOption(ctx.options)
+  if (!main) return ''
+  const addons = addonOptions(ctx.options)
+  const breakdown = computeAddonBreakdown(ctx.options)
+
+  const mainItemsTable =
+    main.items.length > 0
+      ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 0;">${itemRowsHtml(main.items)}</table>`
+      : ''
+
+  const addonLines =
+    addons.length > 0
+      ? `<div style="margin:16px 0 0;padding-top:12px;border-top:1px solid #e4e4e7;">` +
+        `<p style="margin:0 0 6px;font-size:12px;font-weight:700;letter-spacing:.03em;color:#71717a;text-transform:uppercase;">Optional add-ons</p>` +
+        breakdown
+          .map(
+            (b) =>
+              `<p style="margin:0 0 4px;font-size:14px;color:#3f3f46;">${escapeHtml(b.option.name.trim() || 'Add-on')} — <strong style="color:#18181b;">+${formatCurrency(b.addonPriceCents)}</strong> <span style="color:#a1a1aa;">(total ${formatCurrency(b.totalWithAddonCents)})</span></p>`,
+          )
+          .join('') +
+        (ctx.quote.showFullAddonTotal
+          ? `<p style="margin:8px 0 0;font-size:14px;font-weight:700;color:${color};">Everything included: ${formatCurrency(fullTotalCents(ctx.options))}</p>`
+          : '') +
+        `</div>`
+      : ''
+
+  return (
+    `<div style="margin:0 0 20px;padding:16px;background:#fafafa;border-radius:12px;">` +
+    `<p style="margin:0;font-size:16px;font-weight:700;color:#18181b;">${escapeHtml(main.name.trim() || 'Complete system')}</p>` +
+    mainItemsTable +
+    addonLines +
+    `</div>`
+  )
+}
+
+/** One small diagram image per tint entry (data: URI SVG — see carDiagrams.ts), each with a one-line caption. Only the first two ship in the email; a long tail of scenarios is what the public quote page is for. */
+function tintDiagramsHtml(windowTints: Quote['windowTints']): string {
+  if (windowTints.length === 0) return ''
+  const shown = windowTints.slice(0, 2)
+  const cells = shown
+    .map((tint) => {
+      const summary = summarizeWindowTint(tint)
+      const percentLabel = summary.uniformPercent !== null ? `${summary.uniformPercent}%` : ''
+      const dataUri = tintDiagramDataUri(tint.bodyStyle, tint.windows)
+      return (
+        `<td style="padding:0 10px;text-align:center;vertical-align:top;">` +
+        `<img src="${dataUri}" width="150" alt="${escapeHtml(summary.name)} tint diagram" style="display:block;width:150px;" />` +
+        `<p style="margin:4px 0 0;font-size:12px;color:#71717a;">${escapeHtml(summary.name)}${percentLabel ? ` · ${percentLabel}` : ''}</p>` +
+        `</td>`
+      )
+    })
+    .join('')
+  return (
+    `<div style="margin:0 0 20px;">` +
+    `<p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:.03em;color:#71717a;text-transform:uppercase;">Window tint</p>` +
+    `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;"><tr>${cells}</tr></table>` +
+    (windowTints.length > shown.length ? `<p style="margin:6px 0 0;text-align:center;font-size:12px;color:#a1a1aa;">+${windowTints.length - shown.length} more — see your full quote</p>` : '') +
+    `</div>`
+  )
+}
+
 export function renderEmail(templateType: TemplateType, ctx: EmailContext): RenderedEmail {
   const copy = COPY[templateType]
   const { shop, customer, quote } = ctx
   const subject = copy.subject(ctx)
   const intro = copy.intro(ctx)
-  const value = quoteValueCents(ctx.options)
+  const main = mainOption(ctx.options)
+  const value = main?.priceCents ?? 0
   const vehicle = formatVehicle(customer)
   const valueLine =
     value > 0 ? (vehicle ? `Quoted from ${formatCurrency(value)} for your ${vehicle}.` : `Quoted from ${formatCurrency(value)}.`) : ''
-  // Emails stay short — no window-by-window breakdown, just a pointer to the full quote.
-  const tintTeaser =
-    templateType === 'initial' && quote.windowTints.length > 0
-      ? 'Includes window tint — see your quote for the full breakdown.'
-      : ''
+  // The full "what's included" picture gallery + tint diagrams only ride
+  // along on the very first email — follow-ups stay short reminders that
+  // point back to the quote page, same as the old text-only tint teaser did.
+  const showFullSummary = templateType === 'initial' && ctx.options.length > 0
   const expiration = quote.expirationDate
     ? `This quote is good through ${formatDate(quote.expirationDate)}.`
     : ''
@@ -108,7 +198,7 @@ export function renderEmail(templateType: TemplateType, ctx: EmailContext): Rend
     '',
     `${copy.cta}: ${ctx.publicUrl}`,
     valueLine,
-    tintTeaser,
+    showFullSummary && quote.windowTints.length > 0 ? 'Includes window tint — see your quote for the diagram and details.' : '',
     expiration,
     '',
     `Questions? Call ${shop.phone} or reply to this email (${shop.replyToEmail}).`,
@@ -135,12 +225,13 @@ export function renderEmail(templateType: TemplateType, ctx: EmailContext): Rend
     <div style="padding:24px;color:#27272a;font-size:16px;line-height:1.6;">
       <p style="margin:0 0 16px;">Hi ${escapeHtml(customer.firstName || 'there')},</p>
       <p style="margin:0 0 20px;">${escapeHtml(intro)}</p>
+      ${showFullSummary ? packageSummaryHtml(ctx, color) : ''}
       ${
         value > 0
           ? `<p style="margin:0 0 20px;color:#52525b;">${vehicle ? `Your ${escapeHtml(vehicle)} &middot; ` : ''}quoted from <strong style="color:#18181b;">${formatCurrency(value)}</strong></p>`
           : ''
       }
-      ${tintTeaser ? `<p style="margin:0 0 20px;color:#52525b;">${escapeHtml(tintTeaser)}</p>` : ''}
+      ${showFullSummary ? tintDiagramsHtml(quote.windowTints) : ''}
       <p style="margin:0 0 24px;text-align:center;">
         <a href="${escapeHtml(ctx.publicUrl)}" style="display:inline-block;background:${color};color:#ffffff;text-decoration:none;font-weight:700;font-size:17px;padding:14px 32px;border-radius:10px;">${copy.cta}</a>
       </p>

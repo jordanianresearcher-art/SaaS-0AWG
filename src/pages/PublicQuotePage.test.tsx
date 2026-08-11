@@ -34,7 +34,7 @@ describe('PublicQuotePage', () => {
     expect(await screen.findByText(/here's your quote/i)).toBeInTheDocument()
     expect(screen.getByText('Big Tex Audio')).toBeInTheDocument()
     expect(screen.getByText(/2022 Ford F-150/)).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Better' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Complete system' })).toBeInTheDocument()
     // Sanitized: the demo customer is "Marcus Bell" — last name must not render.
     expect(screen.queryByText(/Bell/)).not.toBeInTheDocument()
     expect(screen.queryByText(/marcus\.bell@example\.com/)).not.toBeInTheDocument()

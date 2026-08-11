@@ -11,7 +11,16 @@ export type QuoteStatus =
   | 'lost'
   | 'expired'
 
-export type Tier = 'good' | 'better' | 'insane' | 'custom'
+/**
+ * Replaces the old good/better/insane tier system: a quote has exactly one
+ * 'main' package (the base price) and any number of 'addon' options, each
+ * priced as the *incremental* cost to add that upsell on top of the main
+ * package — not a full alternative price the way a tier used to be. See
+ * src/lib/quotePricing.ts for the display math this shape enables (price
+ * per add-on, running total with each add-on, an optional grand total with
+ * everything).
+ */
+export type OptionKind = 'main' | 'addon'
 
 export type TemplateType =
   | 'initial'
@@ -119,7 +128,20 @@ export type ProductApprovalStatus = 'approved' | 'pending_review' | 'rejected'
 /** How a package template came to exist. 'ai_drafted' is a later phase (deferred) — declared now so the schema/type doesn't need revisiting when it ships. */
 export type PackageTemplateSource = 'staff_saved' | 'ai_drafted'
 
-export type TintBodyStyle = 'sedan_coupe' | 'suv_wagon_van'
+/**
+ * Which generic vehicle silhouette (see src/lib/carDiagrams.ts) and window
+ * layout applies to a tint entry. Was a coarse 2-way sedan_coupe/
+ * suv_wagon_van split; expanded to 7 real body shapes per explicit request
+ * so the diagram and window checklist actually match what's in the shop.
+ */
+export type TintBodyStyle =
+  | 'coupe'
+  | 'sedan'
+  | 'truck_single_cab'
+  | 'truck_crew_cab'
+  | 'suv_4_window'
+  | 'suv_6_window'
+  | 'minivan'
 
 export type TintType = 'normal' | 'ceramic'
 
@@ -202,6 +224,8 @@ export interface QuoteItem {
   description: string | null
   /** What component slot this fills (see src/lib/audioConfigs.ts). Null for items with no category set — they simply fill no slot. */
   category: ProductCategory | null
+  /** Snapshotted from the catalog item (or resolved candidate) it was added from, if any — lets the customer email/quote page show a picture of what they're getting without a live join back to catalog_items. Null for a freehand-typed item. */
+  imageUrl: string | null
   position: number
 }
 
@@ -330,17 +354,17 @@ export interface OutgoingOrder {
 export interface QuoteOption {
   id: string
   quoteId: string
-  tier: Tier
+  optionKind: OptionKind
   name: string
   description: string
   /** Which universal configuration (e.g. 'bass_2x8') this option was built against, if any. References AUDIO_CONFIGURATIONS seed data, not a DB table. */
   configId: string | null
+  /** For a 'main' option, the full package price. For an 'addon' option, the *incremental* price to add it on top of the main package — see quotePricing.ts. */
   priceCents: number
   laborIncluded: boolean
   depositPaymentMethod: PaymentMethod | null
   depositPaymentHandle: string | null
   depositAmountCents: number | null
-  recommended: boolean
   position: number
   items: QuoteItem[]
 }
@@ -402,6 +426,8 @@ export interface Quote {
   emailFollowUpAllowed: boolean
   wonAmountCents: number | null
   windowTints: WindowTintConfig[]
+  /** Staff opt-in: show one extra "everything included" total line (main + every add-on) alongside the per-add-on incremental pricing. Off by default. */
+  showFullAddonTotal: boolean
   createdAt: string
   updatedAt: string
 }
@@ -477,9 +503,10 @@ export interface PublicQuote {
   status: QuoteStatus
   expirationDate: string | null
   optedOut: boolean
+  showFullAddonTotal: boolean
   options: Array<{
     id: string
-    tier: Tier
+    optionKind: OptionKind
     name: string
     description: string
     priceCents: number
@@ -487,7 +514,6 @@ export interface PublicQuote {
     depositPaymentMethod: PaymentMethod | null
     depositPaymentHandle: string | null
     depositAmountCents: number | null
-    recommended: boolean
-    items: Array<{ brand: string | null; model: string | null; name: string; quantity: number; description: string | null }>
+    items: Array<{ brand: string | null; model: string | null; name: string; quantity: number; description: string | null; imageUrl: string | null }>
   }>
 }

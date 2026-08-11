@@ -2161,3 +2161,205 @@ two pairs of independent queries parallelized.
 - Docs updated: `docs/PRODUCT_RESOLVER.md` (candidates-passthrough +
   parallelized-query notes), `docs/IMPLEMENTATION_STATUS.md` (bass-config
   count/description corrected from the old truck/car split).
+
+## Round 30 — No more tiers: one main price + priced add-ons, product photos in the email, and a real window-tint diagram
+
+One large request: drop the good/better/insane tier system for a single
+main price plus optional named add-ons (each showing its own price and a
+running total), put product photos in the customer email without a
+line-by-line price breakdown, and replace the crude 2-body-style tint
+mock with a real diagonal vehicle diagram across 7 body styles — plus
+"less small text, more icons" on the quote form generally.
+
+### Data model — `OptionKind` replaces `Tier` + `recommended` (migration `0016`)
+
+- `quote_options.tier` (enum) + `.recommended` (bool) → one column,
+  `option_kind text check (in 'main','addon')`. With exactly one main
+  option per quote, "the recommended one" and "the main one" are the same
+  thing by construction — keeping both risked them disagreeing. Backfilled
+  from the previously-recommended option (or lowest-position if none was
+  marked, defensively) before dropping the old columns/enum.
+  `quote_items` gained `image_url text` — a snapshot from the catalog item
+  (or resolver candidate) an item was added from, the same snapshot
+  philosophy `package_template_items.image_url` already used. `quotes`
+  gained `show_full_addon_total boolean default false` — a staff opt-in
+  for one extra "everything included" summary line; off by default since
+  not every shop wants to nudge toward stacking every upsell.
+  `get_public_quote` rebuilt to match (tier→optionKind, items gain
+  imageUrl, main sorts first regardless of stored position).
+- **`src/lib/quotePricing.ts`** (new, pure, 12 tests): `mainOption`/
+  `addonOptions` pick the one main option out of a quote's options (falls
+  back to the first option defensively — every real write path always
+  sets exactly one); `computeAddonBreakdown` returns each add-on's own
+  price plus "main + just this one" running total, independently per
+  add-on (never stacked); `fullTotalCents` is the "everything included"
+  number. One shared module — NewQuotePage, QuoteDetailPage,
+  PublicQuotePage, `emailTemplates.ts`, and the Edge Function's duplicated
+  copy all compute this identically.
+- Repository layer (`repository.ts`/`demoRepository.ts`/
+  `supabaseRepository.ts`), `demoData.ts`'s 8 seeded quotes, and
+  `ScanWorkspacePage`'s inline quote creation all updated for the new
+  shape. Reseeding the 3-tier demo quotes into main+addon required real
+  judgment calls, not just a mechanical rename: a tier that was *cheaper*
+  than the recommended one (the old "Good" alternative) doesn't map onto
+  an "addon" (addons only ever add cost) — those were dropped rather than
+  forced into a shape that doesn't fit; a tier that was *pricier* became
+  an add-on priced at the delta between the two tiers' totals.
+
+### `NewQuotePage.tsx` — Main package + Add-ons, not three tier slots
+
+- One always-present "Main package" section (full treatment: the
+  drag-and-drop builder, catalog picker, deposit config, `configId` link)
+  plus an "Add-ons" field array (0–8, lighter: name, one-line description,
+  products, and an "Extra price" field — no deposit config, no builder,
+  since an add-on is a small upsell, not its own installed system). Each
+  add-on card shows its own live running total (`+$300 → total $2,800`)
+  as staff types the price. A "Show a total with everything included"
+  checkbox (visible once there's at least one add-on) previews the live
+  grand total before saving.
+- Removed entirely: the Tier `<select>`, the "Recommend this option"
+  radio, `recommendedIndex`, the 3-option cap (was `.max(3)` on a flat
+  options array — now `.max(8)` on `addons` alone, main is separate and
+  singular by construction).
+- **Less text, more icons**: a shared `ItemRows` subcomponent (used by
+  both the main option and every add-on, avoiding duplicating the
+  brand/model/name/qty grid + catalog-insert modal 9 times) now shows a
+  small category icon badge per item row (`src/components/categoryIcon.tsx`,
+  new — maps `ProductCategory` → a lucide icon; kept out of
+  `audioConfigs.ts` since that module is deliberately framework-agnostic
+  pure data, this is presentation). The catalog-insert modal shows each
+  product's actual photo (or the category icon as a fallback) instead of
+  a generic package icon for every row.
+
+### Window tint — 7 real body styles + a diagonal line-art diagram (was 2 styles + a rough top-down mock)
+
+- `TintBodyStyle` expanded from `sedan_coupe | suv_wagon_van` to `coupe |
+  sedan | truck_single_cab | truck_crew_cab | suv_4_window |
+  suv_6_window | minivan` — each with its own real window layout
+  (`BODY_STYLE_INFO` in `windowTint.ts`; e.g. a single-cab truck only has
+  a front window + back glass, no rear doors to tint). This lives in the
+  `window_tints` JSONB column (migration `0008`), not a DB enum, so no
+  migration was needed for the value-set change itself.
+- **`src/lib/carDiagrams.ts`** (new, pure): a parametric generator — one
+  shared coordinate grid and drawing technique (silhouette + a front-face
+  plane for the headlight + arcs over each wheel), with only proportions
+  (hood length, roof height, cabin bay count, rear shape:
+  fastback/trunk/bed/boxy) varying per body style. Picked a shared system
+  deliberately over 7 fully bespoke hand-drawn silhouettes — keeps every
+  style visually consistent and made the geometry tractable to get right
+  without a slow one-at-a-time visual-iteration loop. Verified by
+  actually rendering all 7 to a contact-sheet PNG via a throwaway esbuild
+  + Playwright screenshot script and eyeballing it (caught nothing wrong,
+  but this was the only way to be sure before wiring it into the app).
+  Generic, unbranded proportions only — "most iconic example of each body
+  style" (per the request) informed proportions, not a traced copy of any
+  one manufacturer's actual design, same legal footing as the reference
+  vehicle-inspection diagram style this was modeled after.
+  A single silhouette can only show one side of the car, so left/right
+  window pairs (front_left/front_right, etc.) collapse onto one visual
+  slot; `visualSlotOpacity` averages the pair's tint darkness so a
+  symmetric job (the common case) reads at full strength and an
+  asymmetric one still shows something rather than picking a side
+  arbitrarily. `tintOpacityForPercent` maps VLT% to overlay darkness —
+  5% (very dark film) renders as a near-solid swatch, 70% (barely tinted)
+  as a faint wash, monotonic across all five `TINT_VLT_PERCENTS` values.
+  `renderTintDiagramSvg`/`tintDiagramDataUri` stringify the same geometry
+  into a standalone `<svg>` for the email (embedded as a base64 data URI
+  `<img>` — the same technique `SalesDocument`'s printable pages already
+  established works across modern clients).
+- **`src/components/TintDiagram.tsx`** (new): renders the same data as
+  real JSX — interactive (`onToggleSlot`, used by the editor: tapping a
+  window on the diagram flips every physical window at that position
+  together, since the diagram can't show sides separately) or read-only
+  (used by QuoteDetailPage, PublicQuotePage, and the email preview via
+  the same component — only the actual sent email uses the string
+  renderer, everything on-screen shares this one component).
+- **`WindowTintEditor.tsx`** rewritten: the body-style picker is now a
+  7-button grid of small diagram thumbnails with short labels (was 2 text
+  cards), and the crude top-down window-tile mock is replaced by the real
+  interactive `TintDiagram`.
+
+### Customer email — photos of what they're getting, one total, no line-by-line breakdown
+
+- `emailTemplates.ts`'s `renderEmail` (client preview) and
+  `send-quote-email/index.ts` (actual send) both rewritten in lockstep.
+  The `initial` email only (follow-ups stay short reminders, matching the
+  existing tint-teaser convention) now includes: the main package name +
+  a small photo per item (a blank placeholder square for an item with no
+  image, never a broken `<img>`), a compact add-on price list (name,
+  `+$X`, running total — never a per-item price, which this app's data
+  model can't produce anyway since `QuoteItem` has no per-item price
+  field), an "Everything included" line only when the shop opted in, and
+  up to 2 tint-diagram images. Everything table-based (not flex/grid) for
+  Outlook compatibility, same convention as the rest of this app's email
+  HTML.
+- The Edge Function needed its own copy of `carDiagrams.ts`'s geometry
+  (Deno can't import `src/lib/*` directly) — a full, mechanical
+  duplication rather than a simplified stand-in, so the actually-sent
+  email visually matches the app exactly, same "duplicate the whole
+  module" convention `emailTemplates.ts`'s own mirroring already
+  established. Verified via a standalone Deno-shim `tsc` typecheck (with
+  `btoa` added to the shim) before wiring it in.
+- `QuoteDetailPage`/`PublicQuotePage` similarly rebuilt: a starred "main
+  package" card + a list of add-on cards (each showing its own price and
+  running total) replaces the old N-cards-of-equal-weight tier grid; item
+  rows show a small photo; the old "Choose this option" tier-picker
+  button is gone (there's no longer a multi-tier decision to make) — the
+  response form's "which option are you asking about" dropdown still
+  lists main + every add-on by name/price, so customers can still
+  reference a specific add-on when they message the shop.
+
+### A real bug the smoke test caught
+
+`ItemRows`'s per-field-array datalist IDs (`${listIdPrefix}-name`) and
+the main/add-on name `<input>`'s own ID (`main-name` /
+`addon-${index}-name`) collided outright — the datalist for item-name
+autocomplete and the package/add-on name field shared the same DOM id.
+Playwright's strict-mode locator resolution is what actually surfaced
+this (`locator('#main-name') resolved to 2 elements`); fixed by scoping
+the item-rows prefix to `main-items`/`addon-${index}-items`, distinct
+from the name field's own id.
+
+### Verification
+
+- `tsc -b --noEmit`, `npm run lint`, `npx vitest run` (290/290, up from
+  272 — new `quotePricing.test.ts` and expanded `emailTemplates.test.ts`
+  coverage for images/add-on pricing/the everything-included total/the
+  tint diagram image), `npm run build` all clean. The Edge Function
+  typechecked standalone via the Deno-shim workflow (shim extended with a
+  `btoa` declaration).
+- New `smoke31-main-addons-tint.mjs` (21/21): no Tier dropdown anywhere,
+  Main package + Add-ons both render, an add-on's live running total, the
+  "everything included" checkbox and its live total, all 7 body styles
+  each with their own diagram, the interactive diagram's window-count per
+  style, clicking a window toggles it without throwing, the created quote
+  saves and its detail page shows main+addon+tint-diagram, the actual
+  rendered email HTML contains the main package name, add-on pricing, the
+  everything-included total, and an embedded tint-diagram `<img>`, and
+  the public quote page shows the same with no leftover tier-picker
+  button — caught the datalist-id collision bug above along the way.
+  New `smoke32-seeded-quotes.mjs` (5/5) confirms the demo data's
+  main+addon conversion renders cleanly for both a zero-addon seeded
+  quote (no stray "Add-ons" heading) and a with-addon-and-tint one.
+  Re-ran `smoke26-quote-tracking.mjs` (6/6, unaffected) and
+  `smoke22-invoice-doc-email.mjs` (pre-existing unrelated staleness from
+  a prior round's document redesign, not a new regression).
+  `smoke27-financing.mjs`'s "Choose this option on a multi-option quote"
+  check now fails by design — that's the tier-picker mechanic this round
+  explicitly removed, not a regression; everything else in that script
+  (the financing CTA, the single-tap confirmation, the staff-side
+  banner/badge) still passes.
+- **Deliberate scope decisions, noted for the record**: the "optional
+  checkbox to show total price of all addons" is a staff-composition-time
+  toggle (shows one static summary line), not a customer-interactive
+  add-on selector with a live running total on the public page — the
+  request read most naturally as a display option alongside "price of
+  addon" and "total with each addon separately" in the same sentence,
+  and building a real interactive selector would be materially more
+  scope (customer-side selection state, event tracking) than this
+  reading. Easy to build as a follow-up if that's actually wanted.
+  Vehicle silhouettes are generic body-style line art, not literal traced
+  copies of any specific real car model. `removeOldTint` stays a
+  job-level toggle (not per-window) since the underlying data model
+  already only tracks it that way — the diagram doesn't invent a
+  per-window removed-vs-fresh visual the data can't back up.
