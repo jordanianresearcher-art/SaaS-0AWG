@@ -58,31 +58,23 @@ Do not build these this week. They are good ideas parked on purpose.
 
 Five streams. A/B/C/D run in parallel; E is continuous integration.
 
-### Stream A — Production readiness ⚠️ BLOCKING
-**This outranks every feature.** The app has been built and verified almost
-entirely in demo mode. If the live Supabase project is behind on migrations,
-a real prospect who signs up gets a broken app and the pitch is dead.
+### Stream A — Production readiness ✅ largely resolved
+Production is deployed and recently verified: migrations current, secrets
+set, Edge Functions live, real quote email confirmed arriving. This was the
+biggest risk on the board and it's closed — which frees an agent for
+booking (see §3.B).
 
-- Verify which migrations are actually applied to the live project. `0009`
-  through `0016` are the suspects — `0016` alone adds `option_kind`,
-  `quote_items.image_url`, and `quotes.show_full_addon_total`, all of which
-  the current UI **requires**.
-- Apply anything missing (`supabase db push`).
-- Set Edge Function secrets: `RESEND_API_KEY` (required — no email without
-  it), and `OPENAI_API_KEY` and/or `ANTHROPIC_API_KEY` (product resolution
-  degrades gracefully without these, but the scan demo is much weaker).
-- Deploy all Edge Functions: `send-quote-email`, `send-invoice-email`,
-  `resolve-product`, `shopify-import-catalog`, `notify-shop-response`,
-  `admin-create-shop`.
-- Deploy the frontend to a real domain.
-- **Run the §1 demo script end to end against production with a fresh shop
-  account.** Real signup, real email arriving in a real inbox, real public
-  quote link opened on a real phone. Until someone has done this, the
-  product is unproven.
+Remaining, and it's small:
+- Migration `0017` (booking) has to reach production the same way. Do not
+  let it sit unapplied while booking screens ship against it.
+- Re-run the §1 demo script against production **once more on Day 6**,
+  after every stream has merged. "Verified last week" is not "verified
+  after four streams landed."
+- Keep a deploy path ready for daily pushes this week rather than one big
+  Day 6 deploy.
 
-Requires Supabase credentials — **only the project owner can do this part.**
-An agent can prepare the checklist and verify the app-side behavior, but
-cannot push migrations or set secrets.
+### Stream B — Booking system 🎯 the build
+Now the critical path. Full spec and the parity sequencing in §5.
 
 ### Stream B — Booking system
 Full spec in §5. The largest build. Owns all new booking files plus
@@ -285,13 +277,62 @@ cancellation. The 24h reminder needs a scheduled trigger — if that's not
 trivial, ship confirmation + cancellation for MVP and make the reminder a
 staff-pressed action like the quote follow-ups already are.
 
-### Booking cut list for MVP
-Ship: services/bays/hours config, staff day+week calendar with
-create/edit/cancel, public self-booking, confirmation email, quote→book
-link.
-Defer: drag-to-reschedule, recurring blocks, staff assignment, waitlist,
-online deposit capture, multi-day jobs (long durations are enough),
-resource-specific service routing.
+### Target: full Booksy parity — built in slices, not in parallel
+
+Decision: go for parity. The way to make that survivable in a week is to
+build **complete vertical slices in descending demo value**, so the product
+is shippable at the end of every slice. Never have four half-features on
+Day 6.
+
+**Slice 0 — Core (Days 1–2, blocking everything else)**
+Migration `0017`, types, `scheduling.ts` + its full test suite,
+`book_appointment` RPC, repository methods in *both* implementations.
+No UI. This is the bottleneck — one strong agent, nothing else in the way.
+
+**Slice 1 — Bookable (Days 2–4)** → *pitch-viable from here*
+Staff calendar (day + week, create/edit/cancel), services/bays/hours
+config, public self-booking page, confirmation email, quote→book link.
+Two agents in parallel once Slice 0 lands: one staff-side, one
+customer-side.
+
+**Slice 2 — No-show killer (Days 4–5)**
+24h reminder email, customer self-reschedule and self-cancel from their
+`public_token` link. These are the two things shop owners actually complain
+about — phone tag and no-shows — and they demo in fifteen seconds. Highest
+value per hour of build in the whole booking system.
+
+**Slice 3 — Money (Day 5–6)** ⚠️ *see the deposit note below*
+Deposit at booking time.
+
+**Slice 4 — Parity tail (Day 6+, only if green)**
+Waitlist, staff assignment alongside bays, drag-to-reschedule,
+resource-specific service routing, recurring blocks.
+
+**Hard checkpoint: end of Day 4.** If Slice 1 is not fully merged, working
+in production, and demoable, Slices 3 and 4 are dropped without further
+discussion and the week finishes on polish. Decide this by looking at
+merged code, not by how close it feels.
+
+### The deposit decision — read before building Slice 3
+
+"Take a deposit online" sounds like one feature and is actually a project.
+Because the money belongs to the *shop* and not to us, this is Stripe
+**Connect**, not plain Checkout: per-shop onboarding flows, KYC, payouts,
+webhooks, refunds, failure states. Realistically 3–4 days on its own, and
+it puts a KYC wall between a pilot shop and their first booking — during
+the exact week we're trying to get shops to say yes.
+
+**Recommended alternative that keeps the demo moment:** the app already
+stores each shop's deposit method and handle (Zelle / CashApp / Venmo /
+PayPal / payment link) from the existing quote deposit feature. At booking
+confirmation, show *"Send your $75 deposit to [handle] to hold this slot"*,
+put the same line in the confirmation email, and give staff a one-tap
+"deposit received" toggle on the appointment. Roughly half a day, no new
+vendor, and it matches how these shops already take money today.
+
+Real Stripe Connect goes on the post-pitch roadmap, where it belongs —
+it's a much easier sell to a shop already using the product than a
+prerequisite to trying it.
 
 ---
 
@@ -339,27 +380,49 @@ deliberate (Deno can't import `src/lib`), so the same change lands twice.
 
 ## 8. Day-by-day
 
-| Day | A · Production | B · Booking | C · Diagrams | D · Polish |
-| --- | --- | --- | --- | --- |
-| 1 | **Verify + apply migrations, set secrets, deploy** | Migration 0017, types, repository interfaces | *waiting on source art* | — |
-| 2 | Prod smoke: signup → quote → real email → public link | `scheduling.ts` + full test suite | Geometry from supplied SVGs | — |
-| 3 | Fix whatever prod smoke found | Staff calendar screen | Web rendering + editor | — |
-| 4 | — | Public booking page | Email SVG duplicate + verify | Demo data rebuild |
-| 5 | — | Emails + quote→book link | done | Landing + pricing |
-| 6 | **Integrate all streams, full regression, deploy** | | | |
-| 7 | **Buffer + timed demo rehearsal** | | | |
+Production being already verified frees an agent — put it on booking, which
+is now the whole critical path. Suggested allocation across 5 agents:
+
+| Day | B1 · Core | B2 · Staff side | B3 · Customer side | C · Diagrams | D · Polish |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Migration 0017, types, repository | *reading spec, scaffolding* | *reading spec, scaffolding* | *waiting on art* | — |
+| 2 | `scheduling.ts` + tests, `book_appointment` RPC | Calendar shell on core | Booking page shell on core | Geometry from SVGs | — |
+| 3 | Support both, apply 0017 to prod | Calendar day+week working | Service → vehicle → time flow | Web rendering + editor | — |
+| 4 | → moves to Slice 2 | Services/bays/hours config | Confirm + email + quote→book | Email SVG duplicate | Demo data rebuild |
+| 4 | **🚩 CHECKPOINT — Slice 1 merged and demoable, or Slices 3–4 are dropped** | | | | |
+| 5 | Reminder email | Deposit-on-booking (§5) | Self-reschedule / self-cancel | done | Landing + pricing |
+| 6 | **Freeze features. Integrate, full regression, deploy, re-run demo script on prod.** | | | | |
+| 7 | **Buffer + timed demo rehearsal. No new code.** | | | | |
+
+If only two or three agents are available, drop D entirely (demo data
+polish is the cheapest thing to hand-do later) and run B1 → B2+B3 → C.
 
 ---
 
 ## 9. Honest risk assessment
 
-- **Production has never been proven end to end.** Highest risk on the
-  board, and it's the one thing an agent can't fully close alone. Do it
-  Day 1.
-- **Booking in ~5 days is aggressive but real** — *if* the pure scheduling
-  logic is tested before any UI is written. The failure mode is building
-  three screens on top of slot math that turns out to be subtly wrong.
+- **Full Booksy parity in one week is the aggressive call.** It's chosen
+  deliberately, and the slice structure in §5 is what makes it survivable:
+  every slice ends shippable, so the week can stop anywhere after Slice 1
+  and still produce a product worth pitching. The failure mode to avoid is
+  four features at 70% on Day 6. Hence the Day 4 checkpoint — treat it as
+  binding.
+- **Slice 0 is a genuine bottleneck.** Two agents cannot build the calendar
+  and the booking page against a repository that doesn't exist yet. Put the
+  strongest agent on it, start it first, and don't let it sprawl into UI.
+- **Slot math is where correctness bugs hide.** Write `scheduling.ts`'s
+  tests before any screen exists. Double-booking a customer in front of a
+  prospect is the single worst demo failure available to us, and the
+  `book_appointment` RPC's transactional re-check is the only real guard —
+  client-side availability is display, not safety.
+- **Deposits are the most likely thing to blow the date.** See §5. Take the
+  half-day handle-based version, not Stripe Connect.
 - **Parallel agents colliding in `types.ts` / the repositories** is the
   most likely way a day gets lost. §4 exists specifically to prevent it.
-- **Day 7 is a buffer, not a workday.** If a stream is planning to finish
-  on Day 7, it is already late.
+- **Day 7 is a buffer, not a workday.** If a stream plans to finish on
+  Day 7, it is already late. Day 6 is a feature freeze — everything after
+  is integration, regression, and rehearsal.
+- **Diagrams (Stream C) are blocked on source art and stay blocked.** If
+  the art doesn't arrive by Day 3, ship the pitch with the current
+  side-view diagrams and redo them after. They are not worth a slipped
+  date, and no prospect will reject the product over diagram style.
