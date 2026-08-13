@@ -1007,7 +1007,22 @@ export class SupabaseRepository implements DataRepository {
       body: { quoteId, templateType },
     })
     if (error) {
-      return { ok: false, status: 'failed', message: 'The email could not be sent. Check your email setup and try again.' }
+      // The function returns a real, human-readable `message` in its JSON
+      // body (e.g. "RESEND_API_KEY is not set" or a column/schema error) —
+      // supabase-js's own error.message is just a generic "non-2xx status
+      // code" unless the body is read off the attached Response ourselves.
+      // Previously this branch threw away that detail entirely, which is
+      // exactly why "Check your email setup and try again" gave no signal
+      // toward the real cause. Mirrors sendInvoiceEmail's handling above.
+      if (error instanceof FunctionsHttpError) {
+        const body = await error.context.json().catch(() => null)
+        return {
+          ok: false,
+          status: 'failed',
+          message: typeof body?.message === 'string' ? body.message : 'The email could not be sent. Check your email setup and try again.',
+        }
+      }
+      return { ok: false, status: 'failed', message: 'The email could not be sent. Check your connection and try again.' }
     }
     const result = data as { ok: boolean; message?: string }
     return result.ok
