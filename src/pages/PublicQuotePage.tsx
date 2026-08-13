@@ -8,7 +8,6 @@ import { formatCurrency, formatDate } from '../lib/format'
 import { buildPaymentUrl, paymentInstructions } from '../lib/paymentMethods'
 import { summarizeWindowTint } from '../lib/windowTint'
 import { addonOptions, computeAddonBreakdown, fullTotalCents, mainOption } from '../lib/quotePricing'
-import { TintDiagram } from '../components/TintDiagram'
 import { Button, LoadingBlock } from '../components/ui'
 
 /** A row of small product thumbnails/names — no per-item price (see docs/QUOTE_TRACKING.md's email section: the shop wants the customer to see pictures of what they're getting without a line-by-line price breakdown, just the option total). */
@@ -334,7 +333,6 @@ export default function PublicQuotePage() {
               ].filter(Boolean)
               return (
                 <div key={i} className="flex flex-wrap items-center gap-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-                  <TintDiagram bodyStyle={tint.bodyStyle} windows={tint.windows} className="h-20 w-32 shrink-0" />
                   <div className="min-w-0 flex-1">
                     <p className="text-base font-bold text-ink">{summary.name}</p>
                     <p className="mt-0.5 text-sm text-zinc-600">

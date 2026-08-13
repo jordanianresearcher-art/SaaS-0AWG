@@ -36,7 +36,6 @@ import {
 } from '../../lib/format'
 import { summarizeWindowTint } from '../../lib/windowTint'
 import { addonOptions, computeAddonBreakdown, fullTotalCents, mainOption } from '../../lib/quotePricing'
-import { TintDiagram } from '../../components/TintDiagram'
 import type { QuoteBundle, TemplateType } from '../../types'
 
 export default function QuoteDetailPage() {
@@ -301,7 +300,6 @@ export default function QuoteDetailPage() {
                 const summary = summarizeWindowTint(tint)
                 return (
                   <Card key={i} className="flex flex-wrap items-start gap-4">
-                    <TintDiagram bodyStyle={tint.bodyStyle} windows={tint.windows} className="h-20 w-32 shrink-0" />
                     <div className="min-w-0 flex-1 space-y-1.5 text-base">
                       <p className="font-bold text-ink">
                         {summary.name} — {summary.bodyStyleLabel} &middot; {summary.tintTypeLabel}

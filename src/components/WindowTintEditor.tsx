@@ -13,7 +13,6 @@ import {
   type WindowTintFormValues,
 } from '../lib/windowTint'
 import { TINT_VISUAL_SLOT_POSITIONS, type TintVisualSlot } from '../lib/carDiagrams'
-import { TintDiagram } from './TintDiagram'
 import { formatCurrency } from '../lib/format'
 import { Field, Input } from './ui'
 
@@ -130,21 +129,24 @@ export default function WindowTintEditor({ index, value, onChange }: WindowTintE
 
   return (
     <div className="space-y-4">
+      {/* Body style still drives which window rows exist below (a single-cab
+         truck has no rear doors, a coupe has quarter glass instead) — it's
+         just a plain label picker now. The car-diagram thumbnails that used
+         to sit here are pulled pending the top-down redesign. */}
       <div>
         <p className="mb-1.5 text-sm font-semibold text-ink">What kind of vehicle is this?</p>
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+        <div className="flex flex-wrap gap-2">
           {BODY_STYLE_ORDER.map((style) => (
             <button
               key={style}
               type="button"
               onClick={() => onChange({ ...value, bodyStyle: style, windows: windowsForBodyStyle(style) })}
               aria-pressed={bodyStyle === style}
-              className={`rounded-xl border-2 p-2 text-center transition-colors ${
-                bodyStyle === style ? 'border-brand bg-blue-50' : 'border-zinc-200 hover:border-zinc-300'
+              className={`min-h-11 rounded-xl border-2 px-3.5 text-sm font-semibold transition-colors ${
+                bodyStyle === style ? 'border-brand bg-blue-50 text-ink' : 'border-zinc-200 text-zinc-600 hover:border-zinc-300'
               }`}
             >
-              <TintDiagram bodyStyle={style} windows={windowsForBodyStyle(style)} className="h-10 w-full" />
-              <p className="mt-1 text-xs font-bold text-ink">{BODY_STYLE_INFO[style].label}</p>
+              {BODY_STYLE_INFO[style].label}
             </button>
           ))}
         </div>
@@ -181,13 +183,8 @@ export default function WindowTintEditor({ index, value, onChange }: WindowTintE
       </Field>
 
       <div>
-        <p className="mb-1.5 text-sm font-semibold text-ink">Apply one % to all windows</p>
-        <PercentPills value={null} onChange={applyToAll} label="Apply one percentage to all windows" />
-      </div>
-
-      <div>
-        <p className="mb-1.5 text-sm font-semibold text-ink">Tap a window to include or skip it</p>
-        <TintDiagram bodyStyle={bodyStyle} windows={value.windows} onToggleSlot={toggleSlot} className="mx-auto block max-h-56 w-full max-w-md" />
+        <p className="mb-1.5 text-sm font-semibold text-ink">Entire vehicle</p>
+        <PercentPills value={null} onChange={applyToAll} label="Apply one percentage to every included window" />
       </div>
 
       <div className="space-y-2">

@@ -58,20 +58,47 @@ Do not build these this week. They are good ideas parked on purpose.
 
 Five streams. A/B/C/D run in parallel; E is continuous integration.
 
-### Stream A — Production readiness ✅ largely resolved
-Production is deployed and recently verified: migrations current, secrets
-set, Edge Functions live, real quote email confirmed arriving. This was the
-biggest risk on the board and it's closed — which frees an agent for
-booking (see §3.B).
+### Stream A — Production readiness ⚠️ REOPENED, blocking
+Initially recorded as verified. It isn't. A live tint-only quote save
+failed with:
 
-Remaining, and it's small:
+```
+Could not find the 'show_full_addon_total' column of 'quotes' in the schema cache
+```
+
+That column ships in migration **`0016`**, so `0016` is not applied to the
+live database. The rest of that migration (`quote_options.option_kind`,
+`quote_items.image_url`) is equally missing, and every quote save in the
+app writes all three — meaning **quote creation is currently broken in
+production for every shop, not just tint-only quotes.** The error was only
+legible at all because of the error-surfacing added in Round 31; before
+that it read "Could not save the quote. Please try again."
+
+Do this first, before any other work this week:
+
+1. **Find out what's actually applied**, rather than fixing one column at a
+   time:
+   ```sql
+   select version, name from supabase_migrations.schema_migrations
+   order by version;
+   ```
+   Compare against `supabase/migrations/` — `0009` through `0016` are all
+   suspect, since nothing after `0008` has been confirmed.
+2. **Apply what's missing:** `supabase db push`.
+3. **If `0016` shows as applied but the error persists**, it's a stale
+   PostgREST schema cache, not a missing column. Reload it with
+   `notify pgrst, 'reload schema';` or restart the project from the
+   dashboard.
+4. **Re-run the §1 demo script end to end against production** afterward —
+   including a tint-only quote, which is the case that surfaced this.
+
+Then, ongoing:
 - Migration `0017` (booking) has to reach production the same way. Do not
   let it sit unapplied while booking screens ship against it.
-- Re-run the §1 demo script against production **once more on Day 6**,
-  after every stream has merged. "Verified last week" is not "verified
-  after four streams landed."
-- Keep a deploy path ready for daily pushes this week rather than one big
-  Day 6 deploy.
+- Re-run the demo script against production again on Day 6, after every
+  stream has merged.
+- **Lesson for the week:** "deployed" and "schema current" are different
+  claims. Verify by running the flow, not by remembering a past deploy.
 
 ### Stream B — Booking system 🎯 the build
 Now the critical path. Full spec and the parity sequencing in §5.
@@ -338,10 +365,27 @@ prerequisite to trying it.
 
 ## 6. Tint diagrams — top-down (Stream C)
 
-Direction changed on owner feedback: **top-down, not 3/4.** Top-down shows
-every window at once including the sunroof, avoids the perspective and
-proportion problems that made the 3/4 art look wrong, and matches the
-convention shops already recognize from other tint software.
+**Current state: diagrams are pulled from the product entirely.** Rather
+than ship art the owner rejected, the tint feature now runs on a written
+per-slot breakdown everywhere — editor, quote detail page, public quote
+page, and email. The tint flow is fully functional without any diagram:
+pick body style (plain labels) → check the job categories → set a % per
+category → windshield and sunroof as separate add-ons.
+
+What that bought: the ~190-line duplicate of the SVG geometry inside
+`send-quote-email/index.ts` is gone, so when the diagrams return there is
+one less copy to keep byte-identical across two runtimes.
+
+`src/components/TintDiagram.tsx` and `src/lib/carDiagrams.ts` both stay in
+the repo. `carDiagrams.ts` is still load-bearing — `windowTint.ts` imports
+`TINT_VISUAL_SLOT_POSITIONS` from it for the left/right grouping.
+`TintDiagram.tsx` renders nowhere right now and is marked at the top as
+deliberately parked; **do not delete it as dead code.**
+
+Direction when the art arrives: **top-down, not 3/4.** Top-down shows every
+window at once including the sunroof, avoids the perspective and proportion
+problems that made the 3/4 art look wrong, and matches the convention shops
+already recognize from other tint software.
 
 Source art is being supplied by the owner. SVG strongly preferred — the
 existing diagram already toggles and shades real vector paths, so real

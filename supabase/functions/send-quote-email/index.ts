@@ -6,12 +6,11 @@
 // Deploy:  supabase functions deploy send-quote-email
 // Secrets: supabase secrets set RESEND_API_KEY=... EMAIL_FROM="Shop <q@dom>" APP_URL=https://...
 //
-// The email copy here mirrors src/lib/emailTemplates.ts (used for previews),
-// and the tint-diagram geometry mirrors src/lib/carDiagrams.ts (used by the
-// on-screen TintDiagram component). Both are duplicated rather than
-// imported — this function runs in Deno with its own module resolution,
-// separate from the Vite/React client build (same established convention
-// as this project's other Edge Functions). Update all three together.
+// The email copy here mirrors src/lib/emailTemplates.ts (used for previews).
+// It's duplicated rather than imported — this function runs in Deno with its
+// own module resolution, separate from the Vite/React client build (same
+// established convention as this project's other Edge Functions). Update
+// both together.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
@@ -121,10 +120,13 @@ function fullTotalCents(options: EmailQuoteOption[]): number {
 }
 
 // ---------------------------------------------------------------------------
-// Window tint diagram — mirrors src/lib/carDiagrams.ts exactly (same
-// coordinate grid, same per-style parameters). See that file for the full
-// design rationale; kept terse here since it's a duplicate, not the source
-// of truth.
+// Window tint summary — mirrors src/lib/emailTemplates.ts's tintSummaryHtml.
+// This used to carry a full duplicate of src/lib/carDiagrams.ts's SVG
+// geometry (~190 lines) to embed a car diagram per tint entry as a base64
+// data: URI. The diagrams are pulled pending a top-down redesign, so the
+// duplicated geometry is gone with them — a written breakdown of which glass
+// is getting film is what the shop wants the customer to read anyway, and
+// it's one less thing that has to be kept byte-identical across two runtimes.
 // ---------------------------------------------------------------------------
 
 interface EmailTintWindow {
@@ -137,202 +139,39 @@ interface EmailWindowTint {
   name: string
   bodyStyle: TintBodyStyle
   windows: EmailTintWindow[]
+  tintType: 'normal' | 'ceramic'
+  windshieldIncluded: boolean
+  windshieldVltPercent: number | null
+  sunroofIncluded: boolean
+  sunroofVltPercent: number | null
+  removeOldTint: boolean
 }
 
-const CAR_DIAGRAM_VIEWBOX = '0 0 480 220'
-const ROCKER_Y = 179
-const ROCKER_DIP_Y = 189
-const BELT_Y = 123
-const FRONT_BUMPER_X = 16
-const REAR_BUMPER_X = 464
-const FRONT_WHEEL_X = 94
-const REAR_WHEEL_X = 392
-
-interface StyleParams {
-  cowlX: number
-  deckX: number
-  roofY: number
-  hoodY: number
-  wheelR: number
-  rear: 'fastback' | 'trunk' | 'boxy' | 'bed'
-  bays: Array<'front' | 'rear' | 'quarter'>
-}
-
-const STYLE_PARAMS: Record<TintBodyStyle, StyleParams> = {
-  coupe: { cowlX: 150, deckX: 300, roofY: 55, hoodY: 148, wheelR: 30, rear: 'fastback', bays: ['front', 'quarter'] },
-  sedan: { cowlX: 155, deckX: 305, roofY: 58, hoodY: 148, wheelR: 30, rear: 'trunk', bays: ['front', 'rear'] },
-  truck_single_cab: { cowlX: 176, deckX: 236, roofY: 52, hoodY: 138, wheelR: 33, rear: 'bed', bays: ['front'] },
-  truck_crew_cab: { cowlX: 164, deckX: 300, roofY: 52, hoodY: 138, wheelR: 33, rear: 'bed', bays: ['front', 'rear'] },
-  suv_4_window: { cowlX: 116, deckX: 360, roofY: 46, hoodY: 136, wheelR: 31, rear: 'boxy', bays: ['front', 'rear'] },
-  suv_6_window: { cowlX: 104, deckX: 392, roofY: 43, hoodY: 134, wheelR: 31, rear: 'boxy', bays: ['front', 'rear', 'quarter'] },
-  minivan: { cowlX: 84, deckX: 402, roofY: 41, hoodY: 132, wheelR: 31, rear: 'boxy', bays: ['front', 'rear', 'quarter'] },
-}
-
-function fmt(n: number): string {
-  return Number(n.toFixed(1)).toString()
-}
-
-function buildBodyPath(p: StyleParams): string {
-  const { cowlX, deckX, roofY, hoodY, rear } = p
-  const roofFrontX = cowlX + 14
-  const roofRearX = deckX - 6
-
-  const rearSegments: string[] =
-    rear === 'fastback'
-      ? [`Q ${fmt(roofRearX + 60)} ${fmt(roofY + 4)} ${fmt(REAR_BUMPER_X - 10)} ${fmt(ROCKER_Y - 24)}`, `L ${fmt(REAR_BUMPER_X)} ${fmt(ROCKER_Y - 6)}`]
-      : rear === 'trunk'
-        ? [
-            `L ${fmt(deckX + 30)} ${fmt(roofY + 26)}`,
-            `L ${fmt(REAR_BUMPER_X - 8)} ${fmt(roofY + 30)}`,
-            `L ${fmt(REAR_BUMPER_X)} ${fmt(ROCKER_Y - 6)}`,
-          ]
-        : rear === 'bed'
-          ? [
-              `L ${fmt(deckX + 8)} ${fmt(hoodY + 6)}`,
-              `L ${fmt(REAR_BUMPER_X)} ${fmt(hoodY + 6)}`,
-              `L ${fmt(REAR_BUMPER_X)} ${fmt(ROCKER_Y - 6)}`,
-            ]
-          : [`L ${fmt(REAR_BUMPER_X - 4)} ${fmt(roofY + 2)}`, `L ${fmt(REAR_BUMPER_X)} ${fmt(ROCKER_Y - 10)}`]
-
-  return [
-    `M ${fmt(FRONT_BUMPER_X)} ${fmt(ROCKER_Y - 4)}`,
-    `L ${fmt(FRONT_BUMPER_X + 2)} ${fmt(hoodY + 10)}`,
-    `Q ${fmt(FRONT_BUMPER_X + 4)} ${fmt(hoodY - 6)} ${fmt(FRONT_BUMPER_X + 26)} ${fmt(hoodY - 4)}`,
-    `L ${fmt(cowlX - 6)} ${fmt(hoodY - 2)}`,
-    `Q ${fmt(cowlX + 4)} ${fmt(hoodY - 10)} ${fmt(roofFrontX)} ${fmt(roofY + 6)}`,
-    `Q ${fmt(roofFrontX + 6)} ${fmt(roofY)} ${fmt(roofFrontX + 18)} ${fmt(roofY)}`,
-    `L ${fmt(roofRearX)} ${fmt(roofY)}`,
-    ...rearSegments,
-    `L ${fmt(REAR_WHEEL_X + p.wheelR + 14)} ${fmt(ROCKER_Y)}`,
-    `Q ${fmt(REAR_WHEEL_X)} ${fmt(ROCKER_DIP_Y)} ${fmt(REAR_WHEEL_X - p.wheelR - 14)} ${fmt(ROCKER_Y)}`,
-    `L ${fmt(FRONT_WHEEL_X + p.wheelR + 14)} ${fmt(ROCKER_Y)}`,
-    `Q ${fmt(FRONT_WHEEL_X)} ${fmt(ROCKER_DIP_Y)} ${fmt(FRONT_WHEEL_X - p.wheelR - 14)} ${fmt(ROCKER_Y)}`,
-    `L ${fmt(FRONT_BUMPER_X)} ${fmt(ROCKER_Y - 4)}`,
-    'Z',
-  ].join(' ')
-}
-
-function buildFrontFacePath(p: StyleParams): string {
-  const x = FRONT_BUMPER_X
-  return [
-    `M ${fmt(x)} ${fmt(ROCKER_Y - 4)}`,
-    `L ${fmt(x + 2)} ${fmt(p.hoodY + 10)}`,
-    `Q ${fmt(x + 4)} ${fmt(p.hoodY - 6)} ${fmt(x + 26)} ${fmt(p.hoodY - 4)}`,
-    `L ${fmt(x + 22)} ${fmt(ROCKER_Y - 4)}`,
-    'Z',
-  ].join(' ')
-}
-
-function sideWindowBays(p: StyleParams): Partial<Record<'front' | 'rear' | 'quarter', string>> {
-  const top = p.roofY + 9
-  const left = p.cowlX + 16
-  const right = p.deckX - 8
-  const span = right - left
-  const gap = 6
-  const n = p.bays.length
-  const bayWidth = (span - gap * (n - 1)) / n
-  const out: Partial<Record<'front' | 'rear' | 'quarter', string>> = {}
-  p.bays.forEach((slot, i) => {
-    const x0 = left + i * (bayWidth + gap)
-    const x1 = x0 + bayWidth
-    const topInset = slot === 'quarter' ? bayWidth * 0.28 : 4
-    out[slot] = [
-      `${fmt(x0 + topInset)},${fmt(top)}`,
-      `${fmt(x1 - 4)},${fmt(top)}`,
-      `${fmt(x1)},${fmt(BELT_Y)}`,
-      `${fmt(x0)},${fmt(BELT_Y)}`,
-    ].join(' ')
-  })
-  return out
-}
-
-function backGlassPolygon(p: StyleParams): string {
-  const top = p.roofY + 9
-  const left = p.deckX + 4
-  switch (p.rear) {
-    case 'fastback':
-      return [`${fmt(left)},${fmt(top)}`, `${fmt(REAR_BUMPER_X - 20)},${fmt(ROCKER_Y - 30)}`, `${fmt(left + 6)},${fmt(ROCKER_Y - 30)}`].join(' ')
-    case 'trunk':
-      return [`${fmt(left)},${fmt(top)}`, `${fmt(left + 40)},${fmt(top + 18)}`, `${fmt(left + 12)},${fmt(top + 18)}`].join(' ')
-    case 'bed':
-      return [`${fmt(left)},${fmt(top + 4)}`, `${fmt(left + 14)},${fmt(top + 4)}`, `${fmt(left + 14)},${fmt(p.hoodY - 2)}`, `${fmt(left)},${fmt(p.hoodY - 2)}`].join(' ')
-    case 'boxy':
-    default:
-      return [
-        `${fmt(left)},${fmt(top + 2)}`,
-        `${fmt(REAR_BUMPER_X - 10)},${fmt(top + 2)}`,
-        `${fmt(REAR_BUMPER_X - 14)},${fmt(BELT_Y)}`,
-        `${fmt(left + 4)},${fmt(BELT_Y)}`,
-      ].join(' ')
-  }
-}
-
-type TintVisualSlot = 'front' | 'rear' | 'quarter' | 'back_glass'
-
-const SLOT_POSITIONS: Record<TintVisualSlot, TintWindowPosition[]> = {
-  front: ['front_left', 'front_right'],
-  rear: ['rear_left', 'rear_right'],
-  quarter: ['rear_quarter_left', 'rear_quarter_right'],
-  back_glass: ['back_glass'],
-}
-
-function tintOpacityForPercent(vltPercent: number | null): number {
-  if (vltPercent === null) return 0
-  const clamped = Math.min(100, Math.max(0, vltPercent))
-  return Math.max(0.12, 0.9 - clamped * 0.008)
-}
-
-function visualSlotOpacity(windows: EmailTintWindow[], slot: TintVisualSlot): number {
-  const positions = SLOT_POSITIONS[slot]
-  const relevant = windows.filter((w) => positions.includes(w.position))
-  if (relevant.length === 0) return 0
-  const total = relevant.reduce((sum, w) => sum + (w.included ? tintOpacityForPercent(w.vltPercent) : 0), 0)
-  return total / relevant.length
-}
-
-function renderTintDiagramSvg(style: TintBodyStyle, windows: EmailTintWindow[]): string {
-  const p = STYLE_PARAMS[style]
-  const bays = sideWindowBays(p)
-  const windowPolys: Partial<Record<TintVisualSlot, string>> = { ...bays, back_glass: backGlassPolygon(p) }
-  const slots = (Object.keys(windowPolys) as TintVisualSlot[]).map((slot) => ({
-    points: windowPolys[slot]!,
-    opacity: visualSlotOpacity(windows, slot),
-  }))
-  const width = 300
-  const wheels = [
-    { cx: FRONT_WHEEL_X, cy: ROCKER_Y + 8, r: p.wheelR },
-    { cx: REAR_WHEEL_X, cy: ROCKER_Y + 8, r: p.wheelR },
-  ]
-  const wheelShapes = wheels
-    .map(
-      (w) =>
-        `<circle cx="${w.cx}" cy="${w.cy}" r="${w.r}" fill="#ffffff" stroke="#111827" stroke-width="3.5" /><circle cx="${w.cx}" cy="${w.cy}" r="${Math.round(w.r * 0.42)}" fill="#111827" />`,
-    )
-    .join('')
-  const windowShapes = slots
-    .map((s) => `<polygon points="${s.points}" fill="#111827" fill-opacity="${s.opacity.toFixed(2)}" stroke="#111827" stroke-width="1" />`)
-    .join('')
-  const headlight = { cx: FRONT_BUMPER_X + 13, cy: p.hoodY + 1, rx: 8, ry: 5 }
-  return (
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${CAR_DIAGRAM_VIEWBOX}" width="${width}" height="${Math.round((width * 220) / 480)}">` +
-    `<rect x="0" y="0" width="480" height="220" fill="#ffffff" />` +
-    wheelShapes +
-    `<path d="${buildBodyPath(p)}" fill="#ffffff" stroke="#111827" stroke-width="3.5" stroke-linejoin="round" />` +
-    windowShapes +
-    `<path d="${buildFrontFacePath(p)}" fill="none" stroke="#111827" stroke-width="3.5" stroke-linejoin="round" />` +
-    `<ellipse cx="${headlight.cx}" cy="${headlight.cy}" rx="${headlight.rx}" ry="${headlight.ry}" fill="#ffffff" stroke="#111827" stroke-width="2" />` +
-    `</svg>`
-  )
-}
-
-function tintDiagramDataUri(style: TintBodyStyle, windows: EmailTintWindow[]): string {
-  return `data:image/svg+xml;base64,${btoa(renderTintDiagramSvg(style, windows))}`
-}
+/** Driver and passenger side collapse into one label — mirrors TINT_SLOT_LABEL / TINT_VISUAL_SLOT_POSITIONS in src/lib/windowTint.ts. */
+const TINT_SLOT_LABELS: Array<{ label: string; positions: TintWindowPosition[] }> = [
+  { label: 'Front windows', positions: ['front_left', 'front_right'] },
+  { label: 'Rear windows', positions: ['rear_left', 'rear_right'] },
+  { label: 'Rear quarter windows', positions: ['rear_quarter_left', 'rear_quarter_right'] },
+  { label: 'Back glass', positions: ['back_glass'] },
+]
 
 function tintUniformPercent(windows: EmailTintWindow[]): number | null {
   const percents = windows.filter((w) => w.included && w.vltPercent !== null).map((w) => w.vltPercent as number)
   if (percents.length === 0) return null
   return new Set(percents).size === 1 ? percents[0] : null
+}
+
+/** One "Front windows 20% · Back glass 5%" line per entry, grouped by visual slot. */
+function tintCoverageLine(windows: EmailTintWindow[]): string {
+  const parts: string[] = []
+  for (const { label, positions } of TINT_SLOT_LABELS) {
+    const included = windows.filter((w) => positions.includes(w.position) && w.included && w.vltPercent !== null)
+    if (included.length === 0) continue
+    const percents = new Set(included.map((w) => w.vltPercent))
+    if (percents.size === 1) parts.push(`${label} ${included[0].vltPercent}%`)
+    else for (const w of included) parts.push(`${label} ${w.vltPercent}%`)
+  }
+  return parts.join(' · ')
 }
 
 // ---------------------------------------------------------------------------
@@ -448,27 +287,35 @@ function packageSummaryHtml(c: EmailContext, color: string): string {
   )
 }
 
-function tintDiagramsHtml(windowTints: EmailWindowTint[]): string {
+function tintSummaryHtml(windowTints: EmailWindowTint[]): string {
   if (windowTints.length === 0) return ''
   const shown = windowTints.slice(0, 2)
-  const cells = shown
+  const blocks = shown
     .map((tint) => {
-      const percent = tintUniformPercent(tint.windows)
-      const dataUri = tintDiagramDataUri(tint.bodyStyle, tint.windows)
       const name = tint.name.trim() || 'Tint option'
+      const uniform = tintUniformPercent(tint.windows)
+      const coverage = uniform !== null ? `All windows at ${uniform}%` : tintCoverageLine(tint.windows)
+      const extras = [
+        tint.windshieldIncluded && tint.windshieldVltPercent !== null ? `windshield ${tint.windshieldVltPercent}%` : null,
+        tint.sunroofIncluded && tint.sunroofVltPercent !== null ? `sunroof ${tint.sunroofVltPercent}%` : null,
+        tint.removeOldTint ? 'old tint removed' : null,
+      ].filter((x): x is string => x !== null)
       return (
-        `<td style="padding:0 10px;text-align:center;vertical-align:top;">` +
-        `<img src="${dataUri}" width="150" alt="${escapeHtml(name)} tint diagram" style="display:block;width:150px;" />` +
-        `<p style="margin:4px 0 0;font-size:12px;color:#71717a;">${escapeHtml(name)}${percent !== null ? ` · ${percent}%` : ''}</p>` +
-        `</td>`
+        `<p style="margin:0 0 6px;font-size:14px;color:#3f3f46;">` +
+        `<strong style="color:#18181b;">${escapeHtml(name)}</strong> — ${tint.tintType === 'ceramic' ? 'Ceramic' : 'Normal'} film` +
+        (coverage ? `<br /><span style="color:#71717a;">${escapeHtml(coverage)}</span>` : '') +
+        (extras.length > 0 ? `<br /><span style="color:#a1a1aa;">Plus ${escapeHtml(extras.join(', '))}</span>` : '') +
+        `</p>`
       )
     })
     .join('')
   return (
-    `<div style="margin:0 0 20px;">` +
+    `<div style="margin:0 0 20px;padding:16px;background:#fafafa;border-radius:12px;">` +
     `<p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:.03em;color:#71717a;text-transform:uppercase;">Window tint</p>` +
-    `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;"><tr>${cells}</tr></table>` +
-    (windowTints.length > shown.length ? `<p style="margin:6px 0 0;text-align:center;font-size:12px;color:#a1a1aa;">+${windowTints.length - shown.length} more — see your full quote</p>` : '') +
+    blocks +
+    (windowTints.length > shown.length
+      ? `<p style="margin:6px 0 0;font-size:12px;color:#a1a1aa;">+${windowTints.length - shown.length} more — see your full quote</p>`
+      : '') +
     `</div>`
   )
 }
@@ -526,7 +373,7 @@ function renderEmail(template: TemplateType, c: EmailContext): { subject: string
           ? `<p style="margin:0 0 20px;color:#52525b;">${c.vehicle ? `Your ${escapeHtml(c.vehicle)} &middot; ` : ''}quoted from <strong style="color:#18181b;">${formatCurrency(value)}</strong></p>`
           : ''
       }
-      ${showFullSummary ? tintDiagramsHtml(c.windowTints) : ''}
+      ${showFullSummary ? tintSummaryHtml(c.windowTints) : ''}
       <p style="margin:0 0 24px;text-align:center;">
         <a href="${escapeHtml(c.publicUrl)}" style="display:inline-block;background:${color};color:#ffffff;text-decoration:none;font-weight:700;font-size:17px;padding:14px 32px;border-radius:10px;">${copy.cta}</a>
       </p>
@@ -687,10 +534,16 @@ Deno.serve(async (req) => {
       .map((i) => ({ brand: i.brand, model: i.model, name: i.name, quantity: i.quantity, imageUrl: i.image_url })),
   }))
   const windowTints: EmailWindowTint[] = Array.isArray(quote.window_tints)
-    ? quote.window_tints.map((t: { name?: string; bodyStyle: TintBodyStyle; windows: EmailTintWindow[] }) => ({
-        name: t.name ?? '',
-        bodyStyle: t.bodyStyle,
-        windows: t.windows,
+    ? quote.window_tints.map((t: Record<string, unknown>) => ({
+        name: (t.name as string) ?? '',
+        bodyStyle: t.bodyStyle as TintBodyStyle,
+        windows: (t.windows as EmailTintWindow[]) ?? [],
+        tintType: (t.tintType as 'normal' | 'ceramic') ?? 'normal',
+        windshieldIncluded: Boolean(t.windshieldIncluded),
+        windshieldVltPercent: (t.windshieldVltPercent as number | null) ?? null,
+        sunroofIncluded: Boolean(t.sunroofIncluded),
+        sunroofVltPercent: (t.sunroofVltPercent as number | null) ?? null,
+        removeOldTint: Boolean(t.removeOldTint),
       }))
     : []
   const vehicle =

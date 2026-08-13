@@ -142,13 +142,33 @@ describe('renderEmail', () => {
     expect(on.html).toContain('Everything included')
   })
 
-  it('embeds a tint diagram as an inline SVG data image, only on the initial email', () => {
+  it('spells out the tint coverage in writing, only on the initial email', () => {
     const ctx = makeContext()
     const initial = renderEmail('initial', ctx)
-    expect(initial.html).toContain('data:image/svg+xml;base64,')
-    expect(initial.html).toContain('tint diagram') // the <img alt="…tint diagram">
+    expect(initial.html).toContain('Window tint')
+    expect(initial.html).toContain('All windows at 20%')
+    expect(initial.html).toContain('Ceramic film')
 
     const checkIn = renderEmail('check_in', ctx)
-    expect(checkIn.html).not.toContain('data:image/svg+xml;base64,')
+    expect(checkIn.html).not.toContain('Window tint')
+  })
+
+  it('never embeds a car-diagram image — the diagrams are pulled pending the top-down redesign', () => {
+    const initial = renderEmail('initial', makeContext())
+    expect(initial.html).not.toContain('data:image/svg+xml;base64,')
+    expect(initial.html).not.toContain('<svg')
+  })
+
+  it('lists per-slot percentages when the windows differ, instead of one uniform line', () => {
+    const ctx = makeContext()
+    const tint = ctx.quote.windowTints[0]
+    const mixed = {
+      ...tint,
+      windows: tint.windows.map((w) => ({ ...w, vltPercent: w.position === 'back_glass' ? 5 : 35 })),
+    }
+    const html = renderEmail('initial', { ...ctx, quote: { ...ctx.quote, windowTints: [mixed] } }).html
+    expect(html).not.toContain('All windows at')
+    expect(html).toContain('Front windows 35%')
+    expect(html).toContain('Back glass 5%')
   })
 })

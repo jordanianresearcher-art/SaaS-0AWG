@@ -1,8 +1,16 @@
-// Renders the diagonal (3/4-view) vehicle silhouette from src/lib/carDiagrams.ts
-// as real SVG — interactive (click a window to toggle it) when onToggleSlot
-// is given, read-only otherwise. Used in the tint editor, the quote detail
-// page, the public quote page, and the email preview (the actual email
-// itself uses renderTintDiagramSvg's string form instead, same geometry).
+// ⚠️ NOT CURRENTLY RENDERED ANYWHERE — deliberately parked, not dead code.
+//
+// This renders the diagonal (3/4-view) vehicle silhouette from
+// src/lib/carDiagrams.ts as real SVG, interactive (click a window to toggle
+// it) when onToggleSlot is given. It was pulled from the tint editor, quote
+// detail page, public quote page, and email because the 3/4 art didn't read
+// well; the replacement is a **top-down** diagram (see docs/MVP_PLAN.md §6,
+// Stream C), which will reuse this component's structure with new geometry.
+//
+// Keep this file. The tint feature still works without it — the editor and
+// all display surfaces fall back to the written per-slot breakdown — and
+// carDiagrams.ts is still load-bearing regardless (windowTint.ts imports
+// TINT_VISUAL_SLOT_POSITIONS from it for the left/right grouping).
 
 import type { TintBodyStyle, WindowTintWindow } from '../types'
 import { CAR_DIAGRAM_VIEWBOX, carDiagramFor, visualSlotsWithOpacity, type TintVisualSlot } from '../lib/carDiagrams'

@@ -2,7 +2,6 @@ import type { Customer, Quote, QuoteOption, Shop, TemplateType } from '../types'
 import { formatCurrency, formatDate, formatVehicle } from './format'
 import { addonOptions, computeAddonBreakdown, fullTotalCents, mainOption } from './quotePricing'
 import { summarizeWindowTint } from './windowTint'
-import { tintDiagramDataUri } from './carDiagrams'
 
 // All five manual email templates. Emails stay short and drive the customer to
 // the public quote page — the full quote never rides inside the email.
@@ -147,28 +146,48 @@ function packageSummaryHtml(ctx: EmailContext, color: string): string {
   )
 }
 
-/** One small diagram image per tint entry (data: URI SVG — see carDiagrams.ts), each with a one-line caption. Only the first two ship in the email; a long tail of scenarios is what the public quote page is for. */
-function tintDiagramsHtml(windowTints: Quote['windowTints']): string {
+/**
+ * A plain-text-styled summary of each tint entry — which glass is getting
+ * film and at what %. Previously this embedded a car-diagram SVG per entry
+ * as a base64 data: URI <img>; the diagrams are pulled pending a top-down
+ * redesign, and a written breakdown is what the shop actually wants the
+ * customer to read anyway. Only the first two entries ship; a long tail of
+ * priced scenarios is what the public quote page is for.
+ */
+function tintSummaryHtml(windowTints: Quote['windowTints']): string {
   if (windowTints.length === 0) return ''
   const shown = windowTints.slice(0, 2)
-  const cells = shown
+  const blocks = shown
     .map((tint) => {
       const summary = summarizeWindowTint(tint)
-      const percentLabel = summary.uniformPercent !== null ? `${summary.uniformPercent}%` : ''
-      const dataUri = tintDiagramDataUri(tint.bodyStyle, tint.windows)
+      const coverage =
+        summary.uniformPercent !== null
+          ? `All windows at ${summary.uniformPercent}%`
+          : summary.windowLines.length > 0
+            ? summary.windowLines.map((w) => `${escapeHtml(w.label)} ${w.vltPercent}%`).join(' · ')
+            : ''
+      const extras = [
+        summary.windshield ? `windshield ${summary.windshield.vltPercent}%` : null,
+        summary.sunroof ? `sunroof ${summary.sunroof.vltPercent}%` : null,
+        summary.removeOldTint ? 'old tint removed' : null,
+      ].filter((x): x is string => x !== null)
       return (
-        `<td style="padding:0 10px;text-align:center;vertical-align:top;">` +
-        `<img src="${dataUri}" width="150" alt="${escapeHtml(summary.name)} tint diagram" style="display:block;width:150px;" />` +
-        `<p style="margin:4px 0 0;font-size:12px;color:#71717a;">${escapeHtml(summary.name)}${percentLabel ? ` · ${percentLabel}` : ''}</p>` +
-        `</td>`
+        `<p style="margin:0 0 6px;font-size:14px;color:#3f3f46;">` +
+        `<strong style="color:#18181b;">${escapeHtml(summary.name)}</strong> — ${escapeHtml(summary.tintTypeLabel)} film` +
+        (coverage ? `<br /><span style="color:#71717a;">${coverage}</span>` : '') +
+        (extras.length > 0 ? `<br /><span style="color:#a1a1aa;">Plus ${escapeHtml(extras.join(', '))}</span>` : '') +
+        (summary.totalCents > 0 ? ` <strong style="color:#18181b;">${formatCurrency(summary.totalCents)}</strong>` : '') +
+        `</p>`
       )
     })
     .join('')
   return (
-    `<div style="margin:0 0 20px;">` +
+    `<div style="margin:0 0 20px;padding:16px;background:#fafafa;border-radius:12px;">` +
     `<p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:.03em;color:#71717a;text-transform:uppercase;">Window tint</p>` +
-    `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;"><tr>${cells}</tr></table>` +
-    (windowTints.length > shown.length ? `<p style="margin:6px 0 0;text-align:center;font-size:12px;color:#a1a1aa;">+${windowTints.length - shown.length} more — see your full quote</p>` : '') +
+    blocks +
+    (windowTints.length > shown.length
+      ? `<p style="margin:6px 0 0;font-size:12px;color:#a1a1aa;">+${windowTints.length - shown.length} more — see your full quote</p>`
+      : '') +
     `</div>`
   )
 }
@@ -231,7 +250,7 @@ export function renderEmail(templateType: TemplateType, ctx: EmailContext): Rend
           ? `<p style="margin:0 0 20px;color:#52525b;">${vehicle ? `Your ${escapeHtml(vehicle)} &middot; ` : ''}quoted from <strong style="color:#18181b;">${formatCurrency(value)}</strong></p>`
           : ''
       }
-      ${showFullSummary ? tintDiagramsHtml(quote.windowTints) : ''}
+      ${showFullSummary ? tintSummaryHtml(quote.windowTints) : ''}
       <p style="margin:0 0 24px;text-align:center;">
         <a href="${escapeHtml(ctx.publicUrl)}" style="display:inline-block;background:${color};color:#ffffff;text-decoration:none;font-weight:700;font-size:17px;padding:14px 32px;border-radius:10px;">${copy.cta}</a>
       </p>
