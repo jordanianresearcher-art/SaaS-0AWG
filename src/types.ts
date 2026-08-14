@@ -42,6 +42,7 @@ export type EmailStatus = 'previewed' | 'sending' | 'sent' | 'failed' | 'demo_se
 
 export type QuoteEventType =
   | 'created'
+  | 'edited'
   | 'email_sent'
   | 'email_demo_sent'
   | 'email_failed'

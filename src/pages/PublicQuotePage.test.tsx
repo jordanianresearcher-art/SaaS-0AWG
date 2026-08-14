@@ -102,14 +102,14 @@ describe('PublicQuotePage', () => {
     expect(target.events.filter((e) => e.eventType === 'quote_viewed')).toHaveLength(1) // still just the seeded one
   })
 
-  it('lets the customer submit a response and shows confirmation', async () => {
+  it('books in a single tap — the primary action needs no form', async () => {
     const user = userEvent.setup()
     renderPage(token)
     await screen.findByText(/here's your quote/i)
 
+    // "I'm ready to book" is the ranked primary action: one tap submits, with
+    // no option picker or message box in the way.
     await user.click(screen.getByRole('button', { name: /i'm ready to book/i }))
-    await user.type(screen.getByLabelText(/anything to add/i), 'Saturday works best')
-    await user.click(screen.getByRole('button', { name: /send to the shop/i }))
 
     expect(await screen.findByText(/got it — thanks!/i)).toBeInTheDocument()
 
@@ -117,8 +117,26 @@ describe('PublicQuotePage', () => {
     const bundles = await fresh.listQuoteBundles()
     const target = bundles.find((b) => b.quote.publicToken === token)!
     expect(target.responses[0].responseType).toBe('ready_to_book')
-    expect(target.responses[0].message).toBe('Saturday works best')
     expect(target.quote.status).toBe('responded')
+  })
+
+  it('lets a lower-intent response carry a written message', async () => {
+    const user = userEvent.setup()
+    renderPage(token)
+    await screen.findByText(/here's your quote/i)
+
+    // The secondary choices still open the optional message box before sending.
+    await user.click(screen.getByRole('button', { name: /i have a question/i }))
+    await user.type(screen.getByLabelText(/anything to add/i), 'Does that include tint?')
+    await user.click(screen.getByRole('button', { name: /send to the shop/i }))
+
+    expect(await screen.findByText(/got it — thanks!/i)).toBeInTheDocument()
+
+    const fresh = new DemoRepository()
+    const bundles = await fresh.listQuoteBundles()
+    const target = bundles.find((b) => b.quote.publicToken === token)!
+    expect(target.responses[0].responseType).toBe('question')
+    expect(target.responses[0].message).toBe('Does that include tint?')
   })
 
   it('blocks duplicate submissions in the same browser session', async () => {

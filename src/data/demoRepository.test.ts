@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { DemoRepository, DEMO_UNRESOLVED_BARCODE } from './demoRepository'
+import type { NewQuoteInput } from './repository'
 
 function memoryStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> & { map: Map<string, string> } {
   const map = new Map<string, string>()
@@ -12,6 +13,38 @@ function memoryStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> & 
 }
 
 describe('DemoRepository', () => {
+  function makeQuoteInput(): NewQuoteInput {
+    return {
+      customer: {
+        firstName: 'Test',
+        lastName: null,
+        email: 'test@example.com',
+        phone: null,
+        vehicleYear: 2020,
+        vehicleMake: 'Toyota',
+        vehicleModel: 'Tundra',
+        vehicleTrim: null,
+        source: null,
+        emailContactPermissionConfirmed: true,
+      },
+      quote: { internalNotes: null, expirationDate: null, nextFollowUpAt: null, windowTints: [] },
+      options: [
+        {
+          optionKind: 'main',
+          name: 'Original',
+          description: '',
+          configId: null,
+          priceCents: 99900,
+          laborIncluded: true,
+          depositPaymentMethod: null,
+          depositPaymentHandle: null,
+          depositAmountCents: null,
+          items: [{ brand: 'Kicker', model: 'X', name: 'Sub', quantity: 2, description: null, category: 'subwoofer', imageUrl: null }],
+        },
+      ],
+    }
+  }
+
   let storage: ReturnType<typeof memoryStorage>
   let repo: DemoRepository
 
@@ -92,6 +125,76 @@ describe('DemoRepository', () => {
     expect(bundle?.options[0].configId).toBe('bass_2x8')
     expect(bundle?.options[0].items[0].category).toBe('subwoofer')
     expect(bundle?.customer.emailContactPermissionConfirmedAt).toBeTruthy()
+  })
+
+  it('updates a quote in place without disturbing its lifecycle or link', async () => {
+    const created = await repo.createQuote(makeQuoteInput())
+    await repo.setQuoteStatus(created.id, 'emailed')
+    const before = await repo.getQuoteBundle(created.id)
+
+    const updated = await repo.updateQuote(created.id, {
+      ...makeQuoteInput(),
+      customer: { ...makeQuoteInput().customer, firstName: 'Renamed', vehicleModel: 'Tacoma' },
+      options: [
+        {
+          optionKind: 'main',
+          name: 'Revised package',
+          description: '',
+          configId: null,
+          priceCents: 150000,
+          laborIncluded: true,
+          depositPaymentMethod: null,
+          depositPaymentHandle: null,
+          depositAmountCents: null,
+          items: [{ brand: 'JL', model: 'Y', name: 'New sub', quantity: 1, description: null, category: 'subwoofer', imageUrl: null }],
+        },
+      ],
+    })
+
+    const after = await repo.getQuoteBundle(created.id)
+    // Edited content
+    expect(after!.customer.firstName).toBe('Renamed')
+    expect(after!.customer.vehicleModel).toBe('Tacoma')
+    expect(after!.options).toHaveLength(1)
+    expect(after!.options[0].name).toBe('Revised package')
+    expect(after!.options[0].priceCents).toBe(150000)
+    expect(after!.options[0].items[0].name).toBe('New sub')
+    // Preserved lifecycle — an edit corrects what a quote says, it doesn't restart it
+    expect(updated.publicToken).toBe(before!.quote.publicToken)
+    expect(after!.quote.status).toBe('emailed')
+    expect(after!.events.some((e) => e.eventType === 'edited')).toBe(true)
+  })
+
+  it('fully replaces options on update rather than merging them', async () => {
+    const created = await repo.createQuote({
+      ...makeQuoteInput(),
+      options: [
+        { optionKind: 'main', name: 'Main', description: '', configId: null, priceCents: 100000, laborIncluded: true, depositPaymentMethod: null, depositPaymentHandle: null, depositAmountCents: null, items: [] },
+        { optionKind: 'addon', name: 'Addon A', description: '', configId: null, priceCents: 20000, laborIncluded: true, depositPaymentMethod: null, depositPaymentHandle: null, depositAmountCents: null, items: [] },
+      ],
+    })
+    await repo.updateQuote(created.id, {
+      ...makeQuoteInput(),
+      options: [
+        { optionKind: 'main', name: 'Main only now', description: '', configId: null, priceCents: 100000, laborIncluded: true, depositPaymentMethod: null, depositPaymentHandle: null, depositAmountCents: null, items: [] },
+      ],
+    })
+    const after = await repo.getQuoteBundle(created.id)
+    expect(after!.options).toHaveLength(1)
+    expect(after!.options[0].name).toBe('Main only now')
+  })
+
+  it('deletes a quote and every row hanging off it', async () => {
+    const created = await repo.createQuote(makeQuoteInput())
+    await repo.sendEmail(created.id, 'initial')
+    expect((await repo.getQuoteBundle(created.id))!.options.length).toBeGreaterThan(0)
+
+    await repo.deleteQuote(created.id)
+
+    expect(await repo.getQuoteBundle(created.id)).toBeNull()
+    expect((await repo.listQuoteBundles()).some((b) => b.quote.id === created.id)).toBe(false)
+    // The public link dies with it.
+    expect(await repo.getPublicQuote(created.publicToken)).toBeNull()
   })
 
   it('creates a bare quote with no vehicle and no pricing options', async () => {

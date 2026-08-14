@@ -11,6 +11,7 @@ import type {
   QuoteBundle,
   QuoteEvent,
   QuoteEventType,
+  QuoteOption,
   QuoteStatus,
   ResponseType,
   Shop,
@@ -560,11 +561,19 @@ export class DemoRepository implements DataRepository {
     }
     this.db.customers.push(customer)
     this.db.quotes.push(quote)
-    input.options.forEach((opt, i) => {
+    this.db.options.push(...this.buildOptions(quote.id, input.options))
+    this.addEvent(quote.id, 'created')
+    this.persist()
+    return quote
+  }
+
+  /** Builds this quote's option rows from form input. Shared by createQuote and updateQuote so the two paths can't drift. */
+  private buildOptions(quoteId: string, options: NewQuoteInput['options']): QuoteOption[] {
+    return options.map((opt, i) => {
       const optionId = newId()
-      this.db.options.push({
+      return {
         id: optionId,
-        quoteId: quote.id,
+        quoteId,
         optionKind: opt.optionKind,
         name: opt.name,
         description: opt.description,
@@ -583,11 +592,56 @@ export class DemoRepository implements DataRepository {
           imageUrl: item.imageUrl ?? null,
           position: j,
         })),
-      })
+      }
     })
-    this.addEvent(quote.id, 'created')
+  }
+
+  async updateQuote(quoteId: string, input: NewQuoteInput): Promise<Quote> {
+    const quote = this.db.quotes.find((q) => q.id === quoteId)
+    if (!quote) throw new Error('Quote not found')
+    const now = new Date().toISOString()
+
+    const customer = this.db.customers.find((c) => c.id === quote.customerId)
+    if (customer) {
+      Object.assign(customer, input.customer, {
+        // Only stamp on the transition into confirmed — re-saving an
+        // already-confirmed customer must not keep moving the timestamp.
+        emailContactPermissionConfirmedAt: input.customer.emailContactPermissionConfirmed
+          ? (customer.emailContactPermissionConfirmedAt ?? now)
+          : null,
+        updatedAt: now,
+      })
+    }
+
+    // status / publicToken / lastEmailedAt deliberately untouched — editing
+    // what a quote says must not reset its lifecycle or invalidate a link
+    // already sitting in a customer's inbox.
+    quote.internalNotes = input.quote.internalNotes
+    quote.expirationDate = input.quote.expirationDate
+    quote.nextFollowUpAt = input.quote.nextFollowUpAt
+    quote.windowTints = input.quote.windowTints
+    quote.showFullAddonTotal = input.quote.showFullAddonTotal ?? false
+    quote.updatedAt = now
+
+    // Full replace, matching SupabaseRepository's delete-and-reinsert.
+    this.db.options = this.db.options.filter((o) => o.quoteId !== quoteId)
+    this.db.options.push(...this.buildOptions(quoteId, input.options))
+
+    this.addEvent(quoteId, 'edited')
     this.persist()
     return quote
+  }
+
+  async deleteQuote(quoteId: string): Promise<void> {
+    // Mirrors the production on-delete-cascade by hand: every child row
+    // keyed to this quote goes with it. Items need no pass of their own —
+    // they live nested inside their option rows in this in-memory shape.
+    this.db.options = this.db.options.filter((o) => o.quoteId !== quoteId)
+    this.db.events = this.db.events.filter((e) => e.quoteId !== quoteId)
+    this.db.responses = this.db.responses.filter((r) => r.quoteId !== quoteId)
+    this.db.emails = this.db.emails.filter((e) => e.quoteId !== quoteId)
+    this.db.quotes = this.db.quotes.filter((q) => q.id !== quoteId)
+    this.persist()
   }
 
   private touch(quote: Quote): void {

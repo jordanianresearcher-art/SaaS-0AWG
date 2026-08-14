@@ -386,6 +386,21 @@ export interface DataRepository {
   listQuoteBundles(): Promise<QuoteBundle[]>
   getQuoteBundle(quoteId: string): Promise<QuoteBundle | null>
   createQuote(input: NewQuoteInput): Promise<Quote>
+  /**
+   * Rewrites an existing quote from the same shape createQuote takes — the
+   * edit form is the create form, so it hands back a whole quote rather
+   * than a patch. Customer details and quote fields are updated in place;
+   * options and their items are **fully replaced** (deleted and reinserted),
+   * since the form has no concept of a per-option identity to diff against.
+   *
+   * Deliberately preserves everything that isn't the staff's to re-edit:
+   * the public token (already-sent links keep working), status, send
+   * history, events, and responses. Editing a quote is correcting what it
+   * says, not restarting its lifecycle.
+   */
+  updateQuote(quoteId: string, input: NewQuoteInput): Promise<Quote>
+  /** Permanently deletes a quote. Options/items/events/responses/emails go with it via on-delete-cascade. */
+  deleteQuote(quoteId: string): Promise<void>
 
   /** Staff status actions: booked, deposit paid, won (with amount), lost. */
   setQuoteStatus(quoteId: string, status: QuoteStatus, wonAmountCents?: number | null): Promise<void>

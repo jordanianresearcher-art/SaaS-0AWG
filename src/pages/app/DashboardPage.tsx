@@ -60,7 +60,6 @@ export default function DashboardPage() {
         <Stat label="Quote views" value={String(last14.quoteViews)} />
         <Stat label="Customer responses" value={String(last14.responses)} />
         <Stat label="Appointments" value={String(last14.appointments)} />
-        <Stat label="Deposits" value={String(last14.deposits)} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -179,6 +178,8 @@ function eventLabel(eventType: string, bundle: QuoteBundle): string {
   switch (eventType) {
     case 'created':
       return 'quote created'
+    case 'edited':
+      return 'quote edited'
     case 'email_sent':
       return 'quote email sent'
     case 'email_demo_sent':

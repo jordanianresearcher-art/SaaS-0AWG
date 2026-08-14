@@ -2,18 +2,13 @@ import { Navigate, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Logo, Button, Input, Select, Textarea, Field } from '../components/ui'
+import { Logo, Button, Input, Textarea, Field } from '../components/ui'
 import { getSupabase } from '../data/supabaseClient'
 import { useAppData } from '../data/AppDataContext'
 import { useToast } from '../components/Toast'
 import { useState } from 'react'
-import { PAYMENT_METHOD_INFO } from '../lib/paymentMethods'
-import type { PaymentMethod } from '../types'
 
-const PAYMENT_METHODS = Object.keys(PAYMENT_METHOD_INFO) as PaymentMethod[]
-
-const schema = z
-  .object({
+const schema = z.object({
     name: z.string().min(2, 'Enter your shop name'),
     phone: z.string().min(7, 'Enter the shop phone number'),
     email: z.string().email('Enter a valid shop email'),
@@ -22,31 +17,11 @@ const schema = z
     website: z.string().url('Enter a full URL (https://…)').or(z.literal('')),
     logoUrl: z.string().url('Enter a full image URL').or(z.literal('')),
     primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Pick a color'),
-    defaultPaymentMethod: z.enum(['none', 'link', 'zelle', 'cashapp', 'venmo', 'paypal']),
-    defaultPaymentHandle: z.string(),
     quoteExpirationDays: z.coerce.number().int().min(1).max(365),
     followUpSchedule: z
       .string()
       .regex(/^\d+(\s*,\s*\d+)*$/, 'Use numbers separated by commas, like 2, 3, 5'),
     quoteDisclaimer: z.string().min(10, 'A short disclaimer is required'),
-  })
-  .superRefine((values, ctx) => {
-    if (values.defaultPaymentMethod === 'none') return
-    if (!values.defaultPaymentHandle.trim()) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['defaultPaymentHandle'], message: 'Enter your payment info' })
-      return
-    }
-    if (values.defaultPaymentMethod === 'link') {
-      try {
-        new URL(values.defaultPaymentHandle.trim())
-      } catch {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['defaultPaymentHandle'],
-          message: 'Enter a full URL (https://…)',
-        })
-      }
-    }
   })
 
 type FormValues = z.infer<typeof schema>
@@ -59,7 +34,6 @@ export default function OnboardingPage() {
   const {
     register,
     handleSubmit,
-    watch,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -69,14 +43,11 @@ export default function OnboardingPage() {
       followUpSchedule: '2, 3, 5',
       website: '',
       logoUrl: '',
-      defaultPaymentMethod: 'none',
-      defaultPaymentHandle: '',
       quoteDisclaimer:
         'Final pricing and compatibility may require vehicle inspection. Products and availability are subject to confirmation by the shop.',
     },
   })
 
-  const watchedPaymentMethod = watch('defaultPaymentMethod')
 
   if (authReady && !session) return <Navigate to="/login" replace />
   if (session && !needsOnboarding) return <Navigate to="/app" replace />
@@ -94,9 +65,8 @@ export default function OnboardingPage() {
         p_website: values.website || null,
         p_logo_url: values.logoUrl || null,
         p_primary_color: values.primaryColor,
-        p_default_payment_method: values.defaultPaymentMethod === 'none' ? null : values.defaultPaymentMethod,
-        p_default_payment_handle:
-          values.defaultPaymentMethod === 'none' ? null : values.defaultPaymentHandle.trim(),
+        p_default_payment_method: null,
+        p_default_payment_handle: null,
         p_quote_expiration_days: values.quoteExpirationDays,
         p_follow_up_schedule_days: scheduleDays,
         p_quote_disclaimer: values.quoteDisclaimer,
@@ -149,30 +119,6 @@ export default function OnboardingPage() {
           <Field label="Brand color" htmlFor="ob-color" error={errors.primaryColor?.message}>
             <Input id="ob-color" type="color" className="h-14 w-24 p-1" {...register('primaryColor')} />
           </Field>
-          <Field label="How do customers pay a deposit?" htmlFor="ob-pay-method" hint="Optional — you can set this up later in Settings.">
-            <Select id="ob-pay-method" {...register('defaultPaymentMethod')}>
-              <option value="none">No default set</option>
-              {PAYMENT_METHODS.map((m) => (
-                <option key={m} value={m}>
-                  {PAYMENT_METHOD_INFO[m].label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          {watchedPaymentMethod && watchedPaymentMethod !== 'none' ? (
-            <Field
-              label={PAYMENT_METHOD_INFO[watchedPaymentMethod].handleLabel}
-              htmlFor="ob-pay-handle"
-              error={errors.defaultPaymentHandle?.message}
-              hint={PAYMENT_METHOD_INFO[watchedPaymentMethod].hint}
-            >
-              <Input
-                id="ob-pay-handle"
-                placeholder={PAYMENT_METHOD_INFO[watchedPaymentMethod].placeholder}
-                {...register('defaultPaymentHandle')}
-              />
-            </Field>
-          ) : null}
           <Field label="Quotes are good for (days)" htmlFor="ob-exp" error={errors.quoteExpirationDays?.message}>
             <Input id="ob-exp" type="number" inputMode="numeric" min={1} max={365} {...register('quoteExpirationDays')} />
           </Field>

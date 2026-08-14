@@ -8,12 +8,13 @@ import {
   CalendarClock,
   Copy,
   CreditCard,
-  DollarSign,
   ExternalLink,
   Files,
   Mail,
+  Pencil,
   Phone,
   Printer,
+  Trash2,
   Sparkles,
   Star,
   Trophy,
@@ -34,6 +35,7 @@ import {
   parseDollarsToCents,
   quoteValueCents,
 } from '../../lib/format'
+import { errorMessage } from '../../lib/errors'
 import { summarizeWindowTint } from '../../lib/windowTint'
 import { addonOptions, computeAddonBreakdown, fullTotalCents, mainOption } from '../../lib/quotePricing'
 import type { QuoteBundle, TemplateType } from '../../types'
@@ -52,6 +54,8 @@ export default function QuoteDetailPage() {
   const [wonOpen, setWonOpen] = useState(false)
   const [rescheduleOpen, setRescheduleOpen] = useState(false)
   const [notesDraft, setNotesDraft] = useState<string | null>(null)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   const load = useCallback(async () => {
     if (!quoteId) return
@@ -119,10 +123,29 @@ export default function QuoteDetailPage() {
     }
   }
 
-  const doStatus = async (status: 'booked' | 'deposit_paid' | 'lost', label: string) => {
+  // 'deposit_paid' is intentionally absent — deposits are pulled from the UI
+  // for now. The status still exists in the data model (and activityLabel
+  // below still names it) so historical quotes that reached it keep reading
+  // correctly; there's just no longer a button that puts a quote there.
+  const doStatus = async (status: 'booked' | 'lost', label: string) => {
     await repo.setQuoteStatus(quote.id, status)
     await reloadAll()
     toast('success', label)
+  }
+
+  const doDelete = async () => {
+    setDeleting(true)
+    try {
+      await repo.deleteQuote(quote.id)
+      await refresh()
+      toast('success', 'Quote deleted.')
+      navigate('/app/quotes')
+    } catch (err) {
+      console.error('deleteQuote failed', err)
+      const detail = errorMessage(err)
+      toast('error', detail ? `Could not delete the quote: ${detail}` : 'Could not delete the quote. Please try again.')
+      setDeleting(false)
+    }
   }
 
   return (
@@ -189,8 +212,8 @@ export default function QuoteDetailPage() {
           <Button variant="secondary" disabled={terminal} onClick={() => void doStatus('booked', 'Appointment marked as booked.')}>
             <CalendarClock className="h-5 w-5" aria-hidden="true" /> Booked
           </Button>
-          <Button variant="secondary" disabled={terminal} onClick={() => void doStatus('deposit_paid', 'Deposit marked as paid.')}>
-            <DollarSign className="h-5 w-5" aria-hidden="true" /> Deposit paid
+          <Button variant="secondary" onClick={() => navigate('/app/quotes/new', { state: { editFrom: bundle } })}>
+            <Pencil className="h-5 w-5" aria-hidden="true" /> Edit
           </Button>
           <Button variant="success" disabled={quote.status === 'won'} onClick={() => setWonOpen(true)}>
             <Trophy className="h-5 w-5" aria-hidden="true" /> Won
@@ -226,6 +249,9 @@ export default function QuoteDetailPage() {
           </Button>
           <Button variant="ghost" onClick={() => navigate('/app/quotes/new', { state: { duplicateFrom: bundle } })}>
             <Files className="h-5 w-5" aria-hidden="true" /> Duplicate
+          </Button>
+          <Button variant="ghost" className="text-red-700 hover:bg-red-50" onClick={() => setDeleteOpen(true)}>
+            <Trash2 className="h-5 w-5" aria-hidden="true" /> Delete
           </Button>
           {customer.phone ? (
             <a
@@ -486,6 +512,24 @@ export default function QuoteDetailPage() {
           toast('success', date ? 'Follow-up rescheduled.' : 'Follow-up cleared.')
         }}
       />
+
+      <Modal open={deleteOpen} onClose={() => setDeleteOpen(false)} title="Delete this quote?">
+        <div className="space-y-4">
+          <p className="text-base text-ink">
+            This permanently deletes {customerDisplayName(customer)}&apos;s quote and everything attached to it — its
+            options, send history, and the customer&apos;s responses. Their quote link will stop working. This can&apos;t
+            be undone.
+          </p>
+          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+            <Button variant="secondary" onClick={() => setDeleteOpen(false)} disabled={deleting}>
+              Keep it
+            </Button>
+            <Button variant="danger" onClick={() => void doDelete()} disabled={deleting}>
+              <Trash2 className="h-5 w-5" aria-hidden="true" /> {deleting ? 'Deleting…' : 'Delete quote'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }
@@ -530,6 +574,7 @@ function EmailStatusBadge({ status }: { status: string }) {
 function activityLabel(eventType: string): string {
   const labels: Record<string, string> = {
     created: 'Quote created',
+    edited: 'Quote edited',
     email_sent: 'Email sent (accepted by provider)',
     email_demo_sent: 'Demo email sent',
     email_failed: 'Email failed to send',

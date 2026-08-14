@@ -72,7 +72,6 @@ export default function ReportsPage() {
     { label: 'Asked for a cheaper package', value: String(metrics.cheaperRequests) },
     { label: 'Asked about financing', value: String(metrics.financingRequests) },
     { label: 'Appointments booked', value: String(metrics.appointments) },
-    { label: 'Deposits paid', value: String(metrics.deposits) },
     { label: 'Jobs won', value: String(metrics.wonJobs), highlight: true },
     { label: 'Recovered revenue', value: formatCurrency(metrics.recoveredRevenueCents), highlight: true },
   ]

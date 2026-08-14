@@ -896,44 +896,111 @@ export class SupabaseRepository implements DataRepository {
     if (quoteError) throw quoteError
 
     for (const [i, opt] of input.options.entries()) {
-      const { data: option, error: optionError } = await this.supabase
-        .from('quote_options')
-        .insert({
-          quote_id: quote.id,
-          option_kind: opt.optionKind,
-          name: opt.name,
-          description: opt.description,
-          price_cents: opt.priceCents,
-          labor_included: opt.laborIncluded,
-          deposit_payment_method: opt.depositPaymentMethod,
-          deposit_payment_handle: opt.depositPaymentHandle,
-          deposit_amount_cents: opt.depositAmountCents,
-          config_id: opt.configId ?? null,
-          position: i,
-        })
-        .select('id')
-        .single()
-      if (optionError) throw optionError
-      if (opt.items.length > 0) {
-        const { error: itemsError } = await this.supabase.from('quote_items').insert(
-          opt.items.map((item, j) => ({
-            quote_option_id: option.id,
-            brand: item.brand,
-            model: item.model,
-            name: item.name,
-            quantity: item.quantity,
-            description: item.description,
-            category: item.category ?? null,
-            image_url: item.imageUrl ?? null,
-            position: j,
-          })),
-        )
-        if (itemsError) throw itemsError
-      }
+      await this.insertOption(quote.id, opt, i)
     }
 
     await this.addEvent(quote.id, 'created')
     return mapQuote(quote)
+  }
+
+  /** Inserts one option plus its items. Shared by createQuote and updateQuote so the column mapping can't drift between the two paths. */
+  private async insertOption(quoteId: string, opt: NewQuoteInput['options'][number], position: number): Promise<void> {
+    const { data: option, error: optionError } = await this.supabase
+      .from('quote_options')
+      .insert({
+        quote_id: quoteId,
+        option_kind: opt.optionKind,
+        name: opt.name,
+        description: opt.description,
+        price_cents: opt.priceCents,
+        labor_included: opt.laborIncluded,
+        deposit_payment_method: opt.depositPaymentMethod,
+        deposit_payment_handle: opt.depositPaymentHandle,
+        deposit_amount_cents: opt.depositAmountCents,
+        config_id: opt.configId ?? null,
+        position,
+      })
+      .select('id')
+      .single()
+    if (optionError) throw optionError
+    if (opt.items.length === 0) return
+    const { error: itemsError } = await this.supabase.from('quote_items').insert(
+      opt.items.map((item, j) => ({
+        quote_option_id: option.id,
+        brand: item.brand,
+        model: item.model,
+        name: item.name,
+        quantity: item.quantity,
+        description: item.description,
+        category: item.category ?? null,
+        image_url: item.imageUrl ?? null,
+        position: j,
+      })),
+    )
+    if (itemsError) throw itemsError
+  }
+
+  async updateQuote(quoteId: string, input: NewQuoteInput): Promise<Quote> {
+    const { data: existing, error: existingError } = await this.supabase
+      .from('quotes')
+      .select('id, customer_id')
+      .eq('id', quoteId)
+      .single()
+    if (existingError) throw existingError
+
+    const now = new Date().toISOString()
+    const { error: customerError } = await this.supabase
+      .from('customers')
+      .update({
+        first_name: input.customer.firstName,
+        last_name: input.customer.lastName,
+        email: input.customer.email,
+        phone: input.customer.phone,
+        vehicle_year: input.customer.vehicleYear,
+        vehicle_make: input.customer.vehicleMake,
+        vehicle_model: input.customer.vehicleModel,
+        vehicle_trim: input.customer.vehicleTrim,
+        source: input.customer.source,
+        email_contact_permission_confirmed: input.customer.emailContactPermissionConfirmed,
+        // Only stamp the confirmation time on the transition into confirmed —
+        // re-saving an already-confirmed customer must not keep moving it.
+        ...(input.customer.emailContactPermissionConfirmed ? { email_contact_permission_confirmed_at: now } : {}),
+      })
+      .eq('id', existing.customer_id)
+    if (customerError) throw customerError
+
+    // status / public_token / last_emailed_at are deliberately untouched —
+    // editing what a quote says must not reset where it is in its lifecycle
+    // or invalidate a link already sitting in a customer's inbox.
+    const { data: quote, error: quoteError } = await this.supabase
+      .from('quotes')
+      .update({
+        internal_notes: input.quote.internalNotes,
+        expiration_date: input.quote.expirationDate,
+        next_follow_up_at: input.quote.nextFollowUpAt,
+        window_tints: input.quote.windowTints,
+        show_full_addon_total: input.quote.showFullAddonTotal ?? false,
+      })
+      .eq('id', quoteId)
+      .select('*')
+      .single()
+    if (quoteError) throw quoteError
+
+    // Full replace: quote_items cascade off quote_options, so dropping the
+    // options is enough to clear both levels before reinserting.
+    const { error: deleteError } = await this.supabase.from('quote_options').delete().eq('quote_id', quoteId)
+    if (deleteError) throw deleteError
+    for (const [i, opt] of input.options.entries()) {
+      await this.insertOption(quoteId, opt, i)
+    }
+
+    await this.addEvent(quoteId, 'edited')
+    return mapQuote(quote)
+  }
+
+  async deleteQuote(quoteId: string): Promise<void> {
+    const { error } = await this.supabase.from('quotes').delete().eq('id', quoteId)
+    if (error) throw error
   }
 
   private async addEvent(quoteId: string, eventType: string, metadata: Row = {}): Promise<void> {

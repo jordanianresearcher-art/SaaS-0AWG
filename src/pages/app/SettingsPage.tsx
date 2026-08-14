@@ -10,15 +10,11 @@ import CatalogOrganizer from '../../components/CatalogOrganizer'
 import { ProductSuggestField } from '../../components/ProductSuggestField'
 import { errorMessage } from '../../lib/errors'
 import { formatCurrency, parseDollarsToCents } from '../../lib/format'
-import { PAYMENT_METHOD_INFO } from '../../lib/paymentMethods'
 import { PRODUCT_CATEGORIES, PRODUCT_CATEGORY_INFO } from '../../lib/audioConfigs'
-import type { CatalogItem, PaymentMethod, ProductCategory } from '../../types'
+import type { CatalogItem, ProductCategory } from '../../types'
 import type { NewCatalogItemInput, ShopifyImportResult } from '../../data/repository'
 
-const PAYMENT_METHODS = Object.keys(PAYMENT_METHOD_INFO) as PaymentMethod[]
-
-const schema = z
-  .object({
+const schema = z.object({
     name: z.string().min(2, 'Enter your shop name'),
     phone: z.string().min(7, 'Enter the shop phone number'),
     email: z.string().email('Enter a valid shop email'),
@@ -27,31 +23,11 @@ const schema = z
     website: z.string().url('Enter a full URL (https://…)').or(z.literal('')),
     logoUrl: z.string().url('Enter a full image URL').or(z.literal('')),
     primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Pick a color'),
-    defaultPaymentMethod: z.enum(['none', 'link', 'zelle', 'cashapp', 'venmo', 'paypal']),
-    defaultPaymentHandle: z.string(),
     quoteExpirationDays: z.coerce.number().int().min(1, 'At least 1 day').max(365, 'No more than a year'),
     followUpSchedule: z
       .string()
       .regex(/^\d+(\s*,\s*\d+)*$/, 'Use numbers separated by commas, like 2, 3, 5'),
     quoteDisclaimer: z.string().min(10, 'A short disclaimer is required'),
-  })
-  .superRefine((values, ctx) => {
-    if (values.defaultPaymentMethod === 'none') return
-    if (!values.defaultPaymentHandle.trim()) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['defaultPaymentHandle'], message: 'Enter your payment info' })
-      return
-    }
-    if (values.defaultPaymentMethod === 'link') {
-      try {
-        new URL(values.defaultPaymentHandle.trim())
-      } catch {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['defaultPaymentHandle'],
-          message: 'Enter a full URL (https://…)',
-        })
-      }
-    }
   })
 
 type FormValues = z.infer<typeof schema>
@@ -66,11 +42,9 @@ export default function SettingsPage() {
     register,
     handleSubmit,
     reset,
-    watch,
     formState: { errors, isSubmitting, isDirty },
   } = useForm<FormValues>({ resolver: zodResolver(schema) })
 
-  const watchedPaymentMethod = watch('defaultPaymentMethod')
 
   useEffect(() => {
     if (shop) {
@@ -83,8 +57,6 @@ export default function SettingsPage() {
         website: shop.website ?? '',
         logoUrl: shop.logoUrl ?? '',
         primaryColor: shop.primaryColor,
-        defaultPaymentMethod: shop.defaultPaymentMethod ?? 'none',
-        defaultPaymentHandle: shop.defaultPaymentHandle ?? '',
         quoteExpirationDays: shop.quoteExpirationDays,
         followUpSchedule: shop.followUpScheduleDays.join(', '),
         quoteDisclaimer: shop.quoteDisclaimer,
@@ -105,8 +77,6 @@ export default function SettingsPage() {
         website: values.website || null,
         logoUrl: values.logoUrl || null,
         primaryColor: values.primaryColor,
-        defaultPaymentMethod: values.defaultPaymentMethod === 'none' ? null : values.defaultPaymentMethod,
-        defaultPaymentHandle: values.defaultPaymentMethod === 'none' ? null : values.defaultPaymentHandle.trim(),
         quoteExpirationDays: values.quoteExpirationDays,
         followUpScheduleDays: values.followUpSchedule.split(',').map((n) => parseInt(n.trim(), 10)),
         quoteDisclaimer: values.quoteDisclaimer,
@@ -166,30 +136,6 @@ export default function SettingsPage() {
               <Input id="s-exp" type="number" inputMode="numeric" {...register('quoteExpirationDays')} />
             </Field>
           </div>
-          <Field label="How do customers pay a deposit?" htmlFor="s-pay-method">
-            <Select id="s-pay-method" {...register('defaultPaymentMethod')}>
-              <option value="none">No default set</option>
-              {PAYMENT_METHODS.map((m) => (
-                <option key={m} value={m}>
-                  {PAYMENT_METHOD_INFO[m].label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          {watchedPaymentMethod && watchedPaymentMethod !== 'none' ? (
-            <Field
-              label={PAYMENT_METHOD_INFO[watchedPaymentMethod].handleLabel}
-              htmlFor="s-pay-handle"
-              error={errors.defaultPaymentHandle?.message}
-              hint={PAYMENT_METHOD_INFO[watchedPaymentMethod].hint}
-            >
-              <Input
-                id="s-pay-handle"
-                placeholder={PAYMENT_METHOD_INFO[watchedPaymentMethod].placeholder}
-                {...register('defaultPaymentHandle')}
-              />
-            </Field>
-          ) : null}
           <Field
             label="Follow-up rhythm (days between emails)"
             htmlFor="s-schedule"
@@ -367,8 +313,8 @@ function CatalogSection({ reloadSignal }: { reloadSignal: number }) {
     register,
     handleSubmit,
     reset,
-    watch,
     setValue,
+    watch,
     formState: { errors, isSubmitting },
   } = useForm<CatalogFormValues>({ resolver: zodResolver(catalogSchema) })
 

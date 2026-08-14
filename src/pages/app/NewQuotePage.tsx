@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
   useFieldArray,
@@ -29,7 +29,6 @@ import {
 import { errorMessage } from '../../lib/errors'
 import { formatCurrency, parseDollarsToCents } from '../../lib/format'
 import { COMMON_MAKES, OTHER_MAKE, VEHICLE_YEARS, fetchModelsForMakeYear } from '../../lib/vehicleData'
-import { DEFAULT_DEPOSIT_PERCENT, PAYMENT_METHOD_INFO, computeDefaultDepositCents } from '../../lib/paymentMethods'
 import {
   TINT_VLT_PERCENTS,
   createDefaultWindowTintFormValues,
@@ -37,9 +36,7 @@ import {
   windowTintFormValuesToConfig,
 } from '../../lib/windowTint'
 import type { NewQuoteInput } from '../../data/repository'
-import type { CatalogItem, PaymentMethod, ProductCategory, QuoteBundle } from '../../types'
-
-const PAYMENT_METHODS = Object.keys(PAYMENT_METHOD_INFO) as PaymentMethod[]
+import type { CatalogItem, ProductCategory, QuoteBundle } from '../../types'
 
 const optionalDollarSchema = z
   .string()
@@ -65,43 +62,20 @@ const itemSchema = z.object({
   imageUrl: z.string().nullable(),
 })
 
-const depositFields = {
-  depositAmount: z.string().refine((v) => v.trim() === '' || parseDollarsToCents(v) !== null, 'Enter a valid dollar amount'),
-  depositOverride: z.boolean(),
-  depositMethod: z.enum(['none', 'link', 'zelle', 'cashapp', 'venmo', 'paypal']),
-  depositHandle: z.string(),
-}
-
-// The one main package on the quote — full treatment: deposit config, the
-// drag-and-drop builder, a configId link back to a universal configuration.
-const mainOptionSchema = z
-  .object({
-    name: z.string(),
-    description: z.string(),
-    price: optionalDollarSchema,
-    laborIncluded: z.boolean(),
-    ...depositFields,
-    items: z.array(itemSchema),
-    configId: z.string().nullable(),
-  })
-  .superRefine((values, ctx) => {
-    if (!values.depositOverride || values.depositMethod === 'none') return
-    if (!values.depositHandle.trim()) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['depositHandle'], message: 'Enter your payment info' })
-      return
-    }
-    if (values.depositMethod === 'link') {
-      try {
-        new URL(values.depositHandle.trim())
-      } catch {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['depositHandle'],
-          message: 'Enter a full URL (https://…)',
-        })
-      }
-    }
-  })
+// The one main package on the quote — full treatment: the drag-and-drop
+// builder and a configId link back to a universal configuration.
+//
+// Deposits are deliberately absent. The DB columns and PaymentMethod type
+// still exist (see repository.ts / paymentMethods.ts) so deposits can come
+// back without a migration — the quote form just no longer collects them.
+const mainOptionSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  price: optionalDollarSchema,
+  laborIncluded: z.boolean(),
+  items: z.array(itemSchema),
+  configId: z.string().nullable(),
+})
 
 // An optional named upsell — priced as the *incremental* cost on top of
 // the main package (see OptionKind in types.ts), not a full alternative
@@ -212,10 +186,6 @@ function emptyMainOption(): FormValues['main'] {
     description: '',
     price: '',
     laborIncluded: true,
-    depositAmount: '',
-    depositOverride: false,
-    depositMethod: 'none',
-    depositHandle: '',
     items: [emptyItem()],
     configId: null,
   }
@@ -237,14 +207,6 @@ function mainFromBundle(bundle: QuoteBundle): FormValues['main'] {
     description: main.description,
     price: (main.priceCents / 100).toString(),
     laborIncluded: main.laborIncluded,
-    depositAmount: main.depositAmountCents != null ? (main.depositAmountCents / 100).toString() : '',
-    // Verbatim carryover, matching today's behavior: a resolved deposit method
-    // always wins over the shop's *current* default when duplicating; if the
-    // original had none, leave it unchecked so submit-time resolution falls
-    // back to the shop's live current default (not a frozen historical one).
-    depositOverride: main.depositPaymentMethod !== null,
-    depositMethod: main.depositPaymentMethod ?? 'none',
-    depositHandle: main.depositPaymentHandle ?? '',
     items: itemsFromBundle(main.items),
     configId: main.configId,
   }
@@ -277,14 +239,95 @@ function mainFromScan(prefill: ScanQuotePrefill): FormValues['main'] {
   }
 }
 
+/**
+ * Initial form state for all four ways this page is opened: editing an
+ * existing quote, duplicating one, arriving from a scan session, or blank.
+ *
+ * The one real difference between edit and duplicate is **customer
+ * identity**. Duplicating is "same build, different person," so the name,
+ * email, phone, notes, and expiration deliberately reset while the vehicle
+ * and package carry over. Editing is the same quote for the same person, so
+ * everything carries over — including the expiration and internal notes,
+ * which a duplicate must not inherit.
+ */
+function buildDefaultValues({
+  editFrom,
+  duplicateFrom,
+  fromScan,
+  defaultExpiration,
+}: {
+  editFrom?: QuoteBundle
+  duplicateFrom?: QuoteBundle
+  fromScan?: ScanQuotePrefill
+  defaultExpiration: string
+}): FormValues {
+  const source = editFrom ?? duplicateFrom
+  const editing = Boolean(editFrom)
+  const vehicleOf = (b: QuoteBundle) => ({
+    vehicleYear: b.customer.vehicleYear != null ? String(b.customer.vehicleYear) : '',
+    vehicleMake: b.customer.vehicleMake ?? '',
+    vehicleModel: b.customer.vehicleModel ?? '',
+    vehicleTrim: b.customer.vehicleTrim ?? '',
+    source: b.customer.source ?? '',
+  })
+
+  if (source) {
+    return {
+      firstName: editing ? source.customer.firstName : '',
+      lastName: editing ? (source.customer.lastName ?? '') : '',
+      email: editing ? source.customer.email : '',
+      phone: editing ? (source.customer.phone ?? '') : '',
+      ...vehicleOf(source),
+      permissionConfirmed: editing ? source.customer.emailContactPermissionConfirmed : false,
+      expirationDate: editing
+        ? source.quote.expirationDate
+          ? format(new Date(source.quote.expirationDate), 'yyyy-MM-dd')
+          : ''
+        : defaultExpiration,
+      internalNotes: editing ? (source.quote.internalNotes ?? '') : '',
+      nextFollowUpAt: editing && source.quote.nextFollowUpAt ? format(new Date(source.quote.nextFollowUpAt), 'yyyy-MM-dd') : '',
+      main: mainFromBundle(source),
+      addons: addonsFromBundle(source),
+      showFullAddonTotal: source.quote.showFullAddonTotal,
+      windowTints: source.quote.windowTints.map(windowTintConfigToFormValues),
+    }
+  }
+
+  return {
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    vehicleYear: '',
+    vehicleMake: '',
+    vehicleModel: '',
+    vehicleTrim: '',
+    source: '',
+    permissionConfirmed: false,
+    expirationDate: defaultExpiration,
+    internalNotes: '',
+    nextFollowUpAt: '',
+    main: fromScan ? mainFromScan(fromScan) : emptyMainOption(),
+    addons: [],
+    showFullAddonTotal: false,
+    windowTints: [],
+  }
+}
+
 export default function NewQuotePage() {
   const repo = useRepo()
   const { shop, bundles, refresh } = useAppData()
   const toast = useToast()
   const navigate = useNavigate()
   const location = useLocation()
-  const navState = location.state as { duplicateFrom?: QuoteBundle; fromScan?: ScanQuotePrefill } | null
+  const navState = location.state as {
+    duplicateFrom?: QuoteBundle
+    editFrom?: QuoteBundle
+    fromScan?: ScanQuotePrefill
+  } | null
   const duplicateFrom = navState?.duplicateFrom
+  /** Set when this page is editing an existing quote in place rather than creating one. */
+  const editFrom = navState?.editFrom
   // Only reads on the initial render (react-hook-form's defaultValues, and
   // the customMake/vehicleOpen initializers below, all only run once) — a
   // deliberate one-shot pre-fill, same as duplicateFrom.
@@ -335,54 +378,22 @@ export default function NewQuotePage() {
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: duplicateFrom
-      ? {
-          firstName: '',
-          lastName: '',
-          email: '',
-          phone: '',
-          vehicleYear: duplicateFrom.customer.vehicleYear != null ? String(duplicateFrom.customer.vehicleYear) : '',
-          vehicleMake: duplicateFrom.customer.vehicleMake ?? '',
-          vehicleModel: duplicateFrom.customer.vehicleModel ?? '',
-          vehicleTrim: duplicateFrom.customer.vehicleTrim ?? '',
-          source: duplicateFrom.customer.source ?? '',
-          expirationDate: defaultExpiration,
-          internalNotes: '',
-          nextFollowUpAt: '',
-          main: mainFromBundle(duplicateFrom),
-          addons: addonsFromBundle(duplicateFrom),
-          showFullAddonTotal: duplicateFrom.quote.showFullAddonTotal,
-          windowTints: duplicateFrom.quote.windowTints.map(windowTintConfigToFormValues),
-        }
-      : {
-          firstName: '',
-          lastName: '',
-          email: '',
-          phone: '',
-          vehicleYear: '',
-          vehicleMake: '',
-          vehicleModel: '',
-          vehicleTrim: '',
-          source: '',
-          expirationDate: defaultExpiration,
-          internalNotes: '',
-          nextFollowUpAt: '',
-          main: fromScan ? mainFromScan(fromScan) : emptyMainOption(),
-          addons: [],
-          showFullAddonTotal: false,
-          windowTints: [],
-        },
+    defaultValues: buildDefaultValues({ editFrom, duplicateFrom, fromScan, defaultExpiration }),
   })
 
   const { fields: addonFields, append: appendAddon, remove: removeAddon } = useFieldArray({ control, name: 'addons' })
   const { fields: tintFields, append: appendTint, remove: removeTint } = useFieldArray({ control, name: 'windowTints' })
 
   const watchedMake = watch('vehicleMake')
+  // Both edit and duplicate carry the vehicle over, so both need the vehicle
+  // section expanded (and the free-text make field shown for an off-list make)
+  // on first render.
+  const prefilled = editFrom ?? duplicateFrom
   const [customMake, setCustomMake] = useState(() =>
-    Boolean(duplicateFrom && duplicateFrom.customer.vehicleMake && !COMMON_MAKES.includes(duplicateFrom.customer.vehicleMake)),
+    Boolean(prefilled && prefilled.customer.vehicleMake && !COMMON_MAKES.includes(prefilled.customer.vehicleMake)),
   )
   const [vehicleOpen, setVehicleOpen] = useState(() =>
-    Boolean(duplicateFrom && (duplicateFrom.customer.vehicleYear || duplicateFrom.customer.vehicleMake || duplicateFrom.customer.vehicleModel)),
+    Boolean(prefilled && (prefilled.customer.vehicleYear || prefilled.customer.vehicleMake || prefilled.customer.vehicleModel)),
   )
 
   const mainPriceValue = useWatch({ control, name: 'main.price' })
@@ -392,22 +403,6 @@ export default function NewQuotePage() {
 
   const onSubmit = async (values: FormValues) => {
     const mainPriceCents = parseDollarsToCents(values.main.price) ?? 0
-    const resolvedMethod: PaymentMethod | null = values.main.depositOverride
-      ? values.main.depositMethod === 'none'
-        ? null
-        : values.main.depositMethod
-      : (shop?.defaultPaymentMethod ?? null)
-    const resolvedHandle: string | null = values.main.depositOverride
-      ? values.main.depositMethod === 'none'
-        ? null
-        : values.main.depositHandle.trim()
-      : (shop?.defaultPaymentHandle ?? null)
-    const resolvedAmount =
-      resolvedMethod === null
-        ? null
-        : values.main.depositAmount.trim()
-          ? parseDollarsToCents(values.main.depositAmount)
-          : computeDefaultDepositCents(mainPriceCents)
 
     const input: NewQuoteInput = {
       customer: {
@@ -436,9 +431,11 @@ export default function NewQuotePage() {
           description: values.main.description.trim(),
           priceCents: mainPriceCents,
           laborIncluded: values.main.laborIncluded,
-          depositPaymentMethod: resolvedMethod,
-          depositPaymentHandle: resolvedHandle,
-          depositAmountCents: resolvedAmount,
+          // Deposits are pulled from the UI for now — the columns stay,
+          // always null, so the feature can return without a migration.
+          depositPaymentMethod: null,
+          depositPaymentHandle: null,
+          depositAmountCents: null,
           configId: values.main.configId,
           items: values.main.items.map((item) => ({
             brand: item.brand.trim() || null,
@@ -473,12 +470,22 @@ export default function NewQuotePage() {
       ],
     }
     try {
+      if (editFrom) {
+        await repo.updateQuote(editFrom.quote.id, input)
+        await refresh()
+        toast('success', 'Quote updated.')
+        // No openEmailPreview here — an edit shouldn't push staff toward
+        // re-sending. If the customer needs the new version, that's a
+        // deliberate Send from the detail page.
+        navigate(`/app/quotes/${editFrom.quote.id}`)
+        return
+      }
       const quote = await repo.createQuote(input)
       await refresh()
       toast('success', 'Quote created. Review the email and send it.')
       navigate(`/app/quotes/${quote.id}`, { state: { openEmailPreview: true } })
     } catch (err) {
-      console.error('createQuote failed', err)
+      console.error(editFrom ? 'updateQuote failed' : 'createQuote failed', err)
       const detail = errorMessage(err)
       toast('error', detail ? `Could not save the quote: ${detail}` : 'Could not save the quote. Please try again.')
     }
@@ -487,9 +494,11 @@ export default function NewQuotePage() {
   return (
     <div className="mx-auto max-w-2xl space-y-6 lg:max-w-none">
       <div>
-        <h1 className="text-3xl font-black text-ink">Create Quote</h1>
+        <h1 className="text-3xl font-black text-ink">{editFrom ? 'Edit Quote' : 'Create Quote'}</h1>
         <p className="mt-1 text-base text-zinc-600">
-          Fill this out while the customer is in the shop or right after the call. Then email it before they change their mind.
+          {editFrom
+            ? 'Changes apply to the quote the customer already has — their existing link keeps working.'
+            : 'Fill this out while the customer is in the shop or right after the call. Then email it before they change their mind.'}
         </p>
       </div>
 
@@ -755,7 +764,7 @@ export default function NewQuotePage() {
             Cancel
           </Button>
           <Button type="submit" disabled={isSubmitting} className="sm:min-w-52">
-            {isSubmitting ? 'Saving…' : 'Save & review email'}
+            {isSubmitting ? 'Saving…' : editFrom ? 'Save changes' : 'Save & review email'}
           </Button>
         </div>
       </form>
@@ -1024,28 +1033,6 @@ function MainOptionEditor({
     }
   }
 
-  // Deposit amount auto-fills at 15% of the price above, live, unless the
-  // staff has manually edited it — tracked by comparing against the last
-  // value this effect itself wrote, so a later price tweak never clobbers a
-  // manual override.
-  const priceValue = useWatch({ control, name: 'main.price' })
-  const depositAmountValue = useWatch({ control, name: 'main.depositAmount' })
-  const lastAutoDepositRef = useRef<string | null>(null)
-
-  useEffect(() => {
-    const cents = parseDollarsToCents(priceValue)
-    if (cents === null) return
-    const suggested = (computeDefaultDepositCents(cents) / 100).toFixed(2)
-    if (depositAmountValue === '' || depositAmountValue === lastAutoDepositRef.current) {
-      setValue('main.depositAmount', suggested)
-      lastAutoDepositRef.current = suggested
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only recompute when price changes, not on every depositAmount keystroke
-  }, [priceValue])
-
-  const depositOverride = useWatch({ control, name: 'main.depositOverride' })
-  const depositMethod = useWatch({ control, name: 'main.depositMethod' })
-
   return (
     <div className="space-y-4">
       <Field label="Package name" htmlFor="main-name" error={mainErrors?.name?.message}>
@@ -1095,47 +1082,9 @@ function MainOptionEditor({
         <ItemRows basePath="main.items" control={control} register={register} itemHistory={itemHistory} catalogItems={catalogItems} listIdPrefix="main-items" />
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Price (installed)" htmlFor="main-price" error={mainErrors?.price?.message}>
-          <Input id="main-price" inputMode="decimal" placeholder="$2,899" {...register('main.price')} />
-        </Field>
-        <Field
-          label="Deposit amount"
-          htmlFor="main-deposit-amount"
-          error={mainErrors?.depositAmount?.message}
-          hint={`Auto-filled at ${DEFAULT_DEPOSIT_PERCENT}% of the price above — change it if you want a different amount.`}
-        >
-          <Input id="main-deposit-amount" inputMode="decimal" placeholder="$435" {...register('main.depositAmount')} />
-        </Field>
-      </div>
-      <label className="flex items-center gap-2.5 text-base font-medium text-ink">
-        <input type="checkbox" className="h-5 w-5 accent-[#1d4ed8]" {...register('main.depositOverride')} />
-        Use a different payment method for this deposit
-      </label>
-      {depositOverride ? (
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Payment method" htmlFor="main-deposit-method">
-            <Select id="main-deposit-method" {...register('main.depositMethod')}>
-              <option value="none">No deposit</option>
-              {PAYMENT_METHODS.map((m) => (
-                <option key={m} value={m}>
-                  {PAYMENT_METHOD_INFO[m].label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          {depositMethod && depositMethod !== 'none' ? (
-            <Field
-              label={PAYMENT_METHOD_INFO[depositMethod].handleLabel}
-              htmlFor="main-deposit-handle"
-              error={mainErrors?.depositHandle?.message}
-              hint={PAYMENT_METHOD_INFO[depositMethod].hint}
-            >
-              <Input id="main-deposit-handle" placeholder={PAYMENT_METHOD_INFO[depositMethod].placeholder} {...register('main.depositHandle')} />
-            </Field>
-          ) : null}
-        </div>
-      ) : null}
+      <Field label="Price (installed)" htmlFor="main-price" error={mainErrors?.price?.message}>
+        <Input id="main-price" inputMode="decimal" placeholder="$2,899" {...register('main.price')} />
+      </Field>
       <label className="flex items-center gap-2.5 text-base font-medium text-ink">
         <input type="checkbox" className="h-5 w-5 accent-[#1d4ed8]" {...register('main.laborIncluded')} />
         Labor included

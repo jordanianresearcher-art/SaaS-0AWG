@@ -5,7 +5,6 @@ import type { PublicQuote, ResponseType } from '../types'
 import { resolvePublicQuoteApi, type PublicQuoteApi } from '../data/publicQuote'
 import { RESPONSE_CONFIG } from '../lib/status'
 import { formatCurrency, formatDate } from '../lib/format'
-import { buildPaymentUrl, paymentInstructions } from '../lib/paymentMethods'
 import { summarizeWindowTint } from '../lib/windowTint'
 import { addonOptions, computeAddonBreakdown, fullTotalCents, mainOption } from '../lib/quotePricing'
 import { Button, LoadingBlock } from '../components/ui'
@@ -32,11 +31,17 @@ function ItemPreviewList({ items }: { items: PublicQuote['options'][number]['ite
 
 // What the customer sees. No login, no jargon, big buttons.
 
-// need_financing has its own big, dedicated CTA right under the options
-// (see the Financing section below) — this real quote's proof of value —
-// so it's deliberately left out of the generic response grid rather than
-// buried as one of six equal-weight choices.
-const RESPONSE_CHOICES: ResponseType[] = ['ready_to_book', 'want_cheaper', 'after_payday', 'question', 'not_interested']
+// The customer's actions are deliberately ranked, not presented as one
+// flat grid of equal-weight buttons. Someone who just opened a quote email
+// should see the thing the shop most wants them to do first, at a glance,
+// and be able to do it in a single tap with no form to fill in.
+//
+//   1. ready_to_book  — the whole point of sending the quote. One tap.
+//   2. need_financing — removes the price objection; this exact action
+//                       produced this product's first real sale.
+//   3. everything else — real, but lower-intent. Still one tap to pick,
+//                       then an optional message box.
+const SECONDARY_CHOICES: ResponseType[] = ['want_cheaper', 'after_payday', 'question', 'not_interested']
 
 export default function PublicQuotePage() {
   const { publicToken = '' } = useParams<{ publicToken: string }>()
@@ -165,13 +170,6 @@ export default function PublicQuotePage() {
   const main = mainOption(quote.options)
   const addons = addonOptions(quote.options)
   const addonBreakdown = computeAddonBreakdown(quote.options)
-  const mainDepositUrl =
-    main?.depositPaymentMethod && main.depositPaymentHandle
-      ? buildPaymentUrl(main.depositPaymentMethod, main.depositPaymentHandle, main.depositAmountCents)
-      : null
-  const mainDepositInstructions =
-    main?.depositPaymentMethod && main.depositPaymentHandle ? paymentInstructions(main.depositPaymentMethod, main.depositPaymentHandle) : null
-  const mainDepositAmountLabel = main?.depositAmountCents != null ? formatCurrency(main.depositAmountCents) : null
 
   return (
     <div className="min-h-screen bg-zinc-50 pb-16">
@@ -232,30 +230,6 @@ export default function PublicQuotePage() {
               <p className="mt-2 text-sm font-medium text-zinc-500">
                 {main.laborIncluded ? '✓ Professional installation included' : 'Installation billed separately'}
               </p>
-              {mainDepositUrl ? (
-                <div className="mt-3 space-y-1.5">
-                  {mainDepositAmountLabel ? (
-                    <p className="text-sm font-semibold text-zinc-600">
-                      {mainDepositAmountLabel} deposit
-                      {main.depositPaymentMethod === 'venmo' ? " — tap Pay, then enter the amount if it isn't already filled in" : ''}
-                    </p>
-                  ) : null}
-                  <a
-                    href={mainDepositUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex min-h-12 w-full items-center justify-center rounded-xl text-base font-bold text-white"
-                    style={{ backgroundColor: color }}
-                  >
-                    Hold my spot with a deposit
-                  </a>
-                </div>
-              ) : mainDepositInstructions ? (
-                <div className="mt-3 rounded-xl border-2 p-3 text-center text-base font-semibold" style={{ borderColor: color, color }}>
-                  {mainDepositAmountLabel ? `${mainDepositAmountLabel} deposit — ` : ''}
-                  {mainDepositInstructions}
-                </div>
-              ) : null}
             </div>
           ) : null}
 
@@ -288,31 +262,6 @@ export default function PublicQuotePage() {
             </div>
           ) : null}
         </section>
-
-        {/* Financing — a real, extremely-easy, one-tap action. Not buried
-            in the generic response grid: this exact action produced this
-            product's first real sale ($3,245), so it stays prominent. */}
-        {quote.options.length > 0 && !optedOut ? (
-          <section aria-label="Financing" className="mt-6">
-            {submitted === 'need_financing' ? (
-              <div className="flex items-center justify-center gap-2 rounded-2xl border-2 border-green-300 bg-green-50 p-4 text-center text-base font-bold text-green-800">
-                <Check className="h-5 w-5 shrink-0" aria-hidden="true" />
-                Got it — {quote.shopName} will follow up about financing.
-              </div>
-            ) : submitted ? null : (
-              <button
-                type="button"
-                onClick={() => void requestFinancing()}
-                disabled={submitting}
-                className="flex min-h-16 w-full items-center justify-center gap-2 rounded-2xl border-2 text-lg font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-60"
-                style={{ borderColor: color, color }}
-              >
-                <CreditCard className="h-6 w-6" aria-hidden="true" />
-                {submitting ? 'Sending…' : 'I need financing'}
-              </button>
-            )}
-          </section>
-        ) : null}
 
         {/* Window tint */}
         {quote.windowTints.length > 0 ? (
@@ -383,27 +332,53 @@ export default function PublicQuotePage() {
               </p>
             </div>
           ) : (
-            <div className="rounded-2xl border border-zinc-200 bg-white p-5">
-              <h2 className="text-xl font-bold text-ink">Where are you at with this?</h2>
-              <p className="mt-1 text-base text-zinc-600">One tap tells the shop — no phone call needed.</p>
-              <div className="mt-4 grid gap-2 sm:grid-cols-2">
-                {RESPONSE_CHOICES.map((choice) => (
-                  <button
-                    key={choice}
-                    type="button"
-                    onClick={() => setSelectedResponse(choice)}
-                    aria-pressed={selectedResponse === choice}
-                    className="min-h-13 rounded-xl border-2 px-4 py-3 text-left text-base font-semibold transition-colors"
-                    style={
-                      selectedResponse === choice
-                        ? { borderColor: color, backgroundColor: `${color}14`, color: '#18181b' }
-                        : { borderColor: '#e4e4e7', color: '#3f3f46' }
-                    }
-                  >
-                    {RESPONSE_CONFIG[choice].publicLabel}
-                  </button>
-                ))}
-              </div>
+            <div className="space-y-3">
+              {/* 1 — the primary action. Filled, full-width, one tap, no
+                 form in the way. This is what the email is asking for. */}
+              <button
+                type="button"
+                onClick={() => void submit('ready_to_book', selectedOption, null)}
+                disabled={submitting}
+                className="flex min-h-16 w-full items-center justify-center gap-2 rounded-2xl text-lg font-black text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-60"
+                style={{ backgroundColor: color }}
+              >
+                <Check className="h-6 w-6" aria-hidden="true" />
+                {submitting ? 'Sending…' : "I'm ready to book"}
+              </button>
+
+              {/* 2 — removes the price objection. Outlined, still one tap. */}
+              <button
+                type="button"
+                onClick={() => void requestFinancing()}
+                disabled={submitting}
+                className="flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl border-2 bg-white text-base font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                style={{ borderColor: color, color }}
+              >
+                <CreditCard className="h-5 w-5" aria-hidden="true" />
+                I need financing
+              </button>
+
+              {/* 3 — everything else, visually quieter. */}
+              <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+                <p className="text-base font-bold text-ink">Something else?</p>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  {SECONDARY_CHOICES.map((choice) => (
+                    <button
+                      key={choice}
+                      type="button"
+                      onClick={() => setSelectedResponse(choice)}
+                      aria-pressed={selectedResponse === choice}
+                      className="min-h-12 rounded-xl border-2 px-4 py-2.5 text-left text-base font-semibold transition-colors"
+                      style={
+                        selectedResponse === choice
+                          ? { borderColor: color, backgroundColor: `${color}14`, color: '#18181b' }
+                          : { borderColor: '#e4e4e7', color: '#3f3f46' }
+                      }
+                    >
+                      {RESPONSE_CONFIG[choice].publicLabel}
+                    </button>
+                  ))}
+                </div>
               {selectedResponse ? (
                 <div className="mt-4 space-y-3">
                   {quote.options.length > 1 ? (
@@ -449,6 +424,7 @@ export default function PublicQuotePage() {
                   </Button>
                 </div>
               ) : null}
+              </div>
             </div>
           )}
         </section>

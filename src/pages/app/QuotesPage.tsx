@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { CreditCard, Plus, Search } from 'lucide-react'
-import { useAppData } from '../../data/AppDataContext'
-import { Badge, Card, EmptyState, Input, LinkButton, LoadingBlock, Select } from '../../components/ui'
+import { Link, useNavigate } from 'react-router-dom'
+import { CreditCard, Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import { useAppData, useRepo } from '../../data/AppDataContext'
+import { useToast } from '../../components/Toast'
+import { Badge, Button, Card, EmptyState, Input, LinkButton, LoadingBlock, Modal, Select } from '../../components/ui'
 import { isTerminal, STATUS_CONFIG } from '../../lib/status'
+import { errorMessage } from '../../lib/errors'
 import { customerDisplayName, formatCurrency, formatDate, formatVehicle, quoteValueCents } from '../../lib/format'
 import type { QuoteBundle, QuoteStatus } from '../../types'
 
@@ -13,9 +15,32 @@ function needsFinancingFollowUp(b: QuoteBundle): boolean {
 }
 
 export default function QuotesPage() {
-  const { bundles, loading } = useAppData()
+  const { bundles, loading, refresh } = useAppData()
+  const repo = useRepo()
+  const toast = useToast()
+  const navigate = useNavigate()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<QuoteStatus | 'all'>('all')
+  /** The quote awaiting delete confirmation, or null. Holds the whole bundle so the dialog can name the customer. */
+  const [deleteTarget, setDeleteTarget] = useState<QuoteBundle | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
+  const doDelete = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
+    try {
+      await repo.deleteQuote(deleteTarget.quote.id)
+      await refresh()
+      toast('success', 'Quote deleted.')
+      setDeleteTarget(null)
+    } catch (err) {
+      console.error('deleteQuote failed', err)
+      const detail = errorMessage(err)
+      toast('error', detail ? `Could not delete the quote: ${detail}` : 'Could not delete the quote. Please try again.')
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase()
@@ -84,8 +109,11 @@ export default function QuotesPage() {
         <ul className="space-y-3">
           {filtered.map((b) => (
             <li key={b.quote.id}>
-              <Link to={`/app/quotes/${b.quote.id}`} className="block">
-                <Card className="flex items-center justify-between gap-3 hover:border-brand">
+              {/* The row's link covers only the content, not the whole card —
+                 edit/delete are real buttons and must not be nested inside an
+                 anchor (invalid HTML, and a tap on either would also navigate). */}
+              <Card className="flex items-center gap-3 hover:border-brand">
+                <Link to={`/app/quotes/${b.quote.id}`} className="flex min-w-0 flex-1 items-center justify-between gap-3">
                   <div className="min-w-0">
                     <p className="truncate text-lg font-bold text-ink">{customerDisplayName(b.customer)}</p>
                     <p className="truncate text-base text-zinc-600">{formatVehicle(b.customer) ?? 'No vehicle on file'}</p>
@@ -103,12 +131,50 @@ export default function QuotesPage() {
                       </Badge>
                     ) : null}
                   </div>
-                </Card>
-              </Link>
+                </Link>
+                <div className="flex shrink-0 items-center gap-1 border-l border-zinc-100 pl-2">
+                  <button
+                    type="button"
+                    aria-label={`Edit ${customerDisplayName(b.customer)}'s quote`}
+                    title="Edit"
+                    onClick={() => navigate('/app/quotes/new', { state: { editFrom: b } })}
+                    className="flex h-11 w-11 items-center justify-center rounded-xl text-zinc-400 hover:bg-zinc-100 hover:text-ink"
+                  >
+                    <Pencil className="h-5 w-5" aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Delete ${customerDisplayName(b.customer)}'s quote`}
+                    title="Delete"
+                    onClick={() => setDeleteTarget(b)}
+                    className="flex h-11 w-11 items-center justify-center rounded-xl text-zinc-400 hover:bg-red-50 hover:text-red-600"
+                  >
+                    <Trash2 className="h-5 w-5" aria-hidden="true" />
+                  </button>
+                </div>
+              </Card>
             </li>
           ))}
         </ul>
       )}
+
+      <Modal open={deleteTarget !== null} onClose={() => setDeleteTarget(null)} title="Delete this quote?">
+        <div className="space-y-4">
+          <p className="text-base text-ink">
+            This permanently deletes {deleteTarget ? customerDisplayName(deleteTarget.customer) : 'this customer'}&apos;s
+            quote and everything attached to it — its options, send history, and the customer&apos;s responses. Their
+            quote link will stop working. This can&apos;t be undone.
+          </p>
+          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+            <Button variant="secondary" onClick={() => setDeleteTarget(null)} disabled={deleting}>
+              Keep it
+            </Button>
+            <Button variant="danger" onClick={() => void doDelete()} disabled={deleting}>
+              <Trash2 className="h-5 w-5" aria-hidden="true" /> {deleting ? 'Deleting…' : 'Delete quote'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }
