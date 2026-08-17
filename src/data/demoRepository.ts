@@ -227,7 +227,7 @@ export class DemoRepository implements DataRepository {
       approvalStatus: input.approvalStatus ?? 'approved',
       position: this.db.catalogItems.length,
       quantityOnHand: 0,
-      upcIsGenerated: false,
+      upcIsGenerated: input.upcIsGenerated ?? false,
       labelPrintedAt: null,
       lowStockThreshold: input.lowStockThreshold ?? null,
       lastCountedAt: null,
@@ -280,6 +280,7 @@ export class DemoRepository implements DataRepository {
     if (input.identificationConfidence !== undefined) item.identificationConfidence = input.identificationConfidence
     if (input.approvalStatus !== undefined) item.approvalStatus = input.approvalStatus
     if (input.lowStockThreshold !== undefined) item.lowStockThreshold = input.lowStockThreshold
+    if (input.upcIsGenerated !== undefined) item.upcIsGenerated = input.upcIsGenerated
     if (input.priceSourceUrl !== undefined || input.priceSourceName !== undefined) {
       item.priceCheckedAt = new Date().toISOString()
     }

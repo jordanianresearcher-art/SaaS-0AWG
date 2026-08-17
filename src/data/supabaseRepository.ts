@@ -348,6 +348,7 @@ function catalogItemRow(input: NewCatalogItemInput): Row {
   if (input.identificationConfidence !== undefined) row.identification_confidence = input.identificationConfidence
   if (input.approvalStatus !== undefined) row.approval_status = input.approvalStatus
   if (input.lowStockThreshold !== undefined) row.low_stock_threshold = input.lowStockThreshold
+  if (input.upcIsGenerated !== undefined) row.upc_is_generated = input.upcIsGenerated
   // A price sourced from the web is only ever "just checked" when the
   // caller actually supplied a source — never stamped on a plain manual edit.
   if (input.priceSourceUrl !== undefined || input.priceSourceName !== undefined) {

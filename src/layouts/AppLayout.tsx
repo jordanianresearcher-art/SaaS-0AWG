@@ -1,27 +1,33 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Barcode, FileText, BellRing, BarChart3, Settings, LogOut } from 'lucide-react'
+import { LayoutDashboard, Barcode, Boxes, FileText, BellRing, BarChart3, Settings, LogOut } from 'lucide-react'
 import { useAppData } from '../data/AppDataContext'
 import { Logo } from '../components/ui'
 import type { ReactNode } from 'react'
 
-const NAV = [
+const FULL_NAV = [
   { to: '/app', label: 'Home', icon: LayoutDashboard, end: true },
   // Scanning is the primary daily workflow — first after Home in the
   // desktop nav, and the prominent center button on the mobile bottom nav
   // below (not one of the flanking slots, see bottomFlankItems).
   { to: '/app/scan', label: 'Scan', icon: Barcode, end: false },
+  { to: '/app/inventory', label: 'Inventory', icon: Boxes, end: false },
   { to: '/app/quotes', label: 'Quotes', icon: FileText, end: false },
   { to: '/app/follow-ups', label: 'Follow-ups', icon: BellRing, end: false },
   { to: '/app/reports', label: 'Reports', icon: BarChart3, end: false },
   { to: '/app/settings', label: 'Settings', icon: Settings, end: false },
 ]
 
-// Mobile bottom nav shows two items flanking the center Scan button —
-// Home/Quotes and Follow-ups/Reports, same set as before Scan existed.
-// Settings stays reachable via the header icon (below) like it already was.
-const bottomFlankItems = NAV.filter((item) => item.to !== '/app/scan' && item.to !== '/app/settings')
+// A shared-access ('inventory') device only ever sees Scan + Inventory —
+// everything else 404s into "not available" via RequireFullAccess anyway
+// (RLS is the real enforcement), so there's no reason to show a link to it.
+const INVENTORY_ONLY_NAV = [
+  { to: '/app/scan', label: 'Scan', icon: Barcode, end: false },
+  { to: '/app/inventory', label: 'Inventory', icon: Boxes, end: true },
+]
 
-function NavItem({ to, label, icon: Icon, end, bottom }: (typeof NAV)[number] & { bottom?: boolean }) {
+type NavEntry = (typeof FULL_NAV)[number]
+
+function NavItem({ to, label, icon: Icon, end, bottom }: NavEntry & { bottom?: boolean }) {
   return (
     <NavLink
       to={to}
@@ -60,19 +66,28 @@ function DemoBanner(): ReactNode {
 }
 
 export function AppLayout() {
-  const { shop, mode, signOut } = useAppData()
+  const { shop, mode, role, signOut } = useAppData()
   const navigate = useNavigate()
+
+  const isInventoryOnly = role === 'inventory'
+  const nav = isInventoryOnly ? INVENTORY_ONLY_NAV : FULL_NAV
+  // Mobile bottom nav flanks the center Scan button with up to two items a
+  // side. Reports is desktop-nav/Home-only — five items don't split evenly
+  // around a center button, and Inventory earns the slot Reports gives up.
+  const bottomFlankItems = isInventoryOnly
+    ? nav.filter((item) => item.to !== '/app/scan')
+    : nav.filter((item) => ['/app', '/app/inventory', '/app/quotes', '/app/follow-ups'].includes(item.to))
 
   return (
     <div className="flex min-h-screen flex-col">
       <DemoBanner />
       <header className="no-print sticky top-0 z-40 border-b border-zinc-200 bg-white">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4">
-          <NavLink to="/app" className="shrink-0">
+          <NavLink to={isInventoryOnly ? '/app/inventory' : '/app'} className="shrink-0">
             <Logo className="text-2xl" />
           </NavLink>
           <div className="hidden items-center gap-1 md:flex">
-            {NAV.map((item) => (
+            {nav.map((item) => (
               <NavItem key={item.to} {...item} />
             ))}
           </div>
@@ -80,13 +95,15 @@ export function AppLayout() {
             <span className="hidden max-w-40 truncate text-sm font-semibold text-zinc-600 sm:block">
               {shop?.name}
             </span>
-            <NavLink
-              to="/app/settings"
-              aria-label="Settings"
-              className="flex h-11 w-11 items-center justify-center rounded-xl text-zinc-500 hover:bg-zinc-100 md:hidden"
-            >
-              <Settings className="h-5 w-5" aria-hidden="true" />
-            </NavLink>
+            {!isInventoryOnly ? (
+              <NavLink
+                to="/app/settings"
+                aria-label="Settings"
+                className="flex h-11 w-11 items-center justify-center rounded-xl text-zinc-500 hover:bg-zinc-100 md:hidden"
+              >
+                <Settings className="h-5 w-5" aria-hidden="true" />
+              </NavLink>
+            ) : null}
             {mode === 'production' ? (
               <button
                 type="button"
