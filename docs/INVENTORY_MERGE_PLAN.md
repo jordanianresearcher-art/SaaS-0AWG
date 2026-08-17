@@ -1,7 +1,14 @@
 # Inventory Merge Plan — fold `car-audio-inventory` into 0Gauge
 
-**Status:** approved plan, not yet executed. Written to be picked up and
-executed slice-by-slice; each slice ends at a committable, verifiable state.
+**Status:** Slices 0–5 shipped (schema, legacy-data-import script, types/
+repository/demo mode, the four inventory screens, and shared-device
+access). Slices 6–9 (receiving/outgoing orders, label printing, low-stock
+email digest + Shopify push, retiring the old app) are not started — see
+§6 for what's still open in each. Migrations `0017`/`0018` are written and
+verified against a local `supabase db reset`, but **not yet applied to
+production** — this session has no Supabase CLI/token (standing
+limitation), so the shop owner applies them the same way every prior
+migration in this repo has been applied.
 
 **Goal (the user's words):** *"We need to connect the caraudio inventory app
 with the 0gauge app. All of it should show up in the 0gauge app. Anyone
@@ -209,28 +216,25 @@ Each slice is independently committable and independently verifiable. Run
 `npm run typecheck && npm run lint && npx vitest run && npm run build` clean
 before every commit — no exceptions.
 
-### Slice 0 — Preflight ⚠️ blocking, do not skip
+### Slice 0 — Preflight ✅ done
 
-`docs/MVP_PLAN.md` Stream A records that migration `0016` is **not applied
-to the live database** and that quote creation is currently broken in
-production as a result. Stacking `0017`+ on an unknown baseline is how a
-migration chain gets unrecoverable.
+`docs/MVP_PLAN.md` Stream A had recorded migration `0016` as unapplied in
+production. The owner ran `supabase/check_migrations.sql` against the live
+database and confirmed `0001`–`0016` are all applied (`0007` isn't tracked
+by that script — superseded by `0008`, not a gap) — that MVP_PLAN.md note
+was stale and has been corrected. `0017`/`0018` are safe to stack on top.
 
-1. Run `supabase/check_migrations.sql` against the live DB; record exactly
-   which of `0001`–`0016` are really applied.
-2. Apply whatever is missing, `0016` included, before writing `0017`.
-3. Confirm both apps point at the same project ref (compare
-   `VITE_SUPABASE_URL` here against `NEXT_PUBLIC_SUPABASE_URL` there). **If
-   they don't, stop** — Slice 2 becomes a cross-project export/import and
-   needs replanning.
-4. `select count(*) from items;`, `select count(*) from pos_invoices;` —
+Still open before Slice 2 can run for real:
+
+1. Confirm both apps point at the same project ref (compare
+   `VITE_SUPABASE_URL` here against `NEXT_PUBLIC_SUPABASE_URL` in
+   `car-audio-inventory`). **If they don't, stop** — Slice 2 becomes a
+   cross-project export/import and needs replanning.
+2. `select count(*) from items;`, `select count(*) from pos_invoices;` —
    record the numbers; they're the acceptance test for Slice 2.
-5. Identify the target `shop_id` (the real shop, not a demo row).
+3. Identify the target `shop_id` (the real shop, not a demo row).
 
-**Done when:** migration state is known and current, and the row counts and
-target `shop_id` are written down.
-
-### Slice 1 — Schema (migration `0017_inventory_merge.sql`)
+### Slice 1 — Schema (migration `0017_inventory_merge.sql`) ✅ written
 
 - `catalog_items`: add the eleven new columns from §5.
 - `product_import_source`: add `'upc_lookup'`, `'ai_photo'`.
@@ -254,7 +258,7 @@ anonymous `'inventory'` member can read `catalog_items` but gets zero rows
 from `quotes`. Write that second assertion as a real SQL test, not an
 assumption.
 
-### Slice 2 — Data migration (`0018_import_legacy_inventory.sql`)
+### Slice 2 — Data migration (`0018_import_legacy_inventory.sql`) ✅ written, not yet run
 
 Written as an **idempotent, parameterised, non-destructive** script:
 
@@ -273,7 +277,7 @@ Written as an **idempotent, parameterised, non-destructive** script:
 `catalog_items`. Any item whose free-text category didn't map lands `null`
 and is listed in the run output for manual triage.
 
-### Slice 3 — Types + repository
+### Slice 3 — Types + repository ✅ done
 
 - `src/types.ts`: extend `CatalogItem` with the new fields; add
   `InventorySummary`, `ShopAccessCode`, `InventoryDevice`.
@@ -292,7 +296,7 @@ and is listed in the run output for manual triage.
 **Done when:** tests green, and the demo seed shows a populated inventory
 with zero backend.
 
-### Slice 4 — Inventory UI
+### Slice 4 — Inventory UI ✅ done
 
 Phone-first, built from the existing `src/components/ui.tsx` primitives so
 it looks like the rest of the app, not like a port.
@@ -315,7 +319,7 @@ it looks like the rest of the app, not like a port.
 **Done when:** a Playwright smoke script drives add → list → adjust → count
 → ledger end to end in demo mode.
 
-### Slice 5 — Shared-device access
+### Slice 5 — Shared-device access ✅ done
 
 `/join` screen, anonymous sign-in with a clear message if the Supabase
 toggle is off, device naming, and a Settings section showing the code, a
@@ -405,4 +409,20 @@ the owner's confirmation, not just green tests.
 
 The shortest path to the user's actual sentence — *anyone can input, check
 and track inventory from a phone, with UPC scan or photo AI* — is
-**0 → 1 → 2 → 3 → 4 → 5**. Slices 6–8 are depth on top of a working product.
+**0 → 1 → 2 → 3 → 4 → 5**, and that path is now built (see the Status line
+at the top). What's left before this is genuinely finished, in order:
+
+1. **Apply `0017`/`0018` to production** (this session cannot — no
+   Supabase CLI/token) and enable anonymous sign-ins in the Supabase
+   dashboard's Auth settings.
+2. **Run the Slice 2 import** (`select public.import_legacy_inventory(p_shop_id, true)`
+   for a dry-run preview, then `false` to commit) against the real
+   `shop_id`, and reconcile any items whose category came back
+   `null` (listed in the function's own JSON result).
+3. **Smoke-test the live app**: join a phone via `/join`, scan a real
+   barcode, confirm a photo lookup, spot-check a count, and confirm an
+   owner account still sees quotes/reports while the joined phone
+   doesn't.
+4. Slices 6–9 (receiving/outgoing orders, label printing, low-stock email
+   digest + Shopify push, retiring the old app) remain future depth on top
+   of a working product — none of them block using the app day to day.

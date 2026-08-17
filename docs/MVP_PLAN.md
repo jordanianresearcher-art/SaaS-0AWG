@@ -58,45 +58,26 @@ Do not build these this week. They are good ideas parked on purpose.
 
 Five streams. A/B/C/D run in parallel; E is continuous integration.
 
-### Stream A — Production readiness ⚠️ REOPENED, blocking
-Initially recorded as verified. It isn't. A live tint-only quote save
-failed with:
+### Stream A — Production readiness ✅ resolved
+Was reopened over a live tint-only quote save failing with "Could not
+find the 'show_full_addon_total' column of 'quotes' in the schema cache"
+— `0016` looked unapplied. The owner ran `supabase/check_migrations.sql`
+against the live database and confirmed `0001`–`0016` are all applied
+(`0007` isn't tracked by that script — superseded by `0008`, not a gap).
+That closes this out; if the schema-cache error recurs, it's PostgREST's
+cache, not a missing column — reload with `notify pgrst, 'reload schema';`
+or restart the project from the dashboard, then re-run the §1 demo script
+end to end against production (a tint-only quote especially) to confirm.
 
-```
-Could not find the 'show_full_addon_total' column of 'quotes' in the schema cache
-```
-
-That column ships in migration **`0016`**, so `0016` is not applied to the
-live database. The rest of that migration (`quote_options.option_kind`,
-`quote_items.image_url`) is equally missing, and every quote save in the
-app writes all three — meaning **quote creation is currently broken in
-production for every shop, not just tint-only quotes.** The error was only
-legible at all because of the error-surfacing added in Round 31; before
-that it read "Could not save the quote. Please try again."
-
-Do this first, before any other work this week:
-
-1. **Find out what's actually applied**, rather than fixing one column at a
-   time:
-   ```sql
-   select version, name from supabase_migrations.schema_migrations
-   order by version;
-   ```
-   Compare against `supabase/migrations/` — `0009` through `0016` are all
-   suspect, since nothing after `0008` has been confirmed.
-2. **Apply what's missing:** `supabase db push`.
-3. **If `0016` shows as applied but the error persists**, it's a stale
-   PostgREST schema cache, not a missing column. Reload it with
-   `notify pgrst, 'reload schema';` or restart the project from the
-   dashboard.
-4. **Re-run the §1 demo script end to end against production** afterward —
-   including a tint-only quote, which is the case that surfaced this.
-
-Then, ongoing:
-- Migration `0017` (booking) has to reach production the same way. Do not
-  let it sit unapplied while booking screens ship against it.
-- Re-run the demo script against production again on Day 6, after every
-  stream has merged.
+**Migration numbering note:** this section used to reserve `0017` for
+booking. That number is now taken — `0017_inventory_merge.sql` and
+`0018_import_legacy_inventory.sql` ship the inventory/car-audio-inventory
+merge (see `docs/INVENTORY_MERGE_PLAN.md`). Booking's migration is `0019`+
+whenever that work starts. Whichever migration reaches this repo next,
+apply it to production the same way (`supabase db push` or the SQL
+editor) rather than letting it sit unapplied while screens ship against
+it — and re-run the demo script against production again after any
+stream that touches the schema merges.
 - **Lesson for the week:** "deployed" and "schema current" are different
   claims. Verify by running the flow, not by remembering a past deploy.
 
@@ -105,7 +86,7 @@ Now the critical path. Full spec and the parity sequencing in §5.
 
 ### Stream B — Booking system
 Full spec in §5. The largest build. Owns all new booking files plus
-migration `0017`.
+migration `0019`.
 
 ### Stream C — Top-down tint diagrams
 Replaces the rejected 3/4-view art. Owns `src/lib/carDiagrams.ts`,
@@ -137,8 +118,13 @@ merge collisions in a handful of shared files. These rules exist so that
 never happens.
 
 **Reserved migration numbers.** Claim before you write:
-- `0017` → Stream B (booking)
-- `0018` → reserved, unassigned
+- `0017`, `0018` → taken by the inventory/car-audio-inventory merge
+  (`0017_inventory_merge.sql`, `0018_import_legacy_inventory.sql` — see
+  `docs/INVENTORY_MERGE_PLAN.md`). Booking's reservation moved to `0019`
+  as a result — every "migration 0017" reference below in the Booking
+  spec means `0019` now.
+- `0019` → Stream B (booking)
+- `0020` → reserved, unassigned
 - Stream C needs no migration.
 - Never write a migration number you haven't been assigned.
 
@@ -203,7 +189,7 @@ we should get right:
 3. **Jobs are hours, not minutes.** Slot math must handle 2–6 hour blocks
    and not offer a 3-hour slot at 4pm when the shop closes at 6.
 
-### Data model (migration `0017`)
+### Data model (migration `0019`)
 
 Follow the existing conventions exactly: shop-scoped, RLS keyed on shop
 membership, `snake_case` columns mapped once at the repository boundary.
@@ -312,7 +298,7 @@ is shippable at the end of every slice. Never have four half-features on
 Day 6.
 
 **Slice 0 — Core (Days 1–2, blocking everything else)**
-Migration `0017`, types, `scheduling.ts` + its full test suite,
+Migration `0019`, types, `scheduling.ts` + its full test suite,
 `book_appointment` RPC, repository methods in *both* implementations.
 No UI. This is the bottleneck — one strong agent, nothing else in the way.
 
@@ -429,9 +415,9 @@ is now the whole critical path. Suggested allocation across 5 agents:
 
 | Day | B1 · Core | B2 · Staff side | B3 · Customer side | C · Diagrams | D · Polish |
 | --- | --- | --- | --- | --- | --- |
-| 1 | Migration 0017, types, repository | *reading spec, scaffolding* | *reading spec, scaffolding* | *waiting on art* | — |
+| 1 | Migration 0019, types, repository | *reading spec, scaffolding* | *reading spec, scaffolding* | *waiting on art* | — |
 | 2 | `scheduling.ts` + tests, `book_appointment` RPC | Calendar shell on core | Booking page shell on core | Geometry from SVGs | — |
-| 3 | Support both, apply 0017 to prod | Calendar day+week working | Service → vehicle → time flow | Web rendering + editor | — |
+| 3 | Support both, apply 0019 to prod | Calendar day+week working | Service → vehicle → time flow | Web rendering + editor | — |
 | 4 | → moves to Slice 2 | Services/bays/hours config | Confirm + email + quote→book | Email SVG duplicate | Demo data rebuild |
 | 4 | **🚩 CHECKPOINT — Slice 1 merged and demoable, or Slices 3–4 are dropped** | | | | |
 | 5 | Reminder email | Deposit-on-booking (§5) | Self-reschedule / self-cancel | done | Landing + pricing |
