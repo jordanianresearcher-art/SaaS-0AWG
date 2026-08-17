@@ -17,7 +17,6 @@ type FormValues = z.infer<typeof schema>
 export default function LoginPage() {
   const { session, mode } = useAppData()
   const [sent, setSent] = useState(false)
-  const [noAccount, setNoAccount] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const {
     register,
@@ -29,24 +28,22 @@ export default function LoginPage() {
 
   const onSubmit = async (values: FormValues) => {
     setError(null)
-    setNoAccount(false)
     try {
+      // Deliberately NOT shouldCreateUser:false. That was tried and reverted —
+      // it broke real sign-ins: Supabase's OTP endpoint can reject an existing
+      // but not-yet-confirmed user as "no account" (e.g. someone who requested
+      // a link before but never clicked it), and there's no reliable way to
+      // tell that error apart from a genuine unknown email from the message
+      // text alone. Leaving this at the default (true) is what makes
+      // signInWithOtp idempotent for a returning user — it does not create a
+      // second account for an email that already has one, it just sends the
+      // link. /signup exists as a separate, friendlier front door for new
+      // owners; this page no longer tries to police who's "allowed" to sign in.
       const { error: authError } = await getSupabase().auth.signInWithOtp({
         email: values.email,
-        options: { emailRedirectTo: `${env.appUrl}/app`, shouldCreateUser: false },
+        options: { emailRedirectTo: `${env.appUrl}/app` },
       })
-      // shouldCreateUser:false is what makes this page a *sign-in* rather than
-      // a silent sign-up. Without it, a typo'd email quietly created a second
-      // empty account and dropped the owner into onboarding for a shop they
-      // already had. Supabase reports the unknown-user case as an error, so it
-      // gets its own message pointing at /signup instead of the generic one.
-      if (authError) {
-        if (/signup|not found|user/i.test(authError.message)) {
-          setNoAccount(true)
-          return
-        }
-        throw authError
-      }
+      if (authError) throw authError
       setSent(true)
     } catch {
       setError('Could not send the sign-in link. Please try again in a minute.')
@@ -96,18 +93,6 @@ export default function LoginPage() {
                 {...register('email')}
               />
             </Field>
-            {noAccount ? (
-              <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-base text-amber-900">
-                <p className="font-semibold">We don&apos;t have an account with that email.</p>
-                <p className="mt-1">
-                  Double-check the spelling, or{' '}
-                  <Link to="/signup" className="font-semibold underline">
-                    create your shop account
-                  </Link>
-                  .
-                </p>
-              </div>
-            ) : null}
             {error ? (
               <p role="alert" className="text-sm font-medium text-red-700">
                 {error}
