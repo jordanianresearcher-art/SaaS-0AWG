@@ -3,7 +3,8 @@
 // editable via a pencil button; the side panel is where staff decide what
 // this scan session becomes — an invoice or a quote, both finished right
 // here (Receive inventory/Outgoing order are still shown as upcoming, not
-// yet functional — see docs/INVENTORY_AND_SCANNING.md).
+// yet functional — see docs/INVENTORY_AND_SCANNING.md; taking a shipment
+// IN is now its own flow at /app/inventory/new, "Rapid intake").
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Barcode, Camera, Copy, Loader2, Mail, Minus, Package, Pencil, Plus, Printer, Search, Trash2 } from 'lucide-react'
@@ -123,6 +124,10 @@ export default function ScanWorkspacePage() {
   const [manualQuery, setManualQuery] = useState('')
   const [scanInputValue, setScanInputValue] = useState('')
   const scanInputRef = useRef<HTMLInputElement>(null)
+  // The most recently scanned code, so a slow background lookup that
+  // finishes after staff have moved on to a different item doesn't pop a
+  // candidate modal for the wrong product.
+  const latestScanRef = useRef<string | null>(null)
   const [editingRowId, setEditingRowId] = useState<string | null>(null)
   const [customName, setCustomName] = useState('')
   const [customPrice, setCustomPrice] = useState('')
@@ -176,13 +181,18 @@ export default function ScanWorkspacePage() {
   async function handleBarcodeDetected(code: string) {
     setScannerOpen(false)
     setLookupBusy(true)
+    latestScanRef.current = code
     // Tracked locally (not read back from state, which wouldn't reflect a
     // setResolveCandidates call made earlier in this same invocation) so
     // the finally block below knows whether to return focus to the scan
     // input or leave it on the just-opened candidate modal.
     let openedCandidateModal = false
     try {
-      const result = await repo.lookupProductByUpc(code)
+      // Fast first: cache + barcode database only, ~1s. A code from a
+      // manufacturer that never published its barcodes will never resolve
+      // from the number alone, so failing fast and handing staff the
+      // keyboard beats making them watch a 15-30s search miss.
+      const result = await repo.lookupProductByUpc(code, { fast: true })
       if (result.source === 'catalog') {
         addCatalogItem(result.catalogItem)
         toast('success', `Added ${result.catalogItem.name}.`)
@@ -214,8 +224,24 @@ export default function ScanWorkspacePage() {
         setResolveCandidates(result.candidates)
         openedCandidateModal = true
       } else {
+        // Fast lookup missed. Retain the code so staff can act on it right
+        // now, and keep looking in the background — if the slower AI/web
+        // search does turn something up, offer it, but only while this is
+        // still the code on screen (see latestScanRef).
         setUnresolvedCode(code)
-        toast('error', `No match for that barcode (${code}) anywhere we looked. It's been kept below — add the details manually.`)
+        toast('info', `No instant match for ${code} — type what it is below. Still searching in the background.`)
+        void repo
+          .lookupProductByUpc(code)
+          .then((full) => {
+            if (latestScanRef.current !== code) return
+            if (full.source === 'candidates' && full.candidates.length > 0) {
+              setResolveKind('barcode')
+              setResolveCandidates(full.candidates)
+            }
+          })
+          .catch(() => {
+            /* Background best-effort — the retained code above is the real answer. */
+          })
       }
     } catch (err) {
       toast('error', err instanceof Error ? err.message : 'Barcode lookup failed.')

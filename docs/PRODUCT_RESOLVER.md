@@ -246,3 +246,37 @@ the photo-specific modal copy and candidate cards).
   resolve-product`), empty candidates to the caller — a billing problem
   and a genuine "nothing found" look identical from the UI, so check the
   logs before assuming the latter.
+
+
+---
+
+## Brand hint and fast mode (added for unpublished barcodes)
+
+Some manufacturers never publish their barcodes anywhere — Nemesis Audio is
+the case that drove this. For those products **no lookup can ever succeed
+from the code alone**: the number is in no barcode database, and a web search
+for a bare 12-digit number matches nothing. Sending it to the AI anyway cost
+15-30 seconds per scan and returned nothing useful.
+
+Two request options address that:
+
+| Option | Applies to | Effect |
+| --- | --- | --- |
+| `brandHint` | `barcode`, `text` | The brand the shop is currently receiving. Scopes the web search to that manufacturer's own site and its dealers, and is part of the cache key. This is what makes a lookup work at all for these products — "Nemesis Audio NA-12F" finds the manufacturer's page; the barcode never will. |
+| `fast` | `barcode` | Answers from the cache + UPCitemdb only and stops there, skipping the AI/web step (~1s instead of 15-30s). |
+
+**An empty `fast` result is never cached.** It isn't an answer, it's a
+deliberately half-finished lookup — caching it would make the follow-up full
+lookup read the empty entry straight back and never run the search at all.
+
+Callers use these together: the scan flows do a `fast` lookup, hand staff the
+keyboard immediately on a miss, and (in the selling workspace) run the full
+search in the background, offering candidates only if the same code is still
+on screen. See `src/pages/app/NewInventoryItemPage.tsx` (rapid intake) and
+`ScanWorkspacePage`'s `handleBarcodeDetected`.
+
+The durable fix is neither of these, though: identifying a product once
+**binds its code to that catalog item forever**, so an unpublished barcode is
+a one-time cost per product rather than a permanent one. Rapid intake is
+built around making that one time as cheap as possible — see
+`src/lib/productSearch.ts` for the offline-first matching that backs it.

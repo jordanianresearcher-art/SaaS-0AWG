@@ -326,8 +326,21 @@ export interface ProductResolutionCandidate {
  * provider just means no candidates, never an error.
  */
 export type ProductResolveRequest =
-  | { kind: 'barcode'; code: string }
-  | { kind: 'text'; query: string }
+  /**
+   * `brandHint` is the shop's current "brand lock" (see
+   * src/lib/productSearch.ts) — the single biggest lever on result quality
+   * for a manufacturer whose barcodes were never published anywhere. A bare
+   * unpublished code can never match anything online; "Nemesis Audio
+   * NA-12F" usually finds the manufacturer's own product page.
+   *
+   * `fast` skips the AI/web step and answers from the cache + UPCitemdb
+   * only (~1s instead of 15-30s). The scan flow uses it so an unknown code
+   * fails fast and staff can start typing what the box is, rather than
+   * waiting out a search that was never going to resolve it. An empty fast
+   * result is never cached, so a later full lookup still does the real work.
+   */
+  | { kind: 'barcode'; code: string; brandHint?: string | null; fast?: boolean }
+  | { kind: 'text'; query: string; brandHint?: string | null }
   | { kind: 'photo'; imageBase64: string; mediaType: 'image/jpeg' | 'image/png' | 'image/webp' }
 
 export interface ProductResolveResult {
@@ -399,10 +412,15 @@ export interface DataRepository {
 
   /** Local catalog match by UPC/SKU only — lookupProductByUpc below wraps this with an external-lookup fallback. */
   findCatalogItemByCode(code: string): Promise<CatalogItem | null>
-  /** Local catalog first, then (production only) an external UPC database. A future phase adds a photo-lookup fallback for codes nothing recognizes. */
-  lookupProductByUpc(code: string): Promise<UpcLookupResult>
-  /** AI+web-search autocomplete for a partially-typed SKU/model/name when adding a new catalog product. Demo mode never makes a real call — always resolves []. Production degrades to [] on any failure rather than throwing, same pattern as lookupProductByUpc. Delegates to resolveProduct() underneath. */
-  lookupProductSuggestions(query: string): Promise<ProductSuggestion[]>
+  /**
+   * Local catalog first, then (production only) an external UPC database.
+   * `options.fast` stops there instead of falling through to the AI/web
+   * search — see ProductResolveRequest. `options.brandHint` scopes any
+   * search that does run to the brand currently being received.
+   */
+  lookupProductByUpc(code: string, options?: { fast?: boolean; brandHint?: string | null }): Promise<UpcLookupResult>
+  /** AI+web-search autocomplete for a partially-typed SKU/model/name when adding a new catalog product. `brandHint` scopes the search to the brand being received. Demo mode never makes a real call — always resolves []. Production degrades to [] on any failure rather than throwing, same pattern as lookupProductByUpc. Delegates to resolveProduct() underneath. */
+  lookupProductSuggestions(query: string, brandHint?: string | null): Promise<ProductSuggestion[]>
   /**
    * The universal resolver: called when a barcode or typed query doesn't
    * match anything already in this shop's catalog. Never throws and never

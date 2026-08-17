@@ -643,7 +643,7 @@ export class SupabaseRepository implements DataRepository {
     return skuResult.data ? mapCatalogItem(skuResult.data as Row) : null
   }
 
-  async lookupProductByUpc(code: string): Promise<UpcLookupResult> {
+  async lookupProductByUpc(code: string, options: { fast?: boolean; brandHint?: string | null } = {}): Promise<UpcLookupResult> {
     const item = await this.findCatalogItemByCode(code)
     if (item) return { source: 'catalog', catalogItem: item }
 
@@ -659,7 +659,7 @@ export class SupabaseRepository implements DataRepository {
     // hiccup) degrades to not_found, worse than which would be a hard
     // error mid-scan.
     try {
-      const result = await this.resolveProduct({ kind: 'barcode', code })
+      const result = await this.resolveProduct({ kind: 'barcode', code, fast: options.fast, brandHint: options.brandHint })
       const top = result.candidates[0]
       if (top && top.source === 'verified_web_source' && top.confidenceLevel === 'high') {
         return {
@@ -681,10 +681,10 @@ export class SupabaseRepository implements DataRepository {
     }
   }
 
-  async lookupProductSuggestions(query: string): Promise<ProductSuggestion[]> {
+  async lookupProductSuggestions(query: string, brandHint?: string | null): Promise<ProductSuggestion[]> {
     const trimmed = query.trim()
     if (trimmed.length < 2) return []
-    const result = await this.resolveProduct({ kind: 'text', query: trimmed })
+    const result = await this.resolveProduct({ kind: 'text', query: trimmed, brandHint })
     return result.candidates.map((c) => ({
       name: c.name,
       brand: c.brand,

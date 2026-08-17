@@ -383,6 +383,9 @@ export class DemoRepository implements DataRepository {
     return this.db.catalogItems.find((i) => i.upc === trimmed || i.sku === trimmed) ?? null
   }
 
+  // Takes no options parameter on purpose (TypeScript allows a narrower
+  // implementation than the interface): `fast` and `brandHint` only shape a
+  // real network lookup, and demo mode never makes one.
   async lookupProductByUpc(code: string): Promise<UpcLookupResult> {
     // Demo mode must never make a real external call (same rule as
     // runShopifyImport) — a local miss falls through to the same
