@@ -5,10 +5,21 @@ repository/demo mode, the four inventory screens, and shared-device
 access). Slices 6–9 (receiving/outgoing orders, label printing, low-stock
 email digest + Shopify push, retiring the old app) are not started — see
 §6 for what's still open in each. Migrations `0017`/`0018` are written and
-verified against a local `supabase db reset`, but **not yet applied to
-production** — this session has no Supabase CLI/token (standing
-limitation), so the shop owner applies them the same way every prior
-migration in this repo has been applied.
+**not yet applied to production** — this session has no Supabase CLI/token
+(standing limitation), so the shop owner applies them the same way every
+prior migration in this repo has been applied.
+
+Both migrations have been executed end to end against a real PostgreSQL 16
+instance, on a reconstructed pre-`0017` baseline, verifying: they apply in
+a single transaction; the role split behaves correctly per role
+(owner/manager/staff keep `is_shop_member`, `inventory` does not, and only
+admins can rotate the code or revoke a device); an owner who uses the join
+code by mistake is not downgraded; a wrong code is refused generically; the
+legacy import maps prices to cents, preserves source UUIDs, emits
+opening-balance ledger rows, reconciles unit totals exactly, and is
+genuinely idempotent across repeated runs. What that does *not* cover is
+this project's actual production data and its full `0001`–`0016` schema —
+run the Slice 2 dry run before committing the import.
 
 **Goal (the user's words):** *"We need to connect the caraudio inventory app
 with the 0gauge app. All of it should show up in the 0gauge app. Anyone

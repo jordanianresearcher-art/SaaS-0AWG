@@ -7,15 +7,31 @@
 -- scan/inventory surface with no account — while staying completely walled
 -- off from quotes, customers, and revenue reporting.
 --
--- Ordering note: this file ADDs enum values (membership_role,
--- product_import_source) and then defines functions whose bodies reference
--- those new values as string literals. That's safe — a new enum value
--- can't be *evaluated* in the same transaction it was added in, but a
--- function body is only parsed at CREATE FUNCTION time, not evaluated, so
--- by the time any of these functions actually run (a later transaction)
--- the ADD VALUE has long since committed. Do not add a DML statement in
--- this file that evaluates 'inventory'/'upc_lookup'/'ai_photo' directly
--- (e.g. a plain insert) — only inside function bodies.
+-- Ordering note — read before touching the enum values below.
+--
+-- This file ADDs enum values (membership_role.'inventory',
+-- product_import_source.'upc_lookup') and then defines functions whose
+-- bodies reference them. Postgres refuses to *use* a new enum value in the
+-- same transaction that added it ("unsafe use of new value ... of enum
+-- type", SQLSTATE 55P04), and this whole file runs as one transaction
+-- (`supabase db push`, or a paste into the SQL editor). The two languages
+-- differ in when that counts as "use":
+--
+--   * `language plpgsql` bodies are NOT resolved at CREATE FUNCTION time,
+--     only when the function first executes — a later transaction, by
+--     which point the ADD VALUE has committed. So a plpgsql body may
+--     reference 'inventory' freely (join_shop_with_access_code,
+--     rotate_staff_access_code, revoke_inventory_device all do).
+--   * `language sql` bodies ARE parsed and validated at CREATE FUNCTION
+--     time (check_function_bodies is on by default), so an enum literal
+--     there fails immediately. That is exactly what happened on the first
+--     real run of this migration.
+--
+-- Hence is_shop_member below compares `role::text <> 'inventory'` rather
+-- than `role <> 'inventory'`: a text comparison needs no enum lookup, so
+-- it validates cleanly in the same transaction. Do NOT "tidy" that cast
+-- away, and do not add a plain DML statement to this file that names
+-- 'inventory'/'upc_lookup' directly — both reintroduce the same failure.
 
 -- ---------------------------------------------------------------------------
 -- Enum growth
@@ -138,7 +154,8 @@ stable
 as $$
   select exists (
     select 1 from shop_memberships
-    where shop_id = p_shop_id and user_id = auth.uid() and role <> 'inventory'
+    -- role::text, not role — see the "Ordering note" at the top of this file.
+    where shop_id = p_shop_id and user_id = auth.uid() and role::text <> 'inventory'
   );
 $$;
 
