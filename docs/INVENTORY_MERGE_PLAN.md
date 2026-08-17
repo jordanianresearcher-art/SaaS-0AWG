@@ -4,12 +4,12 @@
 repository/demo mode, the four inventory screens, and shared-device
 access). Slices 6–9 (receiving/outgoing orders, label printing, low-stock
 email digest + Shopify push, retiring the old app) are not started — see
-§6 for what's still open in each. Migrations `0017`/`0018` are written and
-**not yet applied to production** — this session has no Supabase CLI/token
-(standing limitation), so the shop owner applies them the same way every
-prior migration in this repo has been applied.
+§6 for what's still open in each. Migrations `0017`/`0018`/`0019` are
+written and **not yet fully applied to production** — this session has no
+Supabase CLI/token (standing limitation), so the shop owner applies them the
+same way every prior migration in this repo has been applied.
 
-Both migrations have been executed end to end against a real PostgreSQL 16
+All three migrations have been executed end to end against a real PostgreSQL 16
 instance, on a reconstructed pre-`0017` baseline, verifying: they apply in
 a single transaction; the role split behaves correctly per role
 (owner/manager/staff keep `is_shop_member`, `inventory` does not, and only
@@ -20,6 +20,25 @@ opening-balance ledger rows, reconciles unit totals exactly, and is
 genuinely idempotent across repeated runs. What that does *not* cover is
 this project's actual production data and its full `0001`–`0016` schema —
 run the Slice 2 dry run before committing the import.
+
+Two bugs surfaced only when the migrations were first applied against a
+real Supabase project, both now fixed and regression-verified locally:
+
+- **`55P04` at apply time.** `is_shop_member` is `language sql`, whose body
+  is validated at `CREATE FUNCTION` time, so its `role <> 'inventory'`
+  resolved a brand-new enum label in the transaction that added it. Now
+  compares `role::text`. (`plpgsql` bodies resolve at first execution and
+  were never affected.)
+- **`gen_salt does not exist` at runtime.** Supabase installs pgcrypto into
+  the `extensions` schema, so `0017`'s `create extension if not exists
+  pgcrypto` no-ops and a `search_path = public` function cannot see
+  `crypt()`/`gen_salt()`. The two access-code functions now use
+  `search_path = public, extensions`, which is also correct on installs
+  where pgcrypto lives in `public`.
+
+Lesson for anything added here later: a migration applying cleanly is not
+evidence its functions *run*. Exercise every new SECURITY DEFINER function
+against a real project, not just the migration.
 
 **Goal (the user's words):** *"We need to connect the caraudio inventory app
 with the 0gauge app. All of it should show up in the 0gauge app. Anyone
@@ -423,9 +442,11 @@ and track inventory from a phone, with UPC scan or photo AI* — is
 **0 → 1 → 2 → 3 → 4 → 5**, and that path is now built (see the Status line
 at the top). What's left before this is genuinely finished, in order:
 
-1. **Apply `0017`/`0018` to production** (this session cannot — no
-   Supabase CLI/token) and enable anonymous sign-ins in the Supabase
-   dashboard's Auth settings.
+1. **Apply `0017`, `0018`, and `0019` to production** (this session cannot
+   — no Supabase CLI/token) and enable anonymous sign-ins in the Supabase
+   dashboard's Auth settings. `0019` is a repair for `0017` and is only
+   needed on a database where `0017` was applied before that fix landed;
+   it is harmless (create-or-replace only) to run regardless.
 2. **Run the Slice 2 import** (`select public.import_legacy_inventory(p_shop_id, true)`
    for a dry-run preview, then `false` to commit) against the real
    `shop_id`, and reconcile any items whose category came back

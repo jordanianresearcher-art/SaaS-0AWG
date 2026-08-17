@@ -295,7 +295,10 @@ create or replace function public.join_shop_with_access_code(p_code text, p_devi
 returns uuid
 language plpgsql
 security definer
-set search_path = public
+-- `extensions` too: Supabase installs pgcrypto there, not in public, so a bare
+-- `public` search_path cannot see crypt()/gen_salt(). Harmless on installs
+-- where pgcrypto IS in public — a missing schema in search_path is ignored.
+set search_path = public, extensions
 as $$
 declare
   v_shop_id uuid;
@@ -349,7 +352,8 @@ create or replace function public.rotate_staff_access_code(p_shop_id uuid)
 returns text
 language plpgsql
 security definer
-set search_path = public
+-- `extensions` too — same pgcrypto reason as join_shop_with_access_code above.
+set search_path = public, extensions
 as $$
 declare
   v_code text;
