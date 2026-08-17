@@ -320,16 +320,23 @@ export default function PublicQuotePage() {
         {/* Response area */}
         <section aria-label="Tell the shop what you think" className="mt-8">
           {submitted ? (
-            <div className="rounded-2xl border border-green-300 bg-green-50 p-6 text-center">
-              <p className="text-xl font-bold text-green-900">Got it — thanks!</p>
-              <p className="mt-2 text-base text-green-800">
-                {quote.shopName} received your answer ({RESPONSE_CONFIG[submitted].publicLabel.toLowerCase()}).
-                They&apos;ll be in touch soon. Need them now? Call{' '}
-                <a href={`tel:${quote.shopPhone}`} className="font-bold underline">
-                  {quote.shopPhone}
-                </a>
-                .
-              </p>
+            <div className="space-y-3">
+              <div className="rounded-2xl border border-green-300 bg-green-50 p-6 text-center">
+                <p className="text-xl font-bold text-green-900">Got it — thanks!</p>
+                <p className="mt-2 text-base text-green-800">
+                  {quote.shopName} received your answer ({RESPONSE_CONFIG[submitted].publicLabel.toLowerCase()}).
+                  They&apos;ll be in touch soon. Need them now? Call{' '}
+                  <a href={`tel:${quote.shopPhone}`} className="font-bold underline">
+                    {quote.shopPhone}
+                  </a>
+                  .
+                </p>
+              </div>
+              {/* The shop's answer to "I need financing" is these links, not a
+                 callback. Showing them here turns the highest-intent response
+                 into something the customer can act on immediately, while
+                 they're still on the page. */}
+              {submitted === 'need_financing' ? <FinancingLinks offers={quote.financingOffers} color={color} /> : null}
             </div>
           ) : (
             <div className="space-y-3">
@@ -357,6 +364,11 @@ export default function PublicQuotePage() {
                 <CreditCard className="h-5 w-5" aria-hidden="true" />
                 I need financing
               </button>
+
+              {/* Available before responding too — a customer who already knows
+                 they need financing shouldn't have to tap through a response
+                 first to reach the application. */}
+              <FinancingLinks offers={quote.financingOffers} color={color} />
 
               {/* 3 — everything else, visually quieter. */}
               <div className="rounded-2xl border border-zinc-200 bg-white p-4">
@@ -458,6 +470,39 @@ export default function PublicQuotePage() {
           <p>{quote.shopAddress}</p>
         </footer>
       </main>
+    </div>
+  )
+}
+
+/**
+ * The shop's third-party financing applications, as one-tap buttons.
+ *
+ * Renders nothing when the shop hasn't set any up — most shops on day one
+ * haven't, and an empty "financing" heading reads as a broken promise.
+ *
+ * `rel="noopener noreferrer"` because these are outbound links to third-party
+ * lenders: the opened page must not get a handle back on this one.
+ */
+function FinancingLinks({ offers, color }: { offers: PublicQuote['financingOffers']; color: string }) {
+  if (offers.length === 0) return null
+  return (
+    <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+      <p className="text-base font-bold text-ink">Apply for financing</p>
+      <p className="mt-1 text-sm text-zinc-600">Most decisions come back in a few minutes.</p>
+      <div className="mt-3 space-y-2">
+        {offers.map((offer) => (
+          <a
+            key={offer.id}
+            href={offer.applicationUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex min-h-14 w-full items-center justify-center gap-2 rounded-xl border-2 bg-white text-base font-bold"
+            style={{ borderColor: color, color }}
+          >
+            <CreditCard className="h-5 w-5" aria-hidden="true" /> Apply with {offer.name}
+          </a>
+        ))}
+      </div>
     </div>
   )
 }

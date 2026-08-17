@@ -1,7 +1,8 @@
-import type { Customer, Quote, QuoteOption, Shop, TemplateType } from '../types'
+import type { Customer, FinancingOffer, Quote, QuoteOption, Shop, TemplateType } from '../types'
 import { formatCurrency, formatDate, formatVehicle } from './format'
 import { addonOptions, computeAddonBreakdown, fullTotalCents, mainOption } from './quotePricing'
 import { summarizeWindowTint } from './windowTint'
+import { sanitizeFinancingOffers } from './financing'
 
 // All five manual email templates. Emails stay short and drive the customer to
 // the public quote page — the full quote never rides inside the email.
@@ -192,6 +193,44 @@ function tintSummaryHtml(windowTints: Quote['windowTints']): string {
   )
 }
 
+/**
+ * The shop's financing applications, rendered as tappable rows under the main
+ * CTA. Placed *after* the price and the "See your quote" button on purpose:
+ * sticker shock is exactly the moment financing becomes relevant, and "I need
+ * financing" is already one of the most common replies on a public quote.
+ *
+ * Offers arrive pre-sanitized (see src/lib/financing.ts) — every applicationUrl
+ * here is already known to be http/https, so it is safe to put in an href.
+ */
+function financingHtml(rawOffers: FinancingOffer[], color: string): string {
+  // Sanitize here rather than trusting the caller. This function is the last
+  // thing between stored data and an href in a real customer's inbox, and not
+  // every write path runs through the Settings form — so it re-checks rather
+  // than assuming someone upstream already did.
+  const offers = sanitizeFinancingOffers(rawOffers)
+  if (offers.length === 0) return ''
+  const rows = offers
+    .map(
+      (offer) =>
+        `<a href="${escapeHtml(offer.applicationUrl)}" style="display:block;margin:0 0 8px;padding:12px 16px;background:#ffffff;border:1px solid ${color};border-radius:10px;color:${color};text-decoration:none;font-weight:700;font-size:15px;text-align:center;">Apply with ${escapeHtml(offer.name)}</a>`,
+    )
+    .join('')
+  return (
+    `<div style="margin:0 0 24px;padding:16px;background:#f4f4f5;border-radius:10px;">` +
+    `<p style="margin:0 0 12px;font-size:15px;font-weight:700;color:#18181b;">Need to split this up? We offer financing.</p>` +
+    rows +
+    `<p style="margin:8px 0 0;font-size:13px;color:#71717a;">Applying takes a few minutes and most decisions are instant.</p>` +
+    `</div>`
+  )
+}
+
+/** Plain-text counterpart — every HTML email ships with a text alternative. */
+function financingText(rawOffers: FinancingOffer[]): string | null {
+  const offers = sanitizeFinancingOffers(rawOffers)
+  if (offers.length === 0) return null
+  return ['', 'Need to split this up? We offer financing:', ...offers.map((o) => `- ${o.name}: ${o.applicationUrl}`)].join('\n')
+}
+
 export function renderEmail(templateType: TemplateType, ctx: EmailContext): RenderedEmail {
   const copy = COPY[templateType]
   const { shop, customer, quote } = ctx
@@ -217,6 +256,7 @@ export function renderEmail(templateType: TemplateType, ctx: EmailContext): Rend
     '',
     `${copy.cta}: ${ctx.publicUrl}`,
     valueLine,
+    financingText(shop.financingOffers),
     showFullSummary && quote.windowTints.length > 0 ? 'Includes window tint — see your quote for the diagram and details.' : '',
     expiration,
     '',
@@ -254,6 +294,7 @@ export function renderEmail(templateType: TemplateType, ctx: EmailContext): Rend
       <p style="margin:0 0 24px;text-align:center;">
         <a href="${escapeHtml(ctx.publicUrl)}" style="display:inline-block;background:${color};color:#ffffff;text-decoration:none;font-weight:700;font-size:17px;padding:14px 32px;border-radius:10px;">${copy.cta}</a>
       </p>
+      ${financingHtml(shop.financingOffers, color)}
       ${expiration ? `<p style="margin:0 0 16px;color:#52525b;font-size:14px;">${escapeHtml(expiration)}</p>` : ''}
       <p style="margin:0;color:#52525b;font-size:15px;">Questions? Call <a href="tel:${escapeHtml(shop.phone)}" style="color:${color};">${escapeHtml(shop.phone)}</a> or just reply to this email.</p>
     </div>

@@ -775,6 +775,7 @@ export class DemoRepository implements DataRepository {
       shopEmail: shop.email,
       shopAddress: shop.address,
       shopPrimaryColor: shop.primaryColor,
+      financingOffers: shop.financingOffers,
       quoteDisclaimer: shop.quoteDisclaimer,
       customerFirstName: customer.firstName,
       vehicle: {

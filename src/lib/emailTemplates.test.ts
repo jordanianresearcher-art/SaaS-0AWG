@@ -171,4 +171,34 @@ describe('renderEmail', () => {
     expect(html).toContain('Front windows 35%')
     expect(html).toContain('Back glass 5%')
   })
+  it('offers the shop\'s financing applications in both HTML and text', () => {
+    const ctx = makeContext()
+    const email = renderEmail('initial', ctx)
+    for (const body of [email.html, email.text]) {
+      expect(body).toContain('Snap Finance')
+      expect(body).toContain('https://snapfinance.com/apply')
+      expect(body).toContain('Acima')
+    }
+    expect(email.html).toContain('Need to split this up? We offer financing.')
+  })
+
+  it('says nothing about financing when the shop has not set any up', () => {
+    const ctx = makeContext()
+    const email = renderEmail('initial', { ...ctx, shop: { ...ctx.shop, financingOffers: [] } })
+    expect(email.html).not.toContain('We offer financing')
+    expect(email.text).not.toContain('We offer financing')
+  })
+
+  it('keeps a hostile financing URL out of the href', () => {
+    const ctx = makeContext()
+    const email = renderEmail('initial', {
+      ...ctx,
+      shop: {
+        ...ctx.shop,
+        // Shaped like a stored row that never went through the Settings form.
+        financingOffers: [{ id: 'x', name: 'Evil', applicationUrl: 'javascript:alert(1)' }],
+      },
+    })
+    expect(email.html).not.toContain('javascript:')
+  })
 })

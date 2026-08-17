@@ -1,4 +1,5 @@
 import { FunctionsHttpError, type SupabaseClient } from '@supabase/supabase-js'
+import { sanitizeFinancingOffers } from '../lib/financing'
 import type {
   CatalogItem,
   Customer,
@@ -66,6 +67,9 @@ function mapShop(r: Row): Shop {
     primaryColor: r.primary_color ?? '#1d4ed8',
     defaultPaymentMethod: r.default_payment_method,
     defaultPaymentHandle: r.default_payment_handle,
+    // Sanitized rather than cast: a malformed row must degrade to "not shown"
+    // instead of putting a broken link in a customer's email.
+    financingOffers: sanitizeFinancingOffers(r.financing_offers),
     quoteExpirationDays: r.quote_expiration_days ?? 30,
     followUpScheduleDays: r.follow_up_schedule_days ?? [2, 3, 5],
     quoteDisclaimer: r.quote_disclaimer ?? '',
@@ -406,6 +410,7 @@ export class SupabaseRepository implements DataRepository {
     if (patch.primaryColor !== undefined) row.primary_color = patch.primaryColor
     if (patch.defaultPaymentMethod !== undefined) row.default_payment_method = patch.defaultPaymentMethod
     if (patch.defaultPaymentHandle !== undefined) row.default_payment_handle = patch.defaultPaymentHandle
+    if (patch.financingOffers !== undefined) row.financing_offers = patch.financingOffers
     if (patch.quoteExpirationDays !== undefined) row.quote_expiration_days = patch.quoteExpirationDays
     if (patch.followUpScheduleDays !== undefined) row.follow_up_schedule_days = patch.followUpScheduleDays
     if (patch.quoteDisclaimer !== undefined) row.quote_disclaimer = patch.quoteDisclaimer

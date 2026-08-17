@@ -3,6 +3,7 @@ import type {
   Customer,
   EmailMessage,
   Employee,
+  FinancingOffer,
   ImportSource,
   Invoice,
   InvoicePaymentMethod,
@@ -98,6 +99,8 @@ export interface ShopSettingsPatch {
   primaryColor?: string
   defaultPaymentMethod?: PaymentMethod | null
   defaultPaymentHandle?: string | null
+  /** Replaces the whole list — Settings always sends the full set, never a delta. */
+  financingOffers?: FinancingOffer[]
   quoteExpirationDays?: number
   followUpScheduleDays?: number[]
   quoteDisclaimer?: string

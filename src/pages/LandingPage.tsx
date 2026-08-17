@@ -41,9 +41,17 @@ export default function LandingPage() {
       <header className="border-b border-zinc-100">
         <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-4">
           <Logo className="text-2xl" />
-          <Link to="/login" className="min-h-11 rounded-xl px-4 py-2.5 text-base font-semibold text-charcoal hover:bg-zinc-100">
-            Shop Login
-          </Link>
+          <div className="flex items-center gap-1">
+            <Link to="/login" className="min-h-11 rounded-xl px-4 py-2.5 text-base font-semibold text-charcoal hover:bg-zinc-100">
+              Shop Login
+            </Link>
+            <Link
+              to="/signup"
+              className="min-h-11 rounded-xl bg-brand px-4 py-2.5 text-base font-semibold text-white hover:bg-brand-dark"
+            >
+              Sign Up
+            </Link>
+          </div>
         </div>
       </header>
 
@@ -55,23 +63,24 @@ export default function LandingPage() {
           Email the quote. See who opens it. Bring them back.
         </p>
         <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
+          <Link
+            to="/signup"
+            className="inline-flex min-h-16 w-full items-center justify-center gap-2 rounded-xl bg-brand px-9 text-xl font-bold text-white shadow-sm transition-transform hover:scale-[1.02] hover:bg-brand-dark sm:w-auto"
+          >
+            Set Up My Shop
+            <ArrowRight className="h-6 w-6" aria-hidden="true" />
+          </Link>
           {env.demoModeEnabled ? (
             <Link
               to="/demo"
-              className="inline-flex min-h-16 w-full items-center justify-center gap-2 rounded-xl bg-brand px-9 text-xl font-bold text-white shadow-sm transition-transform hover:scale-[1.02] hover:bg-brand-dark sm:w-auto"
+              className="inline-flex min-h-16 w-full items-center justify-center gap-2 rounded-xl border-2 border-zinc-300 px-9 text-xl font-bold text-ink transition-colors hover:border-zinc-400 hover:bg-zinc-50 sm:w-auto"
             >
               <MousePointerClick className="h-6 w-6" aria-hidden="true" />
               Try the Demo
             </Link>
           ) : null}
-          <Link
-            to="/login"
-            className="inline-flex min-h-16 w-full items-center justify-center gap-2 rounded-xl border-2 border-zinc-300 px-9 text-xl font-bold text-ink transition-colors hover:border-zinc-400 hover:bg-zinc-50 sm:w-auto"
-          >
-            Shop Login
-          </Link>
         </div>
-        <p className="mt-3 text-sm text-zinc-500">No sign-up. No credit card. Just tap and try it.</p>
+        <p className="mt-3 text-sm text-zinc-500">No credit card. Set up in about two minutes.</p>
       </section>
 
       {/* How it works — 3 icons, almost no words */}
@@ -127,15 +136,24 @@ export default function LandingPage() {
           <h2 className="text-3xl font-black text-white sm:text-4xl">
             That quote didn&apos;t say no. It just went quiet.
           </h2>
-          {env.demoModeEnabled ? (
+          <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Link
-              to="/demo"
-              className="mt-8 inline-flex min-h-16 items-center justify-center gap-2 rounded-xl bg-white px-9 text-xl font-bold text-ink transition-transform hover:scale-[1.02] hover:bg-zinc-100"
+              to="/signup"
+              className="inline-flex min-h-16 w-full items-center justify-center gap-2 rounded-xl bg-white px-9 text-xl font-bold text-ink transition-transform hover:scale-[1.02] hover:bg-zinc-100 sm:w-auto"
             >
-              <MousePointerClick className="h-6 w-6" aria-hidden="true" />
-              Try it free
+              Set Up My Shop
+              <ArrowRight className="h-6 w-6" aria-hidden="true" />
             </Link>
-          ) : null}
+            {env.demoModeEnabled ? (
+              <Link
+                to="/demo"
+                className="inline-flex min-h-16 w-full items-center justify-center gap-2 rounded-xl border-2 border-zinc-700 px-9 text-xl font-bold text-white transition-colors hover:bg-zinc-900 sm:w-auto"
+              >
+                <MousePointerClick className="h-6 w-6" aria-hidden="true" />
+                Try it free
+              </Link>
+            ) : null}
+          </div>
         </div>
       </section>
 

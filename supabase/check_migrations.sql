@@ -79,6 +79,14 @@ from (
     ('0016 addons + item images',
      exists (select 1 from information_schema.columns
              where table_schema = 'public' and table_name = 'quotes'
-               and column_name = 'show_full_addon_total'))
+               and column_name = 'show_full_addon_total')),
+
+    ('0018 shop logo storage',
+     exists (select 1 from storage.buckets where id = 'shop-logos')),
+
+    ('0019 shop financing offers',
+     exists (select 1 from information_schema.columns
+             where table_schema = 'public' and table_name = 'shops'
+               and column_name = 'financing_offers'))
 ) as t(migration, applied)
 order by migration;

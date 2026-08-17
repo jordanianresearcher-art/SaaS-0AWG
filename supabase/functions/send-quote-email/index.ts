@@ -178,6 +178,12 @@ function tintCoverageLine(windows: EmailTintWindow[]): string {
 // Email copy + rendering — mirrors src/lib/emailTemplates.ts.
 // ---------------------------------------------------------------------------
 
+/** Mirror of FinancingOffer in src/types.ts. */
+interface EmailFinancingOffer {
+  name: string
+  applicationUrl: string
+}
+
 interface EmailContext {
   shopName: string
   shopPhone: string
@@ -185,6 +191,7 @@ interface EmailContext {
   shopReplyTo: string
   shopLogoUrl: string | null
   shopColor: string
+  financingOffers: EmailFinancingOffer[]
   firstName: string
   vehicle: string | null
   options: EmailQuoteOption[]
@@ -320,6 +327,62 @@ function tintSummaryHtml(windowTints: EmailWindowTint[]): string {
   )
 }
 
+/**
+ * Duplicated from src/lib/financing.ts — Deno Edge Functions cannot import
+ * from src/. Keep the two in sync: this is the copy that decides what a real
+ * customer actually receives.
+ *
+ * Sanitizing here rather than trusting the column matters for one reason: the
+ * value ends up in an href. A row carrying `javascript:` must never survive
+ * this function.
+ */
+function sanitizeFinancingOffers(value: unknown): EmailFinancingOffer[] {
+  if (!Array.isArray(value)) return []
+  const offers: EmailFinancingOffer[] = []
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') continue
+    const row = entry as Record<string, unknown>
+    const name = typeof row.name === 'string' ? row.name.trim() : ''
+    const rawUrl = typeof row.applicationUrl === 'string' ? row.applicationUrl.trim() : ''
+    if (!name || !rawUrl) continue
+    let parsed: URL
+    try {
+      parsed = new URL(/^[a-z][a-z0-9+.-]*:/i.test(rawUrl) ? rawUrl : `https://${rawUrl}`)
+    } catch {
+      continue
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') continue
+    if (!parsed.hostname || !parsed.hostname.includes('.')) continue
+    offers.push({ name, applicationUrl: parsed.toString() })
+    if (offers.length >= 6) break
+  }
+  return offers
+}
+
+/** Mirror of financingHtml in src/lib/emailTemplates.ts. */
+function financingHtml(offers: EmailFinancingOffer[], color: string): string {
+  if (offers.length === 0) return ''
+  const rows = offers
+    .map(
+      (offer) =>
+        `<a href="${escapeHtml(offer.applicationUrl)}" style="display:block;margin:0 0 8px;padding:12px 16px;background:#ffffff;border:1px solid ${color};border-radius:10px;color:${color};text-decoration:none;font-weight:700;font-size:15px;text-align:center;">Apply with ${escapeHtml(offer.name)}</a>`,
+    )
+    .join('')
+  return (
+    `<div style="margin:0 0 24px;padding:16px;background:#f4f4f5;border-radius:10px;">` +
+    `<p style="margin:0 0 12px;font-size:15px;font-weight:700;color:#18181b;">Need to split this up? We offer financing.</p>` +
+    rows +
+    `<p style="margin:8px 0 0;font-size:13px;color:#71717a;">Applying takes a few minutes and most decisions are instant.</p>` +
+    `</div>`
+  )
+}
+
+/** Mirror of financingText in src/lib/emailTemplates.ts. */
+function financingText(offers: EmailFinancingOffer[]): string {
+  if (offers.length === 0) return ''
+  return ['', 'Need to split this up? We offer financing:', ...offers.map((o) => `- ${o.name}: ${o.applicationUrl}`)].join('\n')
+}
+
 function renderEmail(template: TemplateType, c: EmailContext): { subject: string; html: string; text: string } {
   const copy = COPY[template]
   const subject = copy.subject(c)
@@ -342,6 +405,7 @@ function renderEmail(template: TemplateType, c: EmailContext): { subject: string
     '',
     `${copy.cta}: ${c.publicUrl}`,
     valueLine,
+    financingText(c.financingOffers),
     showFullSummary && c.windowTints.length > 0 ? 'Includes window tint — see your quote for the diagram and details.' : '',
     expiration,
     '',
@@ -377,6 +441,7 @@ function renderEmail(template: TemplateType, c: EmailContext): { subject: string
       <p style="margin:0 0 24px;text-align:center;">
         <a href="${escapeHtml(c.publicUrl)}" style="display:inline-block;background:${color};color:#ffffff;text-decoration:none;font-weight:700;font-size:17px;padding:14px 32px;border-radius:10px;">${copy.cta}</a>
       </p>
+      ${financingHtml(c.financingOffers, color)}
       ${expiration ? `<p style="margin:0 0 16px;color:#52525b;font-size:14px;">${escapeHtml(expiration)}</p>` : ''}
       <p style="margin:0;color:#52525b;font-size:15px;">Questions? Call <a href="tel:${escapeHtml(c.shopPhone)}" style="color:${color};">${escapeHtml(c.shopPhone)}</a> or just reply to this email.</p>
     </div>
@@ -591,6 +656,7 @@ Deno.serve(async (req) => {
     shopReplyTo: shop.reply_to_email || shop.email,
     shopLogoUrl: shop.logo_url,
     shopColor: shop.primary_color,
+    financingOffers: sanitizeFinancingOffers(shop.financing_offers),
     firstName: customer.first_name,
     vehicle,
     options,

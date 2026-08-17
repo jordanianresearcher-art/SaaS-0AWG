@@ -183,6 +183,18 @@ export interface WindowTintConfig {
   sunroofPriceCents: number | null
 }
 
+/**
+ * A third-party financing application the shop hands customers off to
+ * (Snap, Acima, Progressive, …). `applicationUrl` is the shop's own
+ * store-specific application link — normally captured by scanning the QR code
+ * on the provider's counter card. See src/lib/financing.ts.
+ */
+export interface FinancingOffer {
+  id: string
+  name: string
+  applicationUrl: string
+}
+
 export interface Shop {
   id: string
   name: string
@@ -196,6 +208,7 @@ export interface Shop {
   primaryColor: string
   defaultPaymentMethod: PaymentMethod | null
   defaultPaymentHandle: string | null
+  financingOffers: FinancingOffer[]
   quoteExpirationDays: number
   followUpScheduleDays: number[]
   quoteDisclaimer: string
@@ -504,6 +517,7 @@ export interface PublicQuote {
   shopEmail: string
   shopAddress: string
   shopPrimaryColor: string
+  financingOffers: FinancingOffer[]
   quoteDisclaimer: string
   customerFirstName: string
   vehicle: { year: number | null; make: string | null; model: string | null; trim: string | null }

@@ -417,6 +417,10 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
     primaryColor: '#1d4ed8',
     defaultPaymentMethod: 'cashapp',
     defaultPaymentHandle: '$BigTexAudio',
+    financingOffers: [
+      { id: 'demo-financing-snap', name: 'Snap Finance', applicationUrl: 'https://snapfinance.com/apply' },
+      { id: 'demo-financing-acima', name: 'Acima', applicationUrl: 'https://acima.com/apply' },
+    ],
     quoteExpirationDays: 30,
     followUpScheduleDays: [2, 3, 5],
     quoteDisclaimer:

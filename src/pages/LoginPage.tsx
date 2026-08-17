@@ -17,6 +17,7 @@ type FormValues = z.infer<typeof schema>
 export default function LoginPage() {
   const { session, mode } = useAppData()
   const [sent, setSent] = useState(false)
+  const [noAccount, setNoAccount] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const {
     register,
@@ -28,12 +29,24 @@ export default function LoginPage() {
 
   const onSubmit = async (values: FormValues) => {
     setError(null)
+    setNoAccount(false)
     try {
       const { error: authError } = await getSupabase().auth.signInWithOtp({
         email: values.email,
-        options: { emailRedirectTo: `${env.appUrl}/app` },
+        options: { emailRedirectTo: `${env.appUrl}/app`, shouldCreateUser: false },
       })
-      if (authError) throw authError
+      // shouldCreateUser:false is what makes this page a *sign-in* rather than
+      // a silent sign-up. Without it, a typo'd email quietly created a second
+      // empty account and dropped the owner into onboarding for a shop they
+      // already had. Supabase reports the unknown-user case as an error, so it
+      // gets its own message pointing at /signup instead of the generic one.
+      if (authError) {
+        if (/signup|not found|user/i.test(authError.message)) {
+          setNoAccount(true)
+          return
+        }
+        throw authError
+      }
       setSent(true)
     } catch {
       setError('Could not send the sign-in link. Please try again in a minute.')
@@ -83,6 +96,18 @@ export default function LoginPage() {
                 {...register('email')}
               />
             </Field>
+            {noAccount ? (
+              <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-base text-amber-900">
+                <p className="font-semibold">We don&apos;t have an account with that email.</p>
+                <p className="mt-1">
+                  Double-check the spelling, or{' '}
+                  <Link to="/signup" className="font-semibold underline">
+                    create your shop account
+                  </Link>
+                  .
+                </p>
+              </div>
+            ) : null}
             {error ? (
               <p role="alert" className="text-sm font-medium text-red-700">
                 {error}
@@ -94,8 +119,14 @@ export default function LoginPage() {
           </form>
         )}
       </div>
+      <p className="mt-6 text-base text-zinc-600">
+        New here?{' '}
+        <Link to="/signup" className="font-semibold text-brand underline">
+          Create your shop account
+        </Link>
+      </p>
       {env.demoModeEnabled ? (
-        <p className="mt-6 text-base text-zinc-600">
+        <p className="mt-2 text-base text-zinc-600">
           Just looking around?{' '}
           <Link to="/demo" className="font-semibold text-brand underline">
             Try the demo

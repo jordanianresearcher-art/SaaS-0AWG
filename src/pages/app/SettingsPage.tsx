@@ -1,17 +1,25 @@
-import { useCallback, useEffect, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Download, LayoutGrid, Package, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
+import { CreditCard, Download, LayoutGrid, Package, Pencil, Plus, QrCode, RotateCcw, Trash2 } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
 import { Button, Card, EmptyState, Field, Input, LoadingBlock, Modal, Select, Textarea } from '../../components/ui'
 import CatalogOrganizer from '../../components/CatalogOrganizer'
 import { ProductSuggestField } from '../../components/ProductSuggestField'
+import { LogoUploadField } from '../../components/LogoUploadField'
 import { errorMessage } from '../../lib/errors'
 import { formatCurrency, parseDollarsToCents } from '../../lib/format'
+import {
+  COMMON_FINANCING_PROVIDERS,
+  MAX_FINANCING_OFFERS,
+  guessProviderName,
+  makeFinancingOffer,
+  parseScannedFinancingCode,
+} from '../../lib/financing'
 import { PRODUCT_CATEGORIES, PRODUCT_CATEGORY_INFO } from '../../lib/audioConfigs'
-import type { CatalogItem, ProductCategory } from '../../types'
+import type { CatalogItem, FinancingOffer, ProductCategory } from '../../types'
 import type { NewCatalogItemInput, ShopifyImportResult } from '../../data/repository'
 
 const schema = z.object({
@@ -42,6 +50,8 @@ export default function SettingsPage() {
     register,
     handleSubmit,
     reset,
+    setValue,
+    watch,
     formState: { errors, isSubmitting, isDirty },
   } = useForm<FormValues>({ resolver: zodResolver(schema) })
 
@@ -125,8 +135,11 @@ export default function SettingsPage() {
           <Field label="Website" htmlFor="s-website" error={errors.website?.message}>
             <Input id="s-website" type="url" {...register('website')} />
           </Field>
-          <Field label="Logo image URL" htmlFor="s-logo" error={errors.logoUrl?.message} hint="Optional. Shown on quote emails and the public quote page.">
-            <Input id="s-logo" type="url" {...register('logoUrl')} />
+          <Field label="Logo" htmlFor="s-logo" error={errors.logoUrl?.message}>
+            <LogoUploadField
+              value={watch('logoUrl') || null}
+              onChange={(url) => setValue('logoUrl', url ?? '', { shouldDirty: true, shouldValidate: true })}
+            />
           </Field>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Brand color" htmlFor="s-color" error={errors.primaryColor?.message}>
@@ -153,6 +166,8 @@ export default function SettingsPage() {
         </Card>
       </form>
 
+      <FinancingSection />
+
       {mode === 'production' ? <ShopifyImportSection onImported={() => setCatalogReloadSignal((n) => n + 1)} /> : null}
 
       <CatalogSection reloadSignal={catalogReloadSignal} />
@@ -174,6 +189,261 @@ export default function SettingsPage() {
           </Button>
         </Card>
       ) : null}
+    </div>
+  )
+}
+
+/**
+ * The shop's third-party financing applications (Snap, Acima, …).
+ *
+ * The whole point of the QR scan is that these links are store-specific and
+ * ugly — `snapfinance.com/apply/store/48812?ref=…`. Owners have that link as a
+ * QR code on a counter card, not as text they can retype, so scanning is the
+ * primary path and typing is the fallback, not the other way around.
+ */
+function FinancingSection() {
+  const { shop, refresh } = useAppData()
+  const repo = useRepo()
+  const toast = useToast()
+  const [editing, setEditing] = useState<FinancingOffer | 'new' | null>(null)
+  const [removing, setRemoving] = useState<FinancingOffer | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  const offers = shop?.financingOffers ?? []
+
+  const save = async (next: FinancingOffer[], successMessage: string) => {
+    setSaving(true)
+    try {
+      await repo.updateShop({ financingOffers: next })
+      await refresh()
+      toast('success', successMessage)
+      return true
+    } catch (err) {
+      console.error('save financing offers failed', err)
+      const detail = errorMessage(err)
+      toast('error', detail ? `Could not save financing options: ${detail}` : 'Could not save financing options. Please try again.')
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const onSubmitOffer = async (offer: FinancingOffer) => {
+    const next =
+      editing === 'new' ? [...offers, offer] : offers.map((o) => (o.id === offer.id ? offer : o))
+    if (await save(next, editing === 'new' ? 'Financing option added.' : 'Financing option updated.')) {
+      setEditing(null)
+    }
+  }
+
+  const onRemove = async (offer: FinancingOffer) => {
+    if (await save(offers.filter((o) => o.id !== offer.id), 'Financing option removed.')) {
+      setRemoving(null)
+    }
+  }
+
+  const atLimit = offers.length >= MAX_FINANCING_OFFERS
+
+  return (
+    <Card className="space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-bold text-ink">Financing options</h2>
+          <p className="text-base text-zinc-600">
+            Customers see these as buttons on every quote email and quote page, so they can apply the moment they see the
+            price.
+          </p>
+        </div>
+        <Button className="shrink-0" disabled={atLimit} onClick={() => setEditing('new')}>
+          <Plus className="h-5 w-5" aria-hidden="true" /> Add
+        </Button>
+      </div>
+
+      {offers.length === 0 ? (
+        <EmptyState
+          title="No financing options yet"
+          message="Add Snap, Acima, or whoever you work with. Scan the QR code on their card and you're done."
+        />
+      ) : (
+        <ul className="divide-y divide-zinc-100">
+          {offers.map((offer) => (
+            <li key={offer.id} className="flex items-center justify-between gap-3 py-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
+                  <CreditCard className="h-5 w-5" aria-hidden="true" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-base font-bold text-ink">{offer.name}</p>
+                  <p className="truncate text-sm text-zinc-500">{offer.applicationUrl}</p>
+                </div>
+              </div>
+              <div className="flex shrink-0 gap-1">
+                <button
+                  type="button"
+                  aria-label={`Edit ${offer.name}`}
+                  onClick={() => setEditing(offer)}
+                  className="flex h-11 w-11 items-center justify-center rounded-xl text-zinc-500 hover:bg-zinc-100"
+                >
+                  <Pencil className="h-5 w-5" aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Remove ${offer.name}`}
+                  onClick={() => setRemoving(offer)}
+                  className="flex h-11 w-11 items-center justify-center rounded-xl text-zinc-400 hover:bg-red-50 hover:text-red-600"
+                >
+                  <Trash2 className="h-5 w-5" aria-hidden="true" />
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {atLimit ? (
+        <p className="text-sm text-zinc-500">
+          That's the maximum of {MAX_FINANCING_OFFERS}. Remove one to add another.
+        </p>
+      ) : null}
+
+      <Modal
+        open={editing !== null}
+        onClose={() => setEditing(null)}
+        title={editing === 'new' ? 'Add financing option' : 'Edit financing option'}
+      >
+        {editing !== null ? (
+          <FinancingOfferForm
+            offer={editing === 'new' ? null : editing}
+            saving={saving}
+            onSubmit={onSubmitOffer}
+          />
+        ) : null}
+      </Modal>
+
+      <Modal open={removing !== null} onClose={() => setRemoving(null)} title="Remove financing option?">
+        <p className="text-base text-zinc-600">
+          {removing?.name} will stop appearing on new quote emails and quote pages. Quotes you already sent keep working.
+        </p>
+        <div className="mt-5 flex gap-3">
+          <Button variant="secondary" className="flex-1" onClick={() => setRemoving(null)}>
+            Keep it
+          </Button>
+          <Button
+            variant="danger"
+            className="flex-1"
+            disabled={saving}
+            onClick={() => removing && void onRemove(removing)}
+          >
+            {saving ? 'Removing…' : 'Remove'}
+          </Button>
+        </div>
+      </Modal>
+    </Card>
+  )
+}
+
+function FinancingOfferForm({
+  offer,
+  saving,
+  onSubmit,
+}: {
+  offer: FinancingOffer | null
+  saving: boolean
+  onSubmit: (offer: FinancingOffer) => void
+}) {
+  const [name, setName] = useState(offer?.name ?? '')
+  const [url, setUrl] = useState(offer?.applicationUrl ?? '')
+  const [scanning, setScanning] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleDecoded = (text: string) => {
+    setScanning(false)
+    const link = parseScannedFinancingCode(text)
+    if (!link) {
+      setError("That code isn't an application link. Try again, or paste the link below.")
+      return
+    }
+    setError(null)
+    setUrl(link)
+    // Only auto-fill a name we actually recognize, and never overwrite one the
+    // owner already typed.
+    const guessed = guessProviderName(link)
+    if (guessed && !name.trim()) setName(guessed)
+  }
+
+  const handleSubmit = () => {
+    const built = makeFinancingOffer(name, url, offer?.id)
+    if (!built) {
+      setError(
+        !name.trim() ? 'Give this a name customers will recognize.' : 'Enter a valid application link (https://…).',
+      )
+      return
+    }
+    setError(null)
+    onSubmit(built)
+  }
+
+  // The scanner replaces the form rather than opening a second modal on top of
+  // this one — nested dialogs fight over focus and the Escape key.
+  if (scanning) {
+    return (
+      <div className="space-y-3">
+        <Suspense fallback={<LoadingBlock label="Starting camera…" />}>
+          <QrScanner
+            onDecoded={handleDecoded}
+            onCameraError={(message) => {
+              setScanning(false)
+              setError(message)
+            }}
+          />
+        </Suspense>
+        <Button type="button" variant="secondary" className="w-full" onClick={() => setScanning(false)}>
+          Cancel
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <Button type="button" variant="secondary" className="w-full" onClick={() => setScanning(true)}>
+        <QrCode className="h-5 w-5" aria-hidden="true" /> Scan QR code
+      </Button>
+
+      <Field label="Provider" htmlFor="fin-name" required>
+        <Input
+          id="fin-name"
+          list="fin-provider-options"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Snap Finance"
+        />
+        <datalist id="fin-provider-options">
+          {COMMON_FINANCING_PROVIDERS.map((p) => (
+            <option key={p} value={p} />
+          ))}
+        </datalist>
+      </Field>
+
+      <Field label="Application link" htmlFor="fin-url" required>
+        <Input
+          id="fin-url"
+          inputMode="url"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="snapfinance.com/apply/your-shop"
+        />
+      </Field>
+
+      {error ? (
+        <p role="alert" className="text-base font-medium text-red-700">
+          {error}
+        </p>
+      ) : null}
+
+      <Button type="button" className="w-full" disabled={saving} onClick={handleSubmit}>
+        {saving ? 'Saving…' : 'Save financing option'}
+      </Button>
     </div>
   )
 }
@@ -259,6 +529,12 @@ function ShopifyImportSection({ onImported }: { onImported: () => void }) {
     </Card>
   )
 }
+
+// @zxing/browser (~470kb) only matters once an owner actually opens the QR
+// scanner — code-split it into its own chunk, the same way ScanWorkspacePage
+// does, instead of putting it in the bundle every phone loads to reach the
+// dashboard.
+const QrScanner = lazy(() => import('../../components/QrScanner').then((m) => ({ default: m.QrScanner })))
 
 const catalogSchema = z.object({
   brand: z.string(),
