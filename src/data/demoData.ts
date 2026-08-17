@@ -4,6 +4,7 @@ import type {
   EmailMessage,
   Employee,
   Invoice,
+  InventoryDevice,
   PackageTemplate,
   PackageTemplateItem,
   Quote,
@@ -33,11 +34,14 @@ export interface DemoDB {
   packageTemplates: PackageTemplate[]
   stockMovements: StockMovement[]
   invoices: Invoice[]
+  /** Demo-only plaintext (never how production works — see rotateStaffAccessCode) so /join can be demoed with no backend. */
+  staffAccessCode: string
+  inventoryDevices: InventoryDevice[]
   /** Bumped when the seed shape changes so stale localStorage is discarded. */
   seedVersion: number
 }
 
-export const DEMO_SEED_VERSION = 14
+export const DEMO_SEED_VERSION = 15
 
 const SHOP_ID = 'demo-shop'
 
@@ -421,6 +425,9 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
     followUpScheduleDays: [2, 3, 5],
     quoteDisclaimer:
       'Final pricing and compatibility may require vehicle inspection. Products and availability are subject to confirmation by the shop.',
+    defaultLowStockThreshold: 3,
+    lowStockAlertEmail: 'shop@bigtexaudio.example.com',
+    hasStaffAccessCode: true,
     createdAt: daysAgo(now, 40),
     updatedAt: daysAgo(now, 40),
   }
@@ -563,7 +570,7 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
   let catalogPosition = 0
   function demoCatalogItem(
     fields: Pick<CatalogItem, 'brand' | 'model' | 'name' | 'category' | 'defaultPriceCents'> &
-      Partial<Pick<CatalogItem, 'msrpCents' | 'specs' | 'quantityOnHand'>>,
+      Partial<Pick<CatalogItem, 'msrpCents' | 'specs' | 'quantityOnHand' | 'lowStockThreshold' | 'lastCountedAt' | 'upc'>>,
   ): CatalogItem {
     return {
       id: `demo-cat-${catalogPosition + 1}`,
@@ -574,7 +581,7 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
       category: fields.category,
       description: null,
       sku: null,
-      upc: null,
+      upc: fields.upc ?? null,
       defaultPriceCents: fields.defaultPriceCents,
       msrpCents: fields.msrpCents ?? null,
       promoPriceCents: null,
@@ -598,6 +605,16 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
       quantityOnHand: fields.quantityOnHand ?? 6,
       upcIsGenerated: false,
       labelPrintedAt: null,
+      lowStockThreshold: fields.lowStockThreshold ?? null,
+      lastCountedAt: fields.lastCountedAt ?? null,
+      lowStockAlerted: false,
+      lowStockAlertedAt: null,
+      shopifyProductId: null,
+      shopifyVariantId: null,
+      shopifySyncedAt: null,
+      shopifySyncError: null,
+      shopifyMatchedExisting: false,
+      shopifyStatus: 'active',
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
     }
@@ -607,6 +624,7 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
     demoCatalogItem({
       brand: 'Kicker', model: 'CompR 12', name: '12" subwoofer', category: 'subwoofer',
       defaultPriceCents: 14900, msrpCents: 17900, specs: { subwooferSizeInches: 12, impedanceOhms: 2 },
+      upc: '612825397048', lastCountedAt: daysAgo(now, 2),
       // Matches the seeded stock movements below: received 10, sold 4.
       quantityOnHand: 6,
     }),
@@ -656,7 +674,9 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
     }),
     demoCatalogItem({
       brand: 'Focal', model: 'TN-52', name: '1" silk dome tweeters', category: 'tweeter',
-      defaultPriceCents: 8900,
+      defaultPriceCents: 8900, upc: '883281024681',
+      // Below its own threshold on purpose — demos the low-stock badge/filter.
+      quantityOnHand: 2, lowStockThreshold: 4,
     }),
     demoCatalogItem({
       brand: 'PAC', model: 'RP5-GM31', name: 'Factory radio integration harness', category: 'integration_module',
@@ -848,6 +868,16 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
       subtotalCents: 19900,
       totalCents: 19900,
       notes: null,
+      taxRate: 0,
+      taxCents: 0,
+      discountCents: 0,
+      customerName: null,
+      customerPhone: null,
+      customerEmail: null,
+      customerAddress: null,
+      vehicleYear: null,
+      vehicleMake: null,
+      vehicleModel: null,
       createdBy: 'demo-user-owner',
       createdAt: daysAgo(now, 3),
       updatedAt: daysAgo(now, 3),
@@ -862,6 +892,8 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
           quantity: 1,
           unitPriceCents: 19900,
           category: 'mono_amp',
+          discountPercent: 0,
+          taxable: true,
           position: 0,
         },
       ],
@@ -895,10 +927,17 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
     }),
   ]
 
+  const inventoryDevices: InventoryDevice[] = [
+    { id: 'demo-device-1', deviceName: 'Front counter iPad', joinedAt: daysAgo(now, 14) },
+    { id: 'demo-device-2', deviceName: "Marco's phone", joinedAt: daysAgo(now, 2) },
+  ]
+
   return {
     shop, employees, customers, quotes, options, events, responses, emails, catalogItems, packageTemplates,
     stockMovements,
     invoices: demoInvoices,
+    staffAccessCode: 'DEMO-2468',
+    inventoryDevices,
     seedVersion: DEMO_SEED_VERSION,
   }
 }

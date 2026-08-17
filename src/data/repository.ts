@@ -6,6 +6,7 @@ import type {
   ImportSource,
   Invoice,
   InvoicePaymentMethod,
+  InventoryDevice,
   OptionKind,
   PackageTemplate,
   PackageTemplateSource,
@@ -101,6 +102,8 @@ export interface ShopSettingsPatch {
   quoteExpirationDays?: number
   followUpScheduleDays?: number[]
   quoteDisclaimer?: string
+  defaultLowStockThreshold?: number
+  lowStockAlertEmail?: string | null
 }
 
 export interface NewCatalogItemInput {
@@ -134,6 +137,8 @@ export interface NewCatalogItemInput {
   externalSourceProductId?: string | null
   identificationConfidence?: number | null
   approvalStatus?: ProductApprovalStatus
+  /** Per-item low-stock override; omit/null to fall back to the shop default (src/lib/inventory.ts). */
+  lowStockThreshold?: number | null
 }
 
 export interface NewPackageTemplateInput {
@@ -189,6 +194,17 @@ export interface NewStockMovementInput {
 export interface NewInvoiceInput {
   customerId?: string | null
   notes?: string | null
+  /** 0-1, e.g. 0.0825 for 8.25%. Applied only to taxable line items — see items[].taxable. Omit/0 for no tax. */
+  taxRate?: number
+  discountCents?: number
+  /** Walk-in customer details typed at sale time — not a persisted Customer record. */
+  customerName?: string | null
+  customerPhone?: string | null
+  customerEmail?: string | null
+  customerAddress?: string | null
+  vehicleYear?: number | null
+  vehicleMake?: string | null
+  vehicleModel?: string | null
   items: Array<{
     /** Null for a one-off/custom line item with no catalog product behind it. */
     catalogItemId: string | null
@@ -198,6 +214,9 @@ export interface NewInvoiceInput {
     quantity: number
     unitPriceCents: number
     category?: ProductCategory | null
+    discountPercent?: number
+    /** Defaults true — set false for a line that shouldn't count toward taxRate (e.g. labor, where the jurisdiction doesn't tax it). */
+    taxable?: boolean
   }>
 }
 
@@ -351,6 +370,30 @@ export interface DataRepository {
   recordStockMovement(input: NewStockMovementInput): Promise<{ movement: StockMovement; catalogItem: CatalogItem }>
   /** Full shop history, or just one item's, newest first. */
   listStockMovements(catalogItemId?: string): Promise<StockMovement[]>
+  /**
+   * The spot-check flow (/app/inventory/check): always stamps lastCountedAt
+   * to now; additionally records one 'adjustment' stock movement (and
+   * returns it) only when newQuantity differs from the item's current
+   * quantityOnHand — confirming a count that already matches touches no
+   * ledger row.
+   */
+  markCounted(catalogItemId: string, newQuantity: number): Promise<{ catalogItem: CatalogItem; movement: StockMovement | null }>
+  /**
+   * Uploads a camera-captured photo (base64 JPEG, no data: prefix) and
+   * returns a URL suitable for CatalogItem.imageUrl. Production stores it
+   * in the shop-product-photos bucket (migration 0017); demo mode returns
+   * a data: URI directly — no network call, but still a real, persistable
+   * image, unlike lookupProductByUpc/resolveProduct's simulated results.
+   */
+  uploadProductPhoto(base64Jpeg: string): Promise<string>
+  /**
+   * Generates a scannable Code-128 SKU (src/lib/sku.ts) for a product with
+   * no findable manufacturer barcode — the "quick add" path. Guaranteed
+   * unique within the shop's catalog at call time (never assigned to an
+   * item automatically; callers pass the result into createCatalogItem's
+   * upc/sku fields).
+   */
+  generateSku(brand: string | null, model: string): Promise<string>
 
   /** Local catalog match by UPC/SKU only — lookupProductByUpc below wraps this with an external-lookup fallback. */
   findCatalogItemByCode(code: string): Promise<CatalogItem | null>
@@ -431,6 +474,22 @@ export interface DataRepository {
     message: string | null,
   ): Promise<void>
   optOutPublicQuote(publicToken: string): Promise<void>
+
+  // ---------------------------------------------------------------------
+  // Shared-device inventory access (migration 0017). Joining a shop by
+  // code happens *before* a shop-scoped repository exists (see /join,
+  // which calls the join_shop_with_access_code RPC directly — mirrors how
+  // OnboardingPage calls create_shop_with_owner directly), so it isn't a
+  // DataRepository method. These three are owner/manager actions taken
+  // from within an already-loaded shop (Settings), so they are.
+  // ---------------------------------------------------------------------
+
+  /** Owner/manager only. Generates a fresh code, revokes every existing 'inventory' device, and returns the new plaintext code — shown exactly once, never re-readable after this call returns. */
+  rotateStaffAccessCode(): Promise<string>
+  /** Every phone/tablet/PC currently joined via the shop's access code, newest first. */
+  listInventoryDevices(): Promise<InventoryDevice[]>
+  /** Revokes one joined device without rotating the shared code — every other device stays signed in. */
+  revokeInventoryDevice(membershipId: string): Promise<void>
 }
 
 export type {

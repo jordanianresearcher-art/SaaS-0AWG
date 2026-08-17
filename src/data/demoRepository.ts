@@ -3,6 +3,7 @@ import type {
   Customer,
   Employee,
   Invoice,
+  InventoryDevice,
   InvoicePaymentMethod,
   PackageTemplate,
   ProductApprovalStatus,
@@ -38,6 +39,8 @@ import { buildDemoData, DEMO_SEED_VERSION, type DemoDB } from './demoData'
 import { advanceStatus, applyStaffStatus, VALID_RESPONSE_TYPES } from '../lib/status'
 import { checkSendEligibility } from '../lib/eligibility'
 import { nextFollowUpDateAfterSend } from '../lib/followUp'
+import { computeInvoiceTotals } from '../lib/invoicePricing'
+import { buildSkuBase, nextAvailableSku } from '../lib/sku'
 import { newId } from '../lib/ids'
 
 const STORAGE_KEY = '0gauge-demo-db'
@@ -226,6 +229,16 @@ export class DemoRepository implements DataRepository {
       quantityOnHand: 0,
       upcIsGenerated: false,
       labelPrintedAt: null,
+      lowStockThreshold: input.lowStockThreshold ?? null,
+      lastCountedAt: null,
+      lowStockAlerted: false,
+      lowStockAlertedAt: null,
+      shopifyProductId: null,
+      shopifyVariantId: null,
+      shopifySyncedAt: null,
+      shopifySyncError: null,
+      shopifyMatchedExisting: false,
+      shopifyStatus: 'active',
       createdAt: now,
       updatedAt: now,
     }
@@ -266,6 +279,7 @@ export class DemoRepository implements DataRepository {
     if (input.externalSourceProductId !== undefined) item.externalSourceProductId = input.externalSourceProductId
     if (input.identificationConfidence !== undefined) item.identificationConfidence = input.identificationConfidence
     if (input.approvalStatus !== undefined) item.approvalStatus = input.approvalStatus
+    if (input.lowStockThreshold !== undefined) item.lowStockThreshold = input.lowStockThreshold
     if (input.priceSourceUrl !== undefined || input.priceSourceName !== undefined) {
       item.priceCheckedAt = new Date().toISOString()
     }
@@ -325,6 +339,41 @@ export class DemoRepository implements DataRepository {
       .map((movement, insertionIndex) => ({ movement, insertionIndex }))
       .sort((a, b) => b.movement.createdAt.localeCompare(a.movement.createdAt) || b.insertionIndex - a.insertionIndex)
       .map(({ movement }) => movement)
+  }
+
+  async markCounted(catalogItemId: string, newQuantity: number): Promise<{ catalogItem: CatalogItem; movement: StockMovement | null }> {
+    const item = this.db.catalogItems.find((i) => i.id === catalogItemId)
+    if (!item) throw new Error('Catalog item not found')
+
+    let movement: StockMovement | null = null
+    if (newQuantity !== item.quantityOnHand) {
+      const result = await this.recordStockMovement({
+        catalogItemId,
+        movementType: 'adjustment',
+        quantityDelta: newQuantity - item.quantityOnHand,
+        note: 'Spot count adjustment',
+      })
+      movement = result.movement
+    }
+    item.lastCountedAt = new Date().toISOString()
+    item.updatedAt = item.lastCountedAt
+    this.persist()
+    return { catalogItem: item, movement }
+  }
+
+  async uploadProductPhoto(base64Jpeg: string): Promise<string> {
+    // No network call, ever (same rule as runShopifyImport/lookupProductByUpc)
+    // — a data: URI is a real, persistable image (survives a reload via
+    // localStorage), unlike an object URL, which would break on reload.
+    return `data:image/jpeg;base64,${base64Jpeg}`
+  }
+
+  async generateSku(brand: string | null, model: string): Promise<string> {
+    const base = buildSkuBase(brand, model)
+    const taken = new Set(
+      this.db.catalogItems.flatMap((i) => [i.upc, i.sku].filter((v): v is string => v !== null && v.startsWith(base))),
+    )
+    return nextAvailableSku(base, taken)
   }
 
   async findCatalogItemByCode(code: string): Promise<CatalogItem | null> {
@@ -397,7 +446,7 @@ export class DemoRepository implements DataRepository {
   async createInvoice(input: NewInvoiceInput): Promise<Invoice> {
     const now = new Date().toISOString()
     const invoiceId = newId()
-    const subtotalCents = input.items.reduce((sum, item) => sum + item.unitPriceCents * item.quantity, 0)
+    const totals = computeInvoiceTotals(input.items, input.taxRate ?? 0, input.discountCents ?? 0)
     const nextNumber = this.db.invoices.reduce((max, inv) => Math.max(max, inv.invoiceNumber), 0) + 1
     const invoice: Invoice = {
       id: invoiceId,
@@ -408,9 +457,19 @@ export class DemoRepository implements DataRepository {
       paymentMethod: null,
       paymentAmountCents: null,
       paidAt: null,
-      subtotalCents,
-      totalCents: subtotalCents,
+      subtotalCents: totals.subtotalCents,
+      totalCents: totals.totalCents,
       notes: input.notes ?? null,
+      taxRate: input.taxRate ?? 0,
+      taxCents: totals.taxCents,
+      discountCents: totals.discountCents,
+      customerName: input.customerName ?? null,
+      customerPhone: input.customerPhone ?? null,
+      customerEmail: input.customerEmail ?? null,
+      customerAddress: input.customerAddress ?? null,
+      vehicleYear: input.vehicleYear ?? null,
+      vehicleMake: input.vehicleMake ?? null,
+      vehicleModel: input.vehicleModel ?? null,
       createdBy: 'demo-user-owner',
       createdAt: now,
       updatedAt: now,
@@ -424,6 +483,8 @@ export class DemoRepository implements DataRepository {
         quantity: item.quantity,
         unitPriceCents: item.unitPriceCents,
         category: item.category ?? null,
+        discountPercent: item.discountPercent ?? 0,
+        taxable: item.taxable ?? true,
         position: i,
       })),
     }
@@ -877,6 +938,28 @@ export class DemoRepository implements DataRepository {
     quote.nextFollowUpAt = null
     this.addEvent(quote.id, 'email_opt_out', {}, null)
     this.touch(quote)
+    this.persist()
+  }
+
+  async rotateStaffAccessCode(): Promise<string> {
+    // Demo-only plaintext, regenerated each call — real production rotation
+    // (see migration 0017's rotate_staff_access_code) never stores or
+    // returns the code again after this point; demo mode has no real
+    // security boundary to protect, so a fixed prefix is fine here.
+    const code = `DEMO-${Math.floor(1000 + Math.random() * 9000)}`
+    this.db.staffAccessCode = code
+    this.db.shop.hasStaffAccessCode = true
+    this.db.inventoryDevices = []
+    this.persist()
+    return code
+  }
+
+  async listInventoryDevices(): Promise<InventoryDevice[]> {
+    return this.db.inventoryDevices.slice().sort((a, b) => b.joinedAt.localeCompare(a.joinedAt))
+  }
+
+  async revokeInventoryDevice(membershipId: string): Promise<void> {
+    this.db.inventoryDevices = this.db.inventoryDevices.filter((d) => d.id !== membershipId)
     this.persist()
   }
 }

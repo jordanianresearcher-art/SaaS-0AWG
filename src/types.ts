@@ -57,7 +57,14 @@ export type QuoteEventType =
   | 'email_opt_out'
   | 'marked_contacted'
 
-export type MembershipRole = 'owner' | 'manager' | 'staff'
+/**
+ * 'inventory' is a low-privilege, shared-device role: a phone/tablet/PC
+ * joins with a shop access code (no email account) and gets read/write on
+ * catalog_items/stock_movements/invoices/outgoing_orders only — RLS (see
+ * migration 0017) walls it off from quotes, customers, and reporting at
+ * the database layer, not just in the UI. See docs/INVENTORY_MERGE_PLAN.md.
+ */
+export type MembershipRole = 'owner' | 'manager' | 'staff' | 'inventory'
 
 export type PaymentMethod = 'link' | 'zelle' | 'cashapp' | 'venmo' | 'paypal'
 
@@ -121,7 +128,10 @@ export type PriceKind = 'msrp' | 'retail' | 'sale' | 'unknown'
 export type ProductAvailability = 'not_tracked' | 'available' | 'low_stock' | 'out_of_stock' | 'special_order'
 
 /** Where a catalog product's data originally came from. */
-export type ImportSource = 'manual' | 'shopify' | 'ai_photo_import'
+export type ImportSource = 'manual' | 'shopify' | 'ai_photo_import' | 'upc_lookup'
+
+/** Whether an item's Shopify listing is pushed live or held as a draft (e.g. a generated-SKU item with no real photos yet — see src/lib/sku.ts). */
+export type ShopifyListingStatus = 'active' | 'draft'
 
 /** AI/import proposals never go live silently — this gates visibility to staff/customers. */
 export type ProductApprovalStatus = 'approved' | 'pending_review' | 'rejected'
@@ -199,6 +209,12 @@ export interface Shop {
   quoteExpirationDays: number
   followUpScheduleDays: number[]
   quoteDisclaimer: string
+  /** Falls back for any catalog item with no lowStockThreshold of its own — see src/lib/inventory.ts's effectiveThreshold. */
+  defaultLowStockThreshold: number
+  /** Recipient for the low-stock digest; null = alerts off. */
+  lowStockAlertEmail: string | null
+  /** Whether a shared-device access code exists — never the code/hash itself (see rotateStaffAccessCode). */
+  hasStaffAccessCode: boolean
   createdAt: string
   updatedAt: string
 }
@@ -277,6 +293,21 @@ export interface CatalogItem {
   upcIsGenerated: boolean
   /** Null = still needs a label printed (only meaningful when upcIsGenerated is true). */
   labelPrintedAt: string | null
+  /** Per-item override; null falls back to Shop.defaultLowStockThreshold — see src/lib/inventory.ts. */
+  lowStockThreshold: number | null
+  /** When stock was last physically confirmed via the spot-check flow (/app/inventory/check). Null sorts as most-overdue. */
+  lastCountedAt: string | null
+  /** True while quantityOnHand is currently below threshold *and* an alert has already fired for this dip — cleared once stock rises back above threshold, so a digest doesn't re-alert on every check. */
+  lowStockAlerted: boolean
+  lowStockAlertedAt: string | null
+  /** Shopify *push* bookkeeping — distinct from the Shopify *import* this app already does (see src/lib/shopifyImport.ts). Null until a push has run. */
+  shopifyProductId: string | null
+  shopifyVariantId: string | null
+  shopifySyncedAt: string | null
+  shopifySyncError: string | null
+  /** True when this item's Shopify listing was matched to a pre-existing product (price/quantity only) rather than one this app created and fully controls. */
+  shopifyMatchedExisting: boolean
+  shopifyStatus: ShopifyListingStatus
   createdAt: string
   updatedAt: string
 }
@@ -310,6 +341,10 @@ export interface InvoiceItem {
   quantity: number
   unitPriceCents: number
   category: ProductCategory | null
+  /** Per-line discount, e.g. a walk-in price break on one item without discounting the whole invoice. */
+  discountPercent: number
+  /** Whether this line counts toward the invoice's tax_cents — false for e.g. labor in a no-tax-on-labor jurisdiction. */
+  taxable: boolean
   position: number
 }
 
@@ -327,6 +362,17 @@ export interface Invoice {
   subtotalCents: number
   totalCents: number
   notes: string | null
+  taxRate: number
+  taxCents: number
+  discountCents: number
+  /** Walk-in customer details typed at sale time — not a persisted Customer record (a real customer record is what NewQuotePage's fuller intake is for). */
+  customerName: string | null
+  customerPhone: string | null
+  customerEmail: string | null
+  customerAddress: string | null
+  vehicleYear: number | null
+  vehicleMake: string | null
+  vehicleModel: string | null
   createdBy: string | null
   createdAt: string
   updatedAt: string
@@ -484,6 +530,19 @@ export interface Employee {
   shopId: string
   fullName: string
   role: MembershipRole
+}
+
+/**
+ * One phone/tablet/PC that joined via a shop access code (role 'inventory'
+ * — see join_shop_with_access_code, migration 0017). Named by the device
+ * itself at join time so stock_movements.created_by reads back as a real
+ * station ("Front counter iPad") rather than an anonymous id.
+ */
+export interface InventoryDevice {
+  /** shop_memberships row id — pass to revokeInventoryDevice. */
+  id: string
+  deviceName: string | null
+  joinedAt: string
 }
 
 /** A quote joined with everything the app screens need. */
