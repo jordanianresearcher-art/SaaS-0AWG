@@ -201,4 +201,28 @@ describe('renderEmail', () => {
     })
     expect(email.html).not.toContain('javascript:')
   })
+
+  it('leads with a bass hook for an audio quote and a heat hook for tint', () => {
+    const ctx = makeContext()
+    const audio = renderEmail('initial', { ...ctx, quote: { ...ctx.quote, windowTints: [] } })
+    expect(audio.subject).toMatch(/bass/i)
+
+    const tintOnly = renderEmail('initial', {
+      ...ctx,
+      options: ctx.options.map((o) => ({ ...o, items: [] })),
+    })
+    expect(tintOnly.subject).toMatch(/heat|tint/i)
+  })
+
+  it('never repeats a subject across the follow-up cadence', () => {
+    const ctx = makeContext()
+    const subjects = ALL_TEMPLATES.map((t) => renderEmail(t, ctx).subject)
+    expect(new Set(subjects).size).toBe(subjects.length)
+  })
+
+  it('includes a hidden preheader so the inbox preview is not "Hi Marcus,"', () => {
+    const html = renderEmail('initial', makeContext()).html
+    expect(html).toContain('display:none')
+    expect(html).toContain('&zwnj;')
+  })
 })

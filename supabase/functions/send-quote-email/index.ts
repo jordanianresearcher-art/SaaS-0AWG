@@ -408,9 +408,106 @@ function financingText(offers: EmailFinancingOffer[]): string {
   return ['', 'Need to split this up? We offer financing:', ...offers.map((o) => `- ${o.name}: ${o.applicationUrl}`)].join('\n')
 }
 
+/**
+ * Mirror of src/lib/quoteFlavor.ts (Deno cannot import from src/). A tint
+ * customer should not get a subject about bass, and four follow-ups that all
+ * lead with the same words read as spam. Update both together — this is the
+ * copy real customers receive.
+ */
+type QuoteFlavor = 'tint' | 'audio' | 'mixed'
+
+function detectQuoteFlavor(windowTints: unknown[], options: EmailQuoteOption[]): QuoteFlavor {
+  const hasTint = windowTints.length > 0
+  const hasProducts = options.some((o) => o.items.length > 0)
+  if (hasTint && hasProducts) return 'mixed'
+  if (hasTint) return 'tint'
+  return 'audio'
+}
+
+const FLAVOR_COPY: Record<QuoteFlavor, Record<TemplateType, (c: { shopName: string; vehicle: string | null }) => { subject: string; preheader: string }>> = {
+  audio: {
+    initial: (c) => ({
+      subject: c.vehicle ? `Ready for some bass in the ${c.vehicle}?` : 'Ready for some bass?',
+      preheader: `Your quote from ${c.shopName} is ready — tap to see the build and the price.`,
+    }),
+    check_in: (c) => ({
+      subject: c.vehicle ? `Still thinking about the ${c.vehicle} build?` : 'Still thinking about your build?',
+      preheader: 'Any questions on the gear or the install? Just reply — we answer fast.',
+    }),
+    financing_option: () => ({
+      subject: 'Good sound now, pay over time',
+      preheader: 'Financing takes a few minutes and most approvals come back instantly.',
+    }),
+    payday_reminder: (c) => ({
+      subject: `Ready when you are — ${c.shopName}`,
+      preheader: 'You asked us to check back. Your quote is still good and the schedule is open.',
+    }),
+    final_check_in: (c) => ({
+      subject: c.vehicle ? `Last note about the ${c.vehicle}` : 'Last note about your quote',
+      preheader: "We won't keep filling your inbox — but the quote is here whenever you want it.",
+    }),
+  },
+  tint: {
+    initial: (c) => ({
+      subject: c.vehicle ? `Beat the heat — your ${c.vehicle} tint quote` : 'Beat the heat — your tint quote is ready',
+      preheader: `${c.shopName} put your numbers together. Cooler, darker, done in a day.`,
+    }),
+    check_in: () => ({
+      subject: 'Still want those windows done?',
+      preheader: 'Any questions about the shades or the film? Reply and we\u2019ll sort it out.',
+    }),
+    financing_option: () => ({
+      subject: 'Tint now, pay over time',
+      preheader: 'Financing takes a few minutes and most approvals come back instantly.',
+    }),
+    payday_reminder: (c) => ({
+      subject: `Ready when you are — ${c.shopName}`,
+      preheader: 'You asked us to check back. Your tint quote is still good.',
+    }),
+    final_check_in: () => ({
+      subject: 'Last note about your tint',
+      preheader: "We won't keep filling your inbox — the quote is here whenever you want it.",
+    }),
+  },
+  mixed: {
+    initial: (c) => ({
+      subject: c.vehicle ? `Your ${c.vehicle} is about to get good` : 'Your build is ready to go',
+      preheader: `${c.shopName} put the whole thing together — sound and tint, one price.`,
+    }),
+    check_in: (c) => ({
+      subject: c.vehicle ? `Still thinking about the ${c.vehicle}?` : 'Still thinking it over?',
+      preheader: 'Questions on any part of it? Reply and we\u2019ll walk you through it.',
+    }),
+    financing_option: () => ({
+      subject: 'Get it all done, pay over time',
+      preheader: 'Financing takes a few minutes and most approvals come back instantly.',
+    }),
+    payday_reminder: (c) => ({
+      subject: `Ready when you are — ${c.shopName}`,
+      preheader: 'You asked us to check back. Your quote is still good and the schedule is open.',
+    }),
+    final_check_in: () => ({
+      subject: 'Last note about your quote',
+      preheader: "We won't keep filling your inbox — but it's here whenever you want it.",
+    }),
+  },
+}
+
+/** Hidden inbox-preview line; the padding stops the body greeting bleeding into the preview. */
+function preheaderHtml(text: string): string {
+  const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return (
+    `<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#ffffff;opacity:0;">` +
+    `${escaped}${'&zwnj;&nbsp;'.repeat(60)}` +
+    `</div>`
+  )
+}
+
 function renderEmail(template: TemplateType, c: EmailContext): { subject: string; html: string; text: string } {
   const copy = COPY[template]
-  const subject = copy.subject(c)
+  const flavor = detectQuoteFlavor(c.windowTints, c.options)
+  const flavored = FLAVOR_COPY[flavor][template]({ shopName: c.shopName, vehicle: c.vehicle })
+  const subject = flavored.subject
   const intro = copy.intro(c)
   const expiration = c.expirationDate ? `This quote is good through ${formatDate(c.expirationDate)}.` : ''
   const main = mainOption(c.options)
@@ -445,6 +542,7 @@ function renderEmail(template: TemplateType, c: EmailContext): { subject: string
   const color = c.shopColor || '#1d4ed8'
   const html = `
 <div style="margin:0;padding:24px 12px;background:#f4f4f5;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  ${preheaderHtml(flavored.preheader)}
   <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e4e4e7;">
     <div style="padding:20px 24px;border-bottom:3px solid ${color};">
       ${
@@ -666,9 +764,15 @@ Deno.serve(async (req) => {
       ? `${customer.vehicle_year} ${customer.vehicle_make} ${customer.vehicle_model}`
       : null
 
-  // The subject line never depends on the quote link itself (see COPY
-  // above), so it can be computed before the email_messages row exists.
-  const subject = COPY[template].subject({ shopName: shop.name, vehicle } as EmailContext)
+  // The subject line never depends on the quote link itself, so it can be
+  // computed before the email_messages row exists. It MUST be derived the same
+  // way renderEmail derives it (flavor-aware) — otherwise the subject logged
+  // in email_messages, and shown in the app's send history, silently disagrees
+  // with the one the customer actually received.
+  const subject = FLAVOR_COPY[detectQuoteFlavor(windowTints, options)][template]({
+    shopName: shop.name,
+    vehicle,
+  }).subject
 
   // Record the attempt first (this is also where delivery_token comes
   // from -- one real, distinct token per send, embedded in the actual

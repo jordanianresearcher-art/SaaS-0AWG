@@ -4,6 +4,7 @@ import { addonOptions, computeAddonBreakdown, fullTotalCents, mainOption } from 
 import { summarizeWindowTint } from './windowTint'
 import { sanitizeFinancingOffers } from './financing'
 import { formatItemDisplayName } from './productNaming'
+import { detectQuoteFlavor, flavorCopy, preheaderHtml } from './quoteFlavor'
 
 // All five manual email templates. Emails stay short and drive the customer to
 // the public quote page — the full quote never rides inside the email.
@@ -231,7 +232,18 @@ function financingText(rawOffers: FinancingOffer[]): string | null {
 export function renderEmail(templateType: TemplateType, ctx: EmailContext): RenderedEmail {
   const copy = COPY[templateType]
   const { shop, customer, quote } = ctx
-  const subject = copy.subject(ctx)
+  // Subject and inbox-preview line come from the job-type-aware copy (see
+  // quoteFlavor.ts) — a tint customer shouldn't get a subject about bass, and
+  // four follow-ups that all lead with the same words read as spam. The body
+  // intro stays shared; it is the subject that decides whether the email is
+  // opened at all.
+  const flavor = detectQuoteFlavor(quote, ctx.options)
+  const flavored = flavorCopy(flavor, templateType, {
+    shopName: shop.name,
+    vehicle: formatVehicle(customer),
+    firstName: customer.firstName,
+  })
+  const subject = flavored.subject
   const intro = copy.intro(ctx)
   const main = mainOption(ctx.options)
   const value = main?.priceCents ?? 0
@@ -270,6 +282,7 @@ export function renderEmail(templateType: TemplateType, ctx: EmailContext): Rend
   const color = shop.primaryColor || '#1d4ed8'
   const html = `
 <div style="margin:0;padding:24px 12px;background:#f4f4f5;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  ${preheaderHtml(flavored.preheader)}
   <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e4e4e7;">
     <div style="padding:20px 24px;border-bottom:3px solid ${color};">
       ${
