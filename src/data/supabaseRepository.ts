@@ -1,6 +1,9 @@
 import { FunctionsHttpError, type SupabaseClient } from '@supabase/supabase-js'
 import { sanitizeFinancingOffers } from '../lib/financing'
 import type {
+  Appointment,
+  Bay,
+  BusinessHoursDay,
   CatalogItem,
   Customer,
   EmailMessage,
@@ -21,13 +24,17 @@ import type {
   QuoteResponse,
   QuoteStatus,
   ResponseType,
+  ScheduleException,
+  Service,
   Shop,
   StockMovement,
   TemplateType,
 } from '../types'
 import type {
   DataRepository,
+  NewAppointmentInput,
   NewCatalogItemInput,
+  NewServiceInput,
   NewInvoiceInput,
   NewPackageTemplateInput,
   NewQuoteInput,
@@ -79,6 +86,7 @@ function mapShop(r: Row): Shop {
     defaultLowStockThreshold: r.default_low_stock_threshold ?? 3,
     lowStockAlertEmail: r.low_stock_alert_email ?? null,
     hasStaffAccessCode: r.has_staff_access_code ?? false,
+    bookingDepositCents: r.booking_deposit_cents ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }
@@ -267,6 +275,76 @@ function mapStockMovement(r: Row): StockMovement {
   }
 }
 
+function mapService(r: Row): Service {
+  return {
+    id: r.id,
+    shopId: r.shop_id,
+    name: r.name,
+    description: r.description ?? null,
+    durationMinutes: r.duration_minutes,
+    priceCents: r.price_cents ?? null,
+    active: r.active ?? true,
+    position: r.position,
+    durationOverrides: ((r.service_duration_overrides as Row[]) ?? []).map((o) => ({
+      bodyStyle: o.body_style,
+      durationMinutes: o.duration_minutes,
+    })),
+  }
+}
+
+function mapBay(r: Row): Bay {
+  return { id: r.id, shopId: r.shop_id, name: r.name, active: r.active ?? true, position: r.position }
+}
+
+function mapBusinessHoursDay(r: Row): BusinessHoursDay {
+  return {
+    dayOfWeek: r.day_of_week,
+    isOpen: r.is_open,
+    // Postgres `time` comes back as "HH:MM:SS" — trim to "HH:mm" to match
+    // src/lib/scheduling.ts's timeStringToMinute contract.
+    openTime: r.open_time ? String(r.open_time).slice(0, 5) : null,
+    closeTime: r.close_time ? String(r.close_time).slice(0, 5) : null,
+  }
+}
+
+function mapScheduleException(r: Row): ScheduleException {
+  return {
+    id: r.id,
+    shopId: r.shop_id,
+    date: r.exception_date,
+    isClosed: r.is_closed,
+    openTime: r.open_time ? String(r.open_time).slice(0, 5) : null,
+    closeTime: r.close_time ? String(r.close_time).slice(0, 5) : null,
+    note: r.note ?? null,
+  }
+}
+
+function mapAppointment(r: Row): Appointment {
+  return {
+    id: r.id,
+    shopId: r.shop_id,
+    bayId: r.bay_id,
+    customerId: r.customer_id,
+    source: r.source,
+    status: r.status,
+    startsAt: r.starts_at,
+    endsAt: r.ends_at,
+    bodyStyle: r.body_style ?? null,
+    notes: r.notes ?? null,
+    publicToken: r.public_token,
+    sourceQuoteId: r.source_quote_id ?? null,
+    depositAmountCents: r.deposit_amount_cents ?? null,
+    depositPaidAt: r.deposit_paid_at ?? null,
+    reminderSentAt: r.reminder_sent_at ?? null,
+    cancelledAt: r.cancelled_at ?? null,
+    services: ((r.appointment_services as Row[]) ?? [])
+      .sort((a, b) => a.position - b.position)
+      .map((s) => ({ serviceId: s.service_id ?? null, name: s.name, durationMinutes: s.duration_minutes, priceCents: s.price_cents ?? null })),
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }
+}
+
 function mapInvoiceItem(r: Row): InvoiceItem {
   return {
     id: r.id,
@@ -446,6 +524,7 @@ export class SupabaseRepository implements DataRepository {
     if (patch.quoteDisclaimer !== undefined) row.quote_disclaimer = patch.quoteDisclaimer
     if (patch.defaultLowStockThreshold !== undefined) row.default_low_stock_threshold = patch.defaultLowStockThreshold
     if (patch.lowStockAlertEmail !== undefined) row.low_stock_alert_email = patch.lowStockAlertEmail
+    if (patch.bookingDepositCents !== undefined) row.booking_deposit_cents = patch.bookingDepositCents
     const { data, error } = await this.supabase
       .from('shops')
       .update(row)
@@ -1260,6 +1339,234 @@ export class SupabaseRepository implements DataRepository {
 
   async revokeInventoryDevice(membershipId: string): Promise<void> {
     const { error } = await this.supabase.rpc('revoke_inventory_device', { p_membership_id: membershipId })
+    if (error) throw error
+  }
+
+  // -------------------------------------------------------------------
+  // Booking (staff side) — see migration 0021_booking_core.sql.
+  // -------------------------------------------------------------------
+
+  async listServices(): Promise<Service[]> {
+    const { data, error } = await this.supabase
+      .from('services')
+      .select('*, service_duration_overrides(body_style, duration_minutes)')
+      .eq('shop_id', this.shopId)
+      .order('position')
+    if (error) throw error
+    return (data as Row[]).map(mapService)
+  }
+
+  async saveService(serviceId: string | null, input: NewServiceInput): Promise<Service> {
+    const row = {
+      shop_id: this.shopId,
+      name: input.name,
+      description: input.description,
+      duration_minutes: input.durationMinutes,
+      price_cents: input.priceCents,
+    }
+    const { data, error } = await (serviceId
+      ? this.supabase.from('services').update(row).eq('id', serviceId).select('*').single()
+      : this.supabase.from('services').insert(row).select('*').single())
+    if (error) throw error
+    const id = (data as Row).id as string
+
+    // Overrides are always fully replaced — same "never a delta" contract
+    // financingOffers uses, for the same reason: the caller (a settings
+    // form) always has the complete current list, so there's no partial
+    // update to reconcile.
+    await this.supabase.from('service_duration_overrides').delete().eq('service_id', id)
+    if (input.durationOverrides.length > 0) {
+      const { error: overrideError } = await this.supabase.from('service_duration_overrides').insert(
+        input.durationOverrides.map((o) => ({ service_id: id, body_style: o.bodyStyle, duration_minutes: o.durationMinutes })),
+      )
+      if (overrideError) throw overrideError
+    }
+
+    return mapService({ ...(data as Row), service_duration_overrides: input.durationOverrides.map((o) => ({
+      body_style: o.bodyStyle,
+      duration_minutes: o.durationMinutes,
+    })) })
+  }
+
+  async deleteService(serviceId: string): Promise<void> {
+    const { error } = await this.supabase.from('services').delete().eq('id', serviceId)
+    if (error) throw error
+  }
+
+  async listBays(): Promise<Bay[]> {
+    const { data, error } = await this.supabase.from('bays').select('*').eq('shop_id', this.shopId).order('position')
+    if (error) throw error
+    return (data as Row[]).map(mapBay)
+  }
+
+  async saveBay(bayId: string | null, name: string): Promise<Bay> {
+    const row = { shop_id: this.shopId, name }
+    const { data, error } = await (bayId
+      ? this.supabase.from('bays').update(row).eq('id', bayId).select('*').single()
+      : this.supabase.from('bays').insert(row).select('*').single())
+    if (error) throw error
+    return mapBay(data as Row)
+  }
+
+  async deleteBay(bayId: string): Promise<void> {
+    const { error } = await this.supabase.from('bays').delete().eq('id', bayId)
+    if (error) throw error
+  }
+
+  async listBusinessHours(): Promise<BusinessHoursDay[]> {
+    const { data, error } = await this.supabase
+      .from('business_hours')
+      .select('*')
+      .eq('shop_id', this.shopId)
+      .order('day_of_week')
+    if (error) throw error
+    return (data as Row[]).map(mapBusinessHoursDay)
+  }
+
+  async saveBusinessHours(hours: BusinessHoursDay[]): Promise<BusinessHoursDay[]> {
+    // One row per day of week, upserted on the (shop_id, day_of_week)
+    // unique constraint migration 0021 defines — every Settings save writes
+    // all 7 days at once, matching how the migration itself backfills them.
+    const rows = hours.map((h) => ({
+      shop_id: this.shopId,
+      day_of_week: h.dayOfWeek,
+      is_open: h.isOpen,
+      open_time: h.isOpen ? h.openTime : null,
+      close_time: h.isOpen ? h.closeTime : null,
+    }))
+    const { data, error } = await this.supabase
+      .from('business_hours')
+      .upsert(rows, { onConflict: 'shop_id,day_of_week' })
+      .select('*')
+    if (error) throw error
+    return (data as Row[]).map(mapBusinessHoursDay).sort((a, b) => a.dayOfWeek - b.dayOfWeek)
+  }
+
+  async listScheduleExceptions(): Promise<ScheduleException[]> {
+    const { data, error } = await this.supabase
+      .from('schedule_exceptions')
+      .select('*')
+      .eq('shop_id', this.shopId)
+      .order('exception_date')
+    if (error) throw error
+    return (data as Row[]).map(mapScheduleException)
+  }
+
+  async saveScheduleException(
+    exceptionId: string | null,
+    ex: Omit<ScheduleException, 'id' | 'shopId'>,
+  ): Promise<ScheduleException> {
+    const row = {
+      shop_id: this.shopId,
+      exception_date: ex.date,
+      is_closed: ex.isClosed,
+      open_time: ex.isClosed ? null : ex.openTime,
+      close_time: ex.isClosed ? null : ex.closeTime,
+      note: ex.note,
+    }
+    const { data, error } = await (exceptionId
+      ? this.supabase.from('schedule_exceptions').update(row).eq('id', exceptionId).select('*').single()
+      : this.supabase.from('schedule_exceptions').insert(row).select('*').single())
+    if (error) throw error
+    return mapScheduleException(data as Row)
+  }
+
+  async deleteScheduleException(exceptionId: string): Promise<void> {
+    const { error } = await this.supabase.from('schedule_exceptions').delete().eq('id', exceptionId)
+    if (error) throw error
+  }
+
+  async listAppointments(rangeStart: string, rangeEnd: string): Promise<Appointment[]> {
+    const { data, error } = await this.supabase
+      .from('appointments')
+      .select('*, appointment_services(service_id, name, duration_minutes, price_cents, position)')
+      .eq('shop_id', this.shopId)
+      .gte('starts_at', rangeStart)
+      .lt('starts_at', rangeEnd)
+      .order('starts_at')
+    if (error) throw error
+    return (data as Row[]).map(mapAppointment)
+  }
+
+  async createAppointment(input: NewAppointmentInput): Promise<Appointment> {
+    let customerId = input.customerId
+    if (!customerId) {
+      if (!input.customerFirstName) throw new Error('Name is required')
+      const { data: customer, error: customerError } = await this.supabase
+        .from('customers')
+        .insert({
+          shop_id: this.shopId,
+          first_name: input.customerFirstName,
+          last_name: input.customerLastName ?? null,
+          // customers.email is NOT NULL at the DB level (quotes always need
+          // one) — booking allows phone-only, so this follows the same
+          // "empty string, not null" convention the rest of the app uses.
+          email: input.customerEmail ?? '',
+          phone: input.customerPhone ?? null,
+          source: 'staff_booking',
+        })
+        .select('*')
+        .single()
+      if (customerError) throw customerError
+      customerId = (customer as Row).id as string
+    }
+
+    const totalMinutes = input.services.reduce((sum, s) => sum + s.durationMinutes, 0)
+    const startsAt = new Date(input.startsAt)
+    const endsAt = new Date(startsAt.getTime() + totalMinutes * 60_000).toISOString()
+
+    const { data: user } = await this.supabase.auth.getUser()
+    const { data: appt, error: apptError } = await this.supabase
+      .from('appointments')
+      .insert({
+        shop_id: this.shopId,
+        bay_id: input.bayId,
+        customer_id: customerId,
+        source: input.source,
+        starts_at: input.startsAt,
+        ends_at: endsAt,
+        body_style: input.bodyStyle,
+        notes: input.notes,
+        source_quote_id: input.sourceQuoteId ?? null,
+        created_by: user.user?.id ?? null,
+      })
+      .select('*')
+      .single()
+    if (apptError) throw apptError
+    const appointmentId = (appt as Row).id as string
+
+    const { error: servicesError } = await this.supabase.from('appointment_services').insert(
+      input.services.map((s, i) => ({
+        appointment_id: appointmentId,
+        service_id: s.serviceId,
+        name: s.name,
+        duration_minutes: s.durationMinutes,
+        price_cents: s.priceCents,
+        position: i,
+      })),
+    )
+    if (servicesError) throw servicesError
+
+    return mapAppointment({
+      ...(appt as Row),
+      appointment_services: input.services.map((s, i) => ({
+        service_id: s.serviceId, name: s.name, duration_minutes: s.durationMinutes, price_cents: s.priceCents, position: i,
+      })),
+    })
+  }
+
+  async setAppointmentStatus(appointmentId: string, status: Appointment['status']): Promise<void> {
+    const row: Row = { status }
+    if (status === 'cancelled') row.cancelled_at = new Date().toISOString()
+    const { error } = await this.supabase.from('appointments').update(row).eq('id', appointmentId)
+    if (error) throw error
+  }
+
+  async markAppointmentReminderSent(appointmentId: string): Promise<void> {
+    const { error } = await this.supabase
+      .from('appointments')
+      .update({ reminder_sent_at: new Date().toISOString() })
+      .eq('id', appointmentId)
     if (error) throw error
   }
 }

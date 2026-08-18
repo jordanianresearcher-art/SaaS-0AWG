@@ -1,4 +1,8 @@
 import type {
+  Appointment,
+  AppointmentSource,
+  Bay,
+  BusinessHoursDay,
   CatalogItem,
   Customer,
   EmailMessage,
@@ -24,10 +28,14 @@ import type {
   QuoteResponse,
   QuoteStatus,
   ResponseType,
+  ScheduleException,
+  Service,
+  ServiceDurationOverride,
   Shop,
   StockMovement,
   StockMovementType,
   TemplateType,
+  TintBodyStyle,
   VehicleType,
   WindowTintConfig,
 } from '../types'
@@ -107,6 +115,7 @@ export interface ShopSettingsPatch {
   quoteDisclaimer?: string
   defaultLowStockThreshold?: number
   lowStockAlertEmail?: string | null
+  bookingDepositCents?: number | null
 }
 
 export interface NewCatalogItemInput {
@@ -234,6 +243,38 @@ export interface NewInvoiceInput {
  * staff to pick one (carried here directly — see the 'candidates' case
  * below), or nothing knows about it at all.
  */
+// ---------------------------------------------------------------------------
+// Booking (staff side — see docs/MVP_PLAN.md §5, src/lib/scheduling.ts).
+// The public/anonymous side (get_public_booking_page, book_appointment,
+// get_public_appointment, cancel_appointment_public) is deliberately NOT
+// part of this interface — it's resolved by src/data/publicBooking.ts, the
+// same split publicQuote.ts already uses for the anonymous quote surface.
+// ---------------------------------------------------------------------------
+
+export interface NewServiceInput {
+  name: string
+  description: string | null
+  durationMinutes: number
+  priceCents: number | null
+  durationOverrides: ServiceDurationOverride[]
+}
+
+export interface NewAppointmentInput {
+  bayId: string
+  /** Existing customer (from a quote, or picked from the customer list) — mutually exclusive with the raw fields below. */
+  customerId?: string
+  customerFirstName?: string
+  customerLastName?: string | null
+  customerEmail?: string | null
+  customerPhone?: string | null
+  source: AppointmentSource
+  startsAt: string
+  bodyStyle: TintBodyStyle | null
+  notes: string | null
+  sourceQuoteId?: string | null
+  services: Array<{ serviceId: string | null; name: string; durationMinutes: number; priceCents: number | null }>
+}
+
 export type UpcLookupResult =
   | { source: 'catalog'; catalogItem: CatalogItem }
   | { source: 'external'; name: string | null; brand: string | null; unitPriceCents: number | null; imageUrl: string | null; upc: string }
@@ -513,6 +554,29 @@ export interface DataRepository {
   listInventoryDevices(): Promise<InventoryDevice[]>
   /** Revokes one joined device without rotating the shared code — every other device stays signed in. */
   revokeInventoryDevice(membershipId: string): Promise<void>
+
+  // ---------------------------------------------------------------------
+  // Booking (staff side). See the NewServiceInput/NewAppointmentInput
+  // comment above for why the public/anonymous side isn't here.
+  // ---------------------------------------------------------------------
+
+  listServices(): Promise<Service[]>
+  saveService(serviceId: string | null, input: NewServiceInput): Promise<Service>
+  deleteService(serviceId: string): Promise<void>
+  listBays(): Promise<Bay[]>
+  saveBay(bayId: string | null, name: string): Promise<Bay>
+  deleteBay(bayId: string): Promise<void>
+  listBusinessHours(): Promise<BusinessHoursDay[]>
+  saveBusinessHours(hours: BusinessHoursDay[]): Promise<BusinessHoursDay[]>
+  listScheduleExceptions(): Promise<ScheduleException[]>
+  saveScheduleException(exceptionId: string | null, ex: Omit<ScheduleException, 'id' | 'shopId'>): Promise<ScheduleException>
+  deleteScheduleException(exceptionId: string): Promise<void>
+  /** Appointments starting in [rangeStart, rangeEnd) — both ISO timestamps. Used by the calendar view; keep the range tight (a day or a week), not "all of history". */
+  listAppointments(rangeStart: string, rangeEnd: string): Promise<Appointment[]>
+  /** Staff-side booking — direct create, no availability RPC (the exclusion constraint on `appointments` is what actually prevents a double-book; this call fails loudly if the chosen bay/time is already taken). */
+  createAppointment(input: NewAppointmentInput): Promise<Appointment>
+  setAppointmentStatus(appointmentId: string, status: Appointment['status']): Promise<void>
+  markAppointmentReminderSent(appointmentId: string): Promise<void>
 }
 
 export type {

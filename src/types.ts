@@ -228,6 +228,8 @@ export interface Shop {
   lowStockAlertEmail: string | null
   /** Whether a shared-device access code exists — never the code/hash itself (see rotateStaffAccessCode). */
   hasStaffAccessCode: boolean
+  /** Shop-wide deposit amount for a self-serve booking; null/0 = no deposit required, self-serve confirms immediately. */
+  bookingDepositCents: number | null
   createdAt: string
   updatedAt: string
 }
@@ -597,4 +599,119 @@ export interface PublicQuote {
     depositAmountCents: number | null
     items: Array<{ brand: string | null; model: string | null; name: string; quantity: number; description: string | null; imageUrl: string | null }>
   }>
+}
+
+// ---------------------------------------------------------------------------
+// Booking — see docs/MVP_PLAN.md §5 and src/lib/scheduling.ts. Capacity is
+// bays, not staff; body-style duration overrides mirror TintBodyStyle.
+// ---------------------------------------------------------------------------
+
+export interface ServiceDurationOverride {
+  bodyStyle: TintBodyStyle
+  durationMinutes: number
+}
+
+export interface Service {
+  id: string
+  shopId: string
+  name: string
+  description: string | null
+  durationMinutes: number
+  priceCents: number | null
+  active: boolean
+  position: number
+  durationOverrides: ServiceDurationOverride[]
+}
+
+export interface Bay {
+  id: string
+  shopId: string
+  name: string
+  active: boolean
+  position: number
+}
+
+export interface BusinessHoursDay {
+  /** 0 = Sunday .. 6 = Saturday, matching JS Date#getDay(). */
+  dayOfWeek: number
+  isOpen: boolean
+  /** "HH:mm", 24-hour. Null when isOpen is false. */
+  openTime: string | null
+  closeTime: string | null
+}
+
+export interface ScheduleException {
+  id: string
+  shopId: string
+  /** "YYYY-MM-DD", shop-local calendar date. */
+  date: string
+  isClosed: boolean
+  openTime: string | null
+  closeTime: string | null
+  note: string | null
+}
+
+export type AppointmentStatus = 'confirmed' | 'awaiting_deposit' | 'cancelled' | 'completed' | 'no_show'
+export type AppointmentSource = 'staff' | 'self_serve' | 'from_quote'
+
+export interface AppointmentServiceLine {
+  /** Snapshot — the Service this line was booked from may since be edited or deleted. */
+  serviceId: string | null
+  name: string
+  durationMinutes: number
+  priceCents: number | null
+}
+
+export interface Appointment {
+  id: string
+  shopId: string
+  bayId: string
+  customerId: string
+  source: AppointmentSource
+  status: AppointmentStatus
+  /** ISO timestamp. */
+  startsAt: string
+  endsAt: string
+  bodyStyle: TintBodyStyle | null
+  notes: string | null
+  publicToken: string
+  sourceQuoteId: string | null
+  depositAmountCents: number | null
+  depositPaidAt: string | null
+  reminderSentAt: string | null
+  cancelledAt: string | null
+  services: AppointmentServiceLine[]
+  createdAt: string
+  updatedAt: string
+}
+
+/** Everything the public booking wizard (/book/:shopSlug) needs before an appointment exists. PII-free by construction — busyBlocks carry only bay + time, never a customer name. */
+export interface PublicBookingPage {
+  shopId: string
+  shopName: string
+  shopPhone: string
+  shopAddress: string
+  shopPrimaryColor: string
+  bookingDepositCents: number | null
+  services: Service[]
+  bayIds: string[]
+  businessHours: BusinessHoursDay[]
+  scheduleExceptions: ScheduleException[]
+  busyBlocks: Array<{ bayId: string; startsAt: string; endsAt: string }>
+}
+
+/** Sanitized shape for the manage page (/booking/:publicToken) — one customer's own appointment, reached with no account. */
+export interface PublicAppointment {
+  publicToken: string
+  status: AppointmentStatus
+  startsAt: string
+  endsAt: string
+  customerFirstName: string
+  shopName: string
+  shopPhone: string
+  shopAddress: string
+  shopPrimaryColor: string
+  depositAmountCents: number | null
+  depositPaidAt: string | null
+  services: Array<{ name: string; durationMinutes: number }>
 }

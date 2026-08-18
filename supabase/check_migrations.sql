@@ -105,6 +105,12 @@ from (
      exists (select 1 from pg_proc p
              join pg_namespace n on n.oid = p.pronamespace
              where n.nspname = 'public'
-               and p.proname = 'import_legacy_inventory'))
+               and p.proname = 'import_legacy_inventory')),
+
+    ('0021 booking core',
+     to_regclass('public.appointments') is not null
+       and exists (select 1 from information_schema.columns
+                   where table_schema = 'public' and table_name = 'shops'
+                     and column_name = 'booking_deposit_cents'))
 ) as t(migration, applied)
 order by migration;

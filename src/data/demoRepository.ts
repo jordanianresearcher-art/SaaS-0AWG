@@ -1,4 +1,7 @@
 import type {
+  Appointment,
+  Bay,
+  BusinessHoursDay,
   CatalogItem,
   Customer,
   Employee,
@@ -15,16 +18,20 @@ import type {
   QuoteOption,
   QuoteStatus,
   ResponseType,
+  ScheduleException,
+  Service,
   Shop,
   StockMovement,
   TemplateType,
 } from '../types'
 import type {
   DataRepository,
+  NewAppointmentInput,
   NewCatalogItemInput,
   NewInvoiceInput,
   NewPackageTemplateInput,
   NewQuoteInput,
+  NewServiceInput,
   NewStockMovementInput,
   ProductResolutionCandidate,
   ProductResolveRequest,
@@ -965,6 +972,372 @@ export class DemoRepository implements DataRepository {
 
   async revokeInventoryDevice(membershipId: string): Promise<void> {
     this.db.inventoryDevices = this.db.inventoryDevices.filter((d) => d.id !== membershipId)
+    this.persist()
+  }
+
+  // -------------------------------------------------------------------
+  // Booking (staff side) — see migration 0021_booking_core.sql for the
+  // production shape this mirrors.
+  // -------------------------------------------------------------------
+
+  async listServices(): Promise<Service[]> {
+    return this.db.services.slice().sort((a, b) => a.position - b.position)
+  }
+
+  async saveService(serviceId: string | null, input: NewServiceInput): Promise<Service> {
+    if (serviceId) {
+      const existing = this.db.services.find((s) => s.id === serviceId)
+      if (!existing) throw new Error('Service not found')
+      Object.assign(existing, { ...input })
+      this.persist()
+      return existing
+    }
+    const service: Service = {
+      id: newId(),
+      shopId: this.db.shop.id,
+      active: true,
+      position: this.db.services.length,
+      ...input,
+    }
+    this.db.services.push(service)
+    this.persist()
+    return service
+  }
+
+  async deleteService(serviceId: string): Promise<void> {
+    this.db.services = this.db.services.filter((s) => s.id !== serviceId)
+    this.persist()
+  }
+
+  async listBays(): Promise<Bay[]> {
+    return this.db.bays.slice().sort((a, b) => a.position - b.position)
+  }
+
+  async saveBay(bayId: string | null, name: string): Promise<Bay> {
+    if (bayId) {
+      const existing = this.db.bays.find((b) => b.id === bayId)
+      if (!existing) throw new Error('Bay not found')
+      existing.name = name
+      this.persist()
+      return existing
+    }
+    const bay: Bay = { id: newId(), shopId: this.db.shop.id, name, active: true, position: this.db.bays.length }
+    this.db.bays.push(bay)
+    this.persist()
+    return bay
+  }
+
+  async deleteBay(bayId: string): Promise<void> {
+    this.db.bays = this.db.bays.filter((b) => b.id !== bayId)
+    this.persist()
+  }
+
+  async listBusinessHours(): Promise<BusinessHoursDay[]> {
+    return this.db.businessHours.slice().sort((a, b) => a.dayOfWeek - b.dayOfWeek)
+  }
+
+  async saveBusinessHours(hours: BusinessHoursDay[]): Promise<BusinessHoursDay[]> {
+    this.db.businessHours = hours.map((h) => ({ ...h }))
+    this.persist()
+    return this.listBusinessHours()
+  }
+
+  async listScheduleExceptions(): Promise<ScheduleException[]> {
+    return this.db.scheduleExceptions.slice().sort((a, b) => a.date.localeCompare(b.date))
+  }
+
+  async saveScheduleException(
+    exceptionId: string | null,
+    ex: Omit<ScheduleException, 'id' | 'shopId'>,
+  ): Promise<ScheduleException> {
+    if (exceptionId) {
+      const existing = this.db.scheduleExceptions.find((e) => e.id === exceptionId)
+      if (!existing) throw new Error('Schedule exception not found')
+      Object.assign(existing, ex)
+      this.persist()
+      return existing
+    }
+    const created: ScheduleException = { id: newId(), shopId: this.db.shop.id, ...ex }
+    this.db.scheduleExceptions.push(created)
+    this.persist()
+    return created
+  }
+
+  async deleteScheduleException(exceptionId: string): Promise<void> {
+    this.db.scheduleExceptions = this.db.scheduleExceptions.filter((e) => e.id !== exceptionId)
+    this.persist()
+  }
+
+  async listAppointments(rangeStart: string, rangeEnd: string): Promise<Appointment[]> {
+    return this.db.appointments
+      .filter((a) => a.startsAt >= rangeStart && a.startsAt < rangeEnd)
+      .slice()
+      .sort((a, b) => a.startsAt.localeCompare(b.startsAt))
+  }
+
+  async createAppointment(input: NewAppointmentInput): Promise<Appointment> {
+    let customerId = input.customerId
+    if (!customerId) {
+      if (!input.customerFirstName) throw new Error('Name is required')
+      const customer: Customer = {
+        id: newId(),
+        shopId: this.db.shop.id,
+        firstName: input.customerFirstName,
+        lastName: input.customerLastName ?? null,
+        // Customer.email is non-nullable app-wide (quotes always need one to
+        // send to) — booking's own validation allows phone-only, so this
+        // follows the same "empty string, not null" convention as everywhere
+        // else a customer might not have an email on file.
+        email: input.customerEmail ?? '',
+        phone: input.customerPhone ?? null,
+        vehicleYear: null,
+        vehicleMake: null,
+        vehicleModel: null,
+        vehicleTrim: null,
+        source: 'staff_booking',
+        emailContactPermissionConfirmed: false,
+        emailContactPermissionConfirmedAt: null,
+        emailOptOutAt: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }
+      this.db.customers.push(customer)
+      customerId = customer.id
+    }
+
+    const totalMinutes = input.services.reduce((sum, s) => sum + s.durationMinutes, 0)
+    const startsAt = new Date(input.startsAt)
+    const endsAtIso = new Date(startsAt.getTime() + totalMinutes * 60_000).toISOString()
+
+    // Same guarantee the production exclusion constraint provides — demo
+    // mode must never silently double-book either, or the calendar demo
+    // teaches the wrong lesson.
+    const conflict = this.db.appointments.some(
+      (a) =>
+        a.bayId === input.bayId &&
+        a.status !== 'cancelled' &&
+        input.startsAt < a.endsAt &&
+        endsAtIso > a.startsAt,
+    )
+    if (conflict) throw new Error('That bay is already booked for part of this time.')
+
+    const appointment: Appointment = {
+      id: newId(),
+      shopId: this.db.shop.id,
+      bayId: input.bayId,
+      customerId,
+      source: input.source,
+      status: 'confirmed',
+      startsAt: input.startsAt,
+      endsAt: endsAtIso,
+      bodyStyle: input.bodyStyle,
+      notes: input.notes,
+      publicToken: newId(),
+      sourceQuoteId: input.sourceQuoteId ?? null,
+      depositAmountCents: null,
+      depositPaidAt: null,
+      reminderSentAt: null,
+      cancelledAt: null,
+      services: input.services.map((s) => ({ serviceId: s.serviceId, name: s.name, durationMinutes: s.durationMinutes, priceCents: s.priceCents })),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+    this.db.appointments.push(appointment)
+    this.persist()
+    return appointment
+  }
+
+  async setAppointmentStatus(appointmentId: string, status: Appointment['status']): Promise<void> {
+    const appt = this.db.appointments.find((a) => a.id === appointmentId)
+    if (!appt) return
+    appt.status = status
+    if (status === 'cancelled') appt.cancelledAt = new Date().toISOString()
+    appt.updatedAt = new Date().toISOString()
+    this.persist()
+  }
+
+  async markAppointmentReminderSent(appointmentId: string): Promise<void> {
+    const appt = this.db.appointments.find((a) => a.id === appointmentId)
+    if (!appt) return
+    appt.reminderSentAt = new Date().toISOString()
+    this.persist()
+  }
+
+  // -------------------------------------------------------------------
+  // Anonymous booking surface — not part of DataRepository (same as
+  // getPublicQuote/submitPublicResponse aren't authenticated-only either),
+  // called directly by src/data/publicBooking.ts the way publicQuote.ts
+  // calls the public-quote equivalents. Demo mode has exactly one shop, so
+  // "resolve by slug" degenerates to "is this that shop's slug".
+  //
+  // Not production-equivalent on one point, by design: this never checks
+  // real availability the way migration 0021's book_appointment RPC does
+  // (business hours, exceptions, the exclusion constraint) — the demo
+  // booking wizard's own client-side availableSlotsForDay call is what
+  // keeps a demo user from picking a bad time in the first place, so this
+  // only needs to guard against the same-bay-overlap case a stale demo
+  // session could still hit.
+  // -------------------------------------------------------------------
+
+  async getPublicBookingPage(shopSlug: string): Promise<import('../types').PublicBookingPage | null> {
+    // Shop.active isn't exposed on the client type (only checked server-side
+    // in production, e.g. send-quote-email) — demo mode has no way to
+    // deactivate its one shop anyway, so slug match alone is the right check here.
+    if (this.db.shop.slug !== shopSlug) return null
+    return {
+      shopId: this.db.shop.id,
+      shopName: this.db.shop.name,
+      shopPhone: this.db.shop.phone,
+      shopAddress: this.db.shop.address,
+      shopPrimaryColor: this.db.shop.primaryColor,
+      bookingDepositCents: this.db.shop.bookingDepositCents,
+      services: this.db.services.filter((s) => s.active),
+      bayIds: this.db.bays.filter((b) => b.active).map((b) => b.id),
+      businessHours: this.db.businessHours,
+      scheduleExceptions: this.db.scheduleExceptions,
+      busyBlocks: this.db.appointments
+        .filter((a) => a.status !== 'cancelled')
+        .map((a) => ({ bayId: a.bayId, startsAt: a.startsAt, endsAt: a.endsAt })),
+    }
+  }
+
+  async bookAppointmentPublic(
+    shopSlug: string,
+    input: {
+      serviceIds: string[]
+      startsAt: string
+      bodyStyle: string | null
+      customerFirstName: string
+      customerLastName: string | null
+      customerEmail: string | null
+      customerPhone: string | null
+      sourceQuotePublicToken: string | null
+      notes: string | null
+    },
+  ): Promise<{ publicToken: string; status: 'confirmed' | 'awaiting_deposit' }> {
+    if (this.db.shop.slug !== shopSlug) throw new Error('Shop not found')
+
+    const services = this.db.services.filter((s) => input.serviceIds.includes(s.id) && s.active)
+    if (services.length === 0) throw new Error('No bookable services matched')
+    const totalMinutes = services.reduce((sum, s) => {
+      const override = s.durationOverrides.find((o) => o.bodyStyle === input.bodyStyle)
+      return sum + (override?.durationMinutes ?? s.durationMinutes)
+    }, 0)
+    const endsAt = new Date(new Date(input.startsAt).getTime() + totalMinutes * 60_000).toISOString()
+
+    let customerId: string
+    let sourceQuoteId: string | null = null
+    if (input.sourceQuotePublicToken) {
+      const quote = this.quoteByToken(input.sourceQuotePublicToken)
+      if (!quote) throw new Error('Quote not found')
+      customerId = quote.customerId
+      sourceQuoteId = quote.id
+    } else {
+      if (!input.customerFirstName.trim()) throw new Error('Name is required')
+      if (!input.customerEmail?.trim() && !input.customerPhone?.trim()) {
+        throw new Error('An email or phone number is required')
+      }
+      const customer: Customer = {
+        id: newId(),
+        shopId: this.db.shop.id,
+        firstName: input.customerFirstName,
+        lastName: input.customerLastName,
+        email: input.customerEmail ?? '',
+        phone: input.customerPhone,
+        vehicleYear: null,
+        vehicleMake: null,
+        vehicleModel: null,
+        vehicleTrim: null,
+        source: 'self_serve_booking',
+        emailContactPermissionConfirmed: false,
+        emailContactPermissionConfirmedAt: null,
+        emailOptOutAt: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }
+      this.db.customers.push(customer)
+      customerId = customer.id
+    }
+
+    const availableBay = this.db.bays.find(
+      (b) =>
+        b.active &&
+        !this.db.appointments.some(
+          (a) => a.bayId === b.id && a.status !== 'cancelled' && input.startsAt < a.endsAt && endsAt > a.startsAt,
+        ),
+    )
+    if (!availableBay) throw new Error('That time was just booked by someone else. Please pick another.')
+
+    const status: 'confirmed' | 'awaiting_deposit' =
+      this.db.shop.bookingDepositCents && this.db.shop.bookingDepositCents > 0 ? 'awaiting_deposit' : 'confirmed'
+
+    const appointment: Appointment = {
+      id: newId(),
+      shopId: this.db.shop.id,
+      bayId: availableBay.id,
+      customerId,
+      source: sourceQuoteId ? 'from_quote' : 'self_serve',
+      status,
+      startsAt: input.startsAt,
+      endsAt,
+      bodyStyle: input.bodyStyle as Appointment['bodyStyle'],
+      notes: input.notes,
+      publicToken: newId(),
+      sourceQuoteId,
+      depositAmountCents: status === 'awaiting_deposit' ? this.db.shop.bookingDepositCents : null,
+      depositPaidAt: null,
+      reminderSentAt: null,
+      cancelledAt: null,
+      services: services.map((s) => {
+        const override = s.durationOverrides.find((o) => o.bodyStyle === input.bodyStyle)
+        return { serviceId: s.id, name: s.name, durationMinutes: override?.durationMinutes ?? s.durationMinutes, priceCents: s.priceCents }
+      }),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+    this.db.appointments.push(appointment)
+    this.persist()
+    return { publicToken: appointment.publicToken, status }
+  }
+
+  async getPublicAppointment(publicToken: string): Promise<import('../types').PublicAppointment | null> {
+    const appt = this.db.appointments.find((a) => a.publicToken === publicToken)
+    if (!appt) return null
+    const customer = this.db.customers.find((c) => c.id === appt.customerId)
+    return {
+      publicToken: appt.publicToken,
+      status: appt.status,
+      startsAt: appt.startsAt,
+      endsAt: appt.endsAt,
+      customerFirstName: customer?.firstName ?? '',
+      shopName: this.db.shop.name,
+      shopPhone: this.db.shop.phone,
+      shopAddress: this.db.shop.address,
+      shopPrimaryColor: this.db.shop.primaryColor,
+      depositAmountCents: appt.depositAmountCents,
+      depositPaidAt: appt.depositPaidAt,
+      services: appt.services.map((s) => ({ name: s.name, durationMinutes: s.durationMinutes })),
+    }
+  }
+
+  async cancelAppointmentPublic(publicToken: string): Promise<void> {
+    const appt = this.db.appointments.find((a) => a.publicToken === publicToken)
+    if (!appt || appt.status === 'cancelled' || appt.status === 'completed') {
+      throw new Error('Appointment not found or already cancelled')
+    }
+    appt.status = 'cancelled'
+    appt.cancelledAt = new Date().toISOString()
+    appt.updatedAt = new Date().toISOString()
+    this.persist()
+  }
+
+  /** Demo-only stand-in for the real Stripe flow (Phase 4) — flips a deposit to paid instantly with no payment. */
+  async fakeDepositPaidPublic(publicToken: string): Promise<void> {
+    const appt = this.db.appointments.find((a) => a.publicToken === publicToken)
+    if (!appt) return
+    appt.depositPaidAt = new Date().toISOString()
+    appt.status = 'confirmed'
+    appt.updatedAt = new Date().toISOString()
     this.persist()
   }
 }

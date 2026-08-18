@@ -1,4 +1,7 @@
 import type {
+  Appointment,
+  Bay,
+  BusinessHoursDay,
   CatalogItem,
   Customer,
   EmailMessage,
@@ -11,6 +14,8 @@ import type {
   QuoteEvent,
   QuoteOption,
   QuoteResponse,
+  ScheduleException,
+  Service,
   Shop,
   StockMovement,
   WindowTintConfig,
@@ -37,11 +42,16 @@ export interface DemoDB {
   /** Demo-only plaintext (never how production works — see rotateStaffAccessCode) so /join can be demoed with no backend. */
   staffAccessCode: string
   inventoryDevices: InventoryDevice[]
+  services: Service[]
+  bays: Bay[]
+  businessHours: BusinessHoursDay[]
+  scheduleExceptions: ScheduleException[]
+  appointments: Appointment[]
   /** Bumped when the seed shape changes so stale localStorage is discarded. */
   seedVersion: number
 }
 
-export const DEMO_SEED_VERSION = 15
+export const DEMO_SEED_VERSION = 16
 
 const SHOP_ID = 'demo-shop'
 
@@ -432,6 +442,9 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
     defaultLowStockThreshold: 3,
     lowStockAlertEmail: 'shop@bigtexaudio.example.com',
     hasStaffAccessCode: true,
+    // $20, so the demo shows the awaiting_deposit self-serve path without
+    // needing Stripe configured — demo mode fakes payment (see DemoRepository).
+    bookingDepositCents: 2000,
     createdAt: daysAgo(now, 40),
     updatedAt: daysAgo(now, 40),
   }
@@ -936,12 +949,143 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
     { id: 'demo-device-2', deviceName: "Marco's phone", joinedAt: daysAgo(now, 2) },
   ]
 
+  // --- Booking (see docs/MVP_PLAN.md §5) ---------------------------------
+
+  const bays: Bay[] = [
+    { id: 'demo-bay-1', shopId: SHOP_ID, name: 'Bay 1', active: true, position: 0 },
+    { id: 'demo-bay-2', shopId: SHOP_ID, name: 'Bay 2', active: true, position: 1 },
+  ]
+
+  const services: Service[] = [
+    {
+      id: 'demo-svc-audio',
+      shopId: SHOP_ID,
+      name: 'Car Audio Install',
+      description: 'Full system install — speakers, amp, sub, wiring.',
+      durationMinutes: 180,
+      priceCents: 15000,
+      active: true,
+      position: 0,
+      durationOverrides: [],
+    },
+    {
+      id: 'demo-svc-tint',
+      shopId: SHOP_ID,
+      name: 'Window Tint',
+      description: 'Ceramic or standard film, full vehicle.',
+      durationMinutes: 90,
+      priceCents: 25000,
+      active: true,
+      position: 1,
+      // Bigger glass takes longer — same reasoning as the tint config's own
+      // per-body-style window layout (src/lib/windowTint.ts).
+      durationOverrides: [
+        { bodyStyle: 'suv_6_window', durationMinutes: 150 },
+        { bodyStyle: 'truck_crew_cab', durationMinutes: 120 },
+        { bodyStyle: 'minivan', durationMinutes: 150 },
+      ],
+    },
+  ]
+
+  const businessHours: BusinessHoursDay[] = [0, 1, 2, 3, 4, 5, 6].map((dayOfWeek) => ({
+    dayOfWeek,
+    isOpen: dayOfWeek !== 0,
+    openTime: dayOfWeek !== 0 ? '09:00' : null,
+    closeTime: dayOfWeek !== 0 ? '18:00' : null,
+  }))
+
+  const scheduleExceptions: ScheduleException[] = []
+
+  const apptStart = (daysFromNow: number, hour: number) => {
+    const d = new Date(now)
+    d.setDate(d.getDate() + daysFromNow)
+    d.setHours(hour, 0, 0, 0)
+    return d
+  }
+  const apptEnd = (start: Date, minutes: number) => new Date(start.getTime() + minutes * 60_000).toISOString()
+
+  const appointments: Appointment[] = (() => {
+    const tomorrow930 = apptStart(1, 9)
+    const tomorrow1400 = apptStart(1, 14)
+    const nextWeek1100 = apptStart(5, 11)
+    return [
+      {
+        id: 'demo-appt-1',
+        shopId: SHOP_ID,
+        bayId: 'demo-bay-1',
+        customerId: 'demo-cust-f150-marcus',
+        source: 'staff',
+        status: 'confirmed',
+        startsAt: tomorrow930.toISOString(),
+        endsAt: apptEnd(tomorrow930, 180),
+        bodyStyle: null,
+        notes: null,
+        publicToken: 'demo-appt-token-1',
+        sourceQuoteId: 'demo-quote-f150-marcus',
+        depositAmountCents: null,
+        depositPaidAt: null,
+        reminderSentAt: null,
+        cancelledAt: null,
+        services: [{ serviceId: 'demo-svc-audio', name: 'Car Audio Install', durationMinutes: 180, priceCents: 15000 }],
+        createdAt: daysAgo(now, 2),
+        updatedAt: daysAgo(now, 2),
+      },
+      {
+        id: 'demo-appt-2',
+        shopId: SHOP_ID,
+        bayId: 'demo-bay-2',
+        customerId: 'demo-cust-tahoe-gloria',
+        source: 'self_serve',
+        status: 'awaiting_deposit',
+        startsAt: tomorrow1400.toISOString(),
+        endsAt: apptEnd(tomorrow1400, 150),
+        bodyStyle: 'suv_6_window',
+        notes: null,
+        publicToken: 'demo-appt-token-2',
+        sourceQuoteId: null,
+        depositAmountCents: 2000,
+        depositPaidAt: null,
+        reminderSentAt: null,
+        cancelledAt: null,
+        services: [{ serviceId: 'demo-svc-tint', name: 'Window Tint', durationMinutes: 150, priceCents: 25000 }],
+        createdAt: daysAgo(now, 1),
+        updatedAt: daysAgo(now, 1),
+      },
+      {
+        id: 'demo-appt-3',
+        shopId: SHOP_ID,
+        bayId: 'demo-bay-1',
+        customerId: 'demo-cust-silverado-dana',
+        source: 'staff',
+        status: 'confirmed',
+        startsAt: nextWeek1100.toISOString(),
+        endsAt: apptEnd(nextWeek1100, 90),
+        bodyStyle: null,
+        notes: 'Customer requested morning slot.',
+        publicToken: 'demo-appt-token-3',
+        sourceQuoteId: null,
+        depositAmountCents: null,
+        depositPaidAt: null,
+        reminderSentAt: null,
+        cancelledAt: null,
+        services: [{ serviceId: 'demo-svc-tint', name: 'Window Tint', durationMinutes: 90, priceCents: 25000 }],
+        createdAt: daysAgo(now, 3),
+        updatedAt: daysAgo(now, 3),
+      },
+    ]
+  })()
+
   return {
     shop, employees, customers, quotes, options, events, responses, emails, catalogItems, packageTemplates,
     stockMovements,
     invoices: demoInvoices,
     staffAccessCode: 'DEMO-2468',
     inventoryDevices,
+    services,
+    bays,
+    businessHours,
+    scheduleExceptions,
+    appointments,
     seedVersion: DEMO_SEED_VERSION,
   }
 }
