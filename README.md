@@ -90,6 +90,23 @@ provider.
 4. Enable the **Email (magic link)** auth provider. Add your app URL to the
    auth redirect allow-list.
 5. Put the project URL + anon key in `.env`.
+6. **Required — edit the "Magic Link" email template** (Authentication →
+   Email Templates → Magic Link, in the Supabase dashboard). Replace the
+   default body's link (`{{ .ConfirmationURL }}`) with:
+
+   ```
+   <a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=magiclink">Sign in</a>
+   ```
+
+   Both `/login` and `/signup` call `signInWithOtp`, so this one template
+   covers both — the app's own `/auth/confirm` page verifies the token only
+   after a real tap and then routes a new owner to `/onboarding` or an
+   existing one to `/app` on its own. Skipping this step is why a magic link
+   can work when clicked from a desktop email client but silently fail from a
+   phone: many mail apps and security scanners execute a linked page's JS (or
+   fetch the link outright) before a human taps it, which burns Supabase's
+   default single-use confirmation URL before the real click happens. See
+   `src/pages/AuthConfirmPage.tsx` for the full explanation.
 
 First sign-in walks the owner through `/onboarding`, which calls
 `create_shop_with_owner` to create the shop and owner membership atomically.

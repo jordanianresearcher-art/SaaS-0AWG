@@ -5,6 +5,7 @@ import { AppLayout } from './layouts/AppLayout'
 import LandingPage from './pages/LandingPage'
 import LoginPage from './pages/LoginPage'
 import SignupPage from './pages/SignupPage'
+import AuthConfirmPage from './pages/AuthConfirmPage'
 import DemoEntryPage from './pages/DemoEntryPage'
 import PublicQuotePage from './pages/PublicQuotePage'
 import OnboardingPage from './pages/OnboardingPage'
@@ -42,6 +43,7 @@ export default function App() {
       <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
+      <Route path="/auth/confirm" element={<AuthConfirmPage />} />
       <Route path="/demo" element={<DemoEntryPage />} />
       <Route path="/q/:publicToken" element={<PublicQuotePage />} />
       <Route path="/onboarding" element={<OnboardingPage />} />
