@@ -6,6 +6,7 @@ import type {
   EmailMessage,
   Employee,
   Invoice,
+  InventoryDevice,
   InvoiceItem,
   InvoicePaymentMethod,
   PackageTemplate,
@@ -44,6 +45,8 @@ import type {
   UpcLookupResult,
 } from './repository'
 import { dedupeCandidates, rankCandidates } from '../lib/productResolver'
+import { computeInvoiceTotals } from '../lib/invoicePricing'
+import { buildSkuBase, nextAvailableSku } from '../lib/sku'
 import { newId } from '../lib/ids'
 
 // Production repository. Row-level security scopes every query to shops the
@@ -73,6 +76,9 @@ function mapShop(r: Row): Shop {
     quoteExpirationDays: r.quote_expiration_days ?? 30,
     followUpScheduleDays: r.follow_up_schedule_days ?? [2, 3, 5],
     quoteDisclaimer: r.quote_disclaimer ?? '',
+    defaultLowStockThreshold: r.default_low_stock_threshold ?? 3,
+    lowStockAlertEmail: r.low_stock_alert_email ?? null,
+    hasStaffAccessCode: r.has_staff_access_code ?? false,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }
@@ -229,6 +235,16 @@ function mapCatalogItem(r: Row): CatalogItem {
     quantityOnHand: r.quantity_on_hand ?? 0,
     upcIsGenerated: r.upc_is_generated ?? false,
     labelPrintedAt: r.label_printed_at ?? null,
+    lowStockThreshold: r.low_stock_threshold ?? null,
+    lastCountedAt: r.last_counted_at ?? null,
+    lowStockAlerted: r.low_stock_alerted ?? false,
+    lowStockAlertedAt: r.low_stock_alerted_at ?? null,
+    shopifyProductId: r.shopify_product_id ?? null,
+    shopifyVariantId: r.shopify_variant_id ?? null,
+    shopifySyncedAt: r.shopify_synced_at ?? null,
+    shopifySyncError: r.shopify_sync_error ?? null,
+    shopifyMatchedExisting: r.shopify_matched_existing ?? false,
+    shopifyStatus: r.shopify_status ?? 'active',
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }
@@ -262,6 +278,8 @@ function mapInvoiceItem(r: Row): InvoiceItem {
     quantity: r.quantity,
     unitPriceCents: r.unit_price_cents,
     category: r.category ?? null,
+    discountPercent: r.discount_percent ?? 0,
+    taxable: r.taxable ?? true,
     position: r.position,
   }
 }
@@ -281,6 +299,16 @@ function mapInvoice(r: Row): Invoice {
     subtotalCents: r.subtotal_cents,
     totalCents: r.total_cents,
     notes: r.notes ?? null,
+    taxRate: r.tax_rate ?? 0,
+    taxCents: r.tax_cents ?? 0,
+    discountCents: r.discount_cents ?? 0,
+    customerName: r.customer_name ?? null,
+    customerPhone: r.customer_phone ?? null,
+    customerEmail: r.customer_email ?? null,
+    customerAddress: r.customer_address ?? null,
+    vehicleYear: r.vehicle_year ?? null,
+    vehicleMake: r.vehicle_make ?? null,
+    vehicleModel: r.vehicle_model ?? null,
     createdBy: r.created_by ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -323,6 +351,8 @@ function catalogItemRow(input: NewCatalogItemInput): Row {
   if (input.externalSourceProductId !== undefined) row.external_source_product_id = input.externalSourceProductId
   if (input.identificationConfidence !== undefined) row.identification_confidence = input.identificationConfidence
   if (input.approvalStatus !== undefined) row.approval_status = input.approvalStatus
+  if (input.lowStockThreshold !== undefined) row.low_stock_threshold = input.lowStockThreshold
+  if (input.upcIsGenerated !== undefined) row.upc_is_generated = input.upcIsGenerated
   // A price sourced from the web is only ever "just checked" when the
   // caller actually supplied a source — never stamped on a plain manual edit.
   if (input.priceSourceUrl !== undefined || input.priceSourceName !== undefined) {
@@ -414,6 +444,8 @@ export class SupabaseRepository implements DataRepository {
     if (patch.quoteExpirationDays !== undefined) row.quote_expiration_days = patch.quoteExpirationDays
     if (patch.followUpScheduleDays !== undefined) row.follow_up_schedule_days = patch.followUpScheduleDays
     if (patch.quoteDisclaimer !== undefined) row.quote_disclaimer = patch.quoteDisclaimer
+    if (patch.defaultLowStockThreshold !== undefined) row.default_low_stock_threshold = patch.defaultLowStockThreshold
+    if (patch.lowStockAlertEmail !== undefined) row.low_stock_alert_email = patch.lowStockAlertEmail
     const { data, error } = await this.supabase
       .from('shops')
       .update(row)
@@ -538,6 +570,62 @@ export class SupabaseRepository implements DataRepository {
     return (data as Row[]).map(mapStockMovement)
   }
 
+  async markCounted(catalogItemId: string, newQuantity: number): Promise<{ catalogItem: CatalogItem; movement: StockMovement | null }> {
+    const { data: current, error: fetchError } = await this.supabase
+      .from('catalog_items')
+      .select('*')
+      .eq('id', catalogItemId)
+      .single()
+    if (fetchError) throw fetchError
+    const currentItem = mapCatalogItem(current as Row)
+
+    let movement: StockMovement | null = null
+    if (newQuantity !== currentItem.quantityOnHand) {
+      const result = await this.recordStockMovement({
+        catalogItemId,
+        movementType: 'adjustment',
+        quantityDelta: newQuantity - currentItem.quantityOnHand,
+        note: 'Spot count adjustment',
+      })
+      movement = result.movement
+    }
+
+    const { data, error } = await this.supabase
+      .from('catalog_items')
+      .update({ last_counted_at: new Date().toISOString() })
+      .eq('id', catalogItemId)
+      .select('*')
+      .single()
+    if (error) throw error
+    return { catalogItem: mapCatalogItem(data as Row), movement }
+  }
+
+  async uploadProductPhoto(base64Jpeg: string): Promise<string> {
+    const bytes = Uint8Array.from(atob(base64Jpeg), (c) => c.charCodeAt(0))
+    const path = `${this.shopId}/${newId()}.jpg`
+    const { error } = await this.supabase.storage
+      .from('shop-product-photos')
+      .upload(path, bytes, { contentType: 'image/jpeg' })
+    if (error) throw error
+    const { data } = this.supabase.storage.from('shop-product-photos').getPublicUrl(path)
+    return data.publicUrl
+  }
+
+  async generateSku(brand: string | null, model: string): Promise<string> {
+    const base = buildSkuBase(brand, model)
+    const [upcMatches, skuMatches] = await Promise.all([
+      this.supabase.from('catalog_items').select('upc').eq('shop_id', this.shopId).like('upc', `${base}%`),
+      this.supabase.from('catalog_items').select('sku').eq('shop_id', this.shopId).like('sku', `${base}%`),
+    ])
+    if (upcMatches.error) throw upcMatches.error
+    if (skuMatches.error) throw skuMatches.error
+    const taken = new Set<string>([
+      ...(upcMatches.data as Row[]).map((r) => r.upc as string),
+      ...(skuMatches.data as Row[]).map((r) => r.sku as string),
+    ])
+    return nextAvailableSku(base, taken)
+  }
+
   async findCatalogItemByCode(code: string): Promise<CatalogItem | null> {
     const trimmed = code.trim()
     if (!trimmed) return null
@@ -560,7 +648,7 @@ export class SupabaseRepository implements DataRepository {
     return skuResult.data ? mapCatalogItem(skuResult.data as Row) : null
   }
 
-  async lookupProductByUpc(code: string): Promise<UpcLookupResult> {
+  async lookupProductByUpc(code: string, options: { fast?: boolean; brandHint?: string | null } = {}): Promise<UpcLookupResult> {
     const item = await this.findCatalogItemByCode(code)
     if (item) return { source: 'catalog', catalogItem: item }
 
@@ -576,7 +664,7 @@ export class SupabaseRepository implements DataRepository {
     // hiccup) degrades to not_found, worse than which would be a hard
     // error mid-scan.
     try {
-      const result = await this.resolveProduct({ kind: 'barcode', code })
+      const result = await this.resolveProduct({ kind: 'barcode', code, fast: options.fast, brandHint: options.brandHint })
       const top = result.candidates[0]
       if (top && top.source === 'verified_web_source' && top.confidenceLevel === 'high') {
         return {
@@ -598,10 +686,10 @@ export class SupabaseRepository implements DataRepository {
     }
   }
 
-  async lookupProductSuggestions(query: string): Promise<ProductSuggestion[]> {
+  async lookupProductSuggestions(query: string, brandHint?: string | null): Promise<ProductSuggestion[]> {
     const trimmed = query.trim()
     if (trimmed.length < 2) return []
-    const result = await this.resolveProduct({ kind: 'text', query: trimmed })
+    const result = await this.resolveProduct({ kind: 'text', query: trimmed, brandHint })
     return result.candidates.map((c) => ({
       name: c.name,
       brand: c.brand,
@@ -678,7 +766,7 @@ export class SupabaseRepository implements DataRepository {
   }
 
   async createInvoice(input: NewInvoiceInput): Promise<Invoice> {
-    const subtotalCents = input.items.reduce((sum, item) => sum + item.unitPriceCents * item.quantity, 0)
+    const totals = computeInvoiceTotals(input.items, input.taxRate ?? 0, input.discountCents ?? 0)
     // invoice_number is assigned by the assign_invoice_number trigger
     // (migration 0011) — never set client-side.
     const { data: invoice, error: invoiceError } = await this.supabase
@@ -687,9 +775,19 @@ export class SupabaseRepository implements DataRepository {
         shop_id: this.shopId,
         customer_id: input.customerId ?? null,
         status: 'draft',
-        subtotal_cents: subtotalCents,
-        total_cents: subtotalCents,
+        subtotal_cents: totals.subtotalCents,
+        total_cents: totals.totalCents,
+        tax_rate: input.taxRate ?? 0,
+        tax_cents: totals.taxCents,
+        discount_cents: totals.discountCents,
         notes: input.notes ?? null,
+        customer_name: input.customerName ?? null,
+        customer_phone: input.customerPhone ?? null,
+        customer_email: input.customerEmail ?? null,
+        customer_address: input.customerAddress ?? null,
+        vehicle_year: input.vehicleYear ?? null,
+        vehicle_make: input.vehicleMake ?? null,
+        vehicle_model: input.vehicleModel ?? null,
       })
       .select('id')
       .single()
@@ -706,6 +804,8 @@ export class SupabaseRepository implements DataRepository {
           quantity: item.quantity,
           unit_price_cents: item.unitPriceCents,
           category: item.category ?? null,
+          discount_percent: item.discountPercent ?? 0,
+          taxable: item.taxable ?? true,
           position: i,
         })),
       )
@@ -1138,6 +1238,28 @@ export class SupabaseRepository implements DataRepository {
 
   async optOutPublicQuote(publicToken: string): Promise<void> {
     const { error } = await this.supabase.rpc('opt_out_public_quote_email', { p_public_token: publicToken })
+    if (error) throw error
+  }
+
+  async rotateStaffAccessCode(): Promise<string> {
+    const { data, error } = await this.supabase.rpc('rotate_staff_access_code', { p_shop_id: this.shopId })
+    if (error) throw error
+    return data as string
+  }
+
+  async listInventoryDevices(): Promise<InventoryDevice[]> {
+    const { data, error } = await this.supabase
+      .from('shop_memberships')
+      .select('id, device_name, created_at')
+      .eq('shop_id', this.shopId)
+      .eq('role', 'inventory')
+      .order('created_at', { ascending: false })
+    if (error) throw error
+    return (data as Row[]).map((r) => ({ id: r.id, deviceName: r.device_name ?? null, joinedAt: r.created_at }))
+  }
+
+  async revokeInventoryDevice(membershipId: string): Promise<void> {
+    const { error } = await this.supabase.rpc('revoke_inventory_device', { p_membership_id: membershipId })
     if (error) throw error
   }
 }

@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react'
 import type { Session } from '@supabase/supabase-js'
-import type { QuoteBundle, Shop } from '../types'
+import type { MembershipRole, QuoteBundle, Shop } from '../types'
 import type { DataRepository } from './repository'
 import type { AdminRepository } from './adminRepository'
 import { DemoRepository } from './demoRepository'
@@ -26,6 +26,15 @@ interface AppDataValue {
   /** Null until a mode is active (demo entered, or signed in with a shop). */
   repo: DataRepository | null
   shop: Shop | null
+  /**
+   * This user's role on the current shop. 'inventory' is a shared-device
+   * member (joined via /join with a shop access code, see migration
+   * 0017) — RLS already walls it off from quotes/customers/reporting at
+   * the database layer; this drives the matching UI restriction (nav,
+   * routing) so a wrong URL shows "not available" instead of an empty or
+   * broken screen. Demo mode is always 'owner' (full access).
+   */
+  role: MembershipRole | null
   bundles: QuoteBundle[]
   loading: boolean
   loadError: string | null
@@ -40,6 +49,8 @@ interface AppDataValue {
   refresh: () => Promise<void>
   signOut: () => Promise<void>
   completeOnboarding: (shopId: string) => void
+  /** Called by /join right after join_shop_with_access_code succeeds — mirrors completeOnboarding but for the low-privilege shared-device role. */
+  completeJoin: (shopId: string) => void
 }
 
 const AppDataContext = createContext<AppDataValue | null>(null)
@@ -51,6 +62,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [authReady, setAuthReady] = useState(!supabaseConfigured)
   const [shopId, setShopId] = useState<string | null>(null)
+  const [role, setRole] = useState<MembershipRole | null>(null)
   const [needsOnboarding, setNeedsOnboarding] = useState(false)
   const [isPlatformAdmin, setIsPlatformAdmin] = useState(false)
   const [shop, setShop] = useState<Shop | null>(null)
@@ -78,19 +90,21 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!supabaseConfigured || !session) {
       setShopId(null)
+      setRole(null)
       setNeedsOnboarding(false)
       return
     }
     let cancelled = false
     getSupabase()
       .from('shop_memberships')
-      .select('shop_id')
+      .select('shop_id, role')
       .limit(1)
       .maybeSingle()
       .then(({ data }) => {
         if (cancelled) return
         if (data?.shop_id) {
           setShopId(data.shop_id)
+          setRole(data.role as MembershipRole)
           setNeedsOnboarding(false)
           setMode('production')
         } else {
@@ -181,10 +195,19 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     if (supabaseConfigured) await getSupabase().auth.signOut()
     setMode((m) => (m === 'production' ? null : m))
     setShopId(null)
+    setRole(null)
   }, [])
 
   const completeOnboarding = useCallback((newShopId: string) => {
     setShopId(newShopId)
+    setRole('owner')
+    setNeedsOnboarding(false)
+    setMode('production')
+  }, [])
+
+  const completeJoin = useCallback((newShopId: string) => {
+    setShopId(newShopId)
+    setRole('inventory')
     setNeedsOnboarding(false)
     setMode('production')
   }, [])
@@ -193,6 +216,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     mode,
     repo,
     shop,
+    // Demo mode has no real membership row — always full access.
+    role: mode === 'demo' ? 'owner' : role,
     bundles,
     loading,
     loadError,
@@ -207,6 +232,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     refresh,
     signOut,
     completeOnboarding,
+    completeJoin,
   }
 
   return <AppDataContext.Provider value={value}>{children}</AppDataContext.Provider>

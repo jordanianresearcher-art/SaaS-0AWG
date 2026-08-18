@@ -2,7 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { CreditCard, Download, LayoutGrid, Package, Pencil, Plus, QrCode, RotateCcw, Trash2 } from 'lucide-react'
+import { CreditCard, Download, KeyRound, LayoutGrid, Package, Pencil, Plus, QrCode, RotateCcw, Smartphone, Trash2 } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
 import { Button, Card, EmptyState, Field, Input, LoadingBlock, Modal, Select, Textarea } from '../../components/ui'
@@ -10,7 +10,7 @@ import CatalogOrganizer from '../../components/CatalogOrganizer'
 import { ProductSuggestField } from '../../components/ProductSuggestField'
 import { LogoUploadField } from '../../components/LogoUploadField'
 import { errorMessage } from '../../lib/errors'
-import { formatCurrency, parseDollarsToCents } from '../../lib/format'
+import { formatCurrency, formatDateTime, parseDollarsToCents } from '../../lib/format'
 import {
   COMMON_FINANCING_PROVIDERS,
   MAX_FINANCING_OFFERS,
@@ -19,7 +19,7 @@ import {
   parseScannedFinancingCode,
 } from '../../lib/financing'
 import { PRODUCT_CATEGORIES, PRODUCT_CATEGORY_INFO } from '../../lib/audioConfigs'
-import type { CatalogItem, FinancingOffer, ProductCategory } from '../../types'
+import type { CatalogItem, FinancingOffer, InventoryDevice, ProductCategory } from '../../types'
 import type { NewCatalogItemInput, ShopifyImportResult } from '../../data/repository'
 
 const schema = z.object({
@@ -171,6 +171,8 @@ export default function SettingsPage() {
       {mode === 'production' ? <ShopifyImportSection onImported={() => setCatalogReloadSignal((n) => n + 1)} /> : null}
 
       <CatalogSection reloadSignal={catalogReloadSignal} />
+
+      <SharedDeviceAccessSection />
 
       {mode === 'demo' ? (
         <Card className="space-y-3">
@@ -342,6 +344,116 @@ function FinancingSection() {
   )
 }
 
+// Owner/manager only, enforced server-side (rotate_staff_access_code /
+// revoke_inventory_device both check is_shop_admin — see migration 0017);
+// shown to every role here, same as the rest of this page, and any denial
+// surfaces as a plain toast rather than a UI-level gate.
+function SharedDeviceAccessSection() {
+  const repo = useRepo()
+  const { shop, refresh } = useAppData()
+  const toast = useToast()
+  const [devices, setDevices] = useState<InventoryDevice[] | null>(null)
+  const [rotating, setRotating] = useState(false)
+  const [newCode, setNewCode] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setDevices(await repo.listInventoryDevices())
+  }, [repo])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  async function handleRotate() {
+    if (
+      shop?.hasStaffAccessCode &&
+      !window.confirm('Generate a new code? Every phone/tablet/PC currently signed in with the old code will be signed out.')
+    ) {
+      return
+    }
+    setRotating(true)
+    try {
+      const code = await repo.rotateStaffAccessCode()
+      setNewCode(code)
+      await Promise.all([refresh(), load()])
+    } catch (err) {
+      console.error('rotateStaffAccessCode failed', err)
+      const detail = errorMessage(err)
+      toast('error', detail ? `Could not generate a code: ${detail}` : 'Could not generate a code. Please try again.')
+    } finally {
+      setRotating(false)
+    }
+  }
+
+  async function handleRevoke(device: InventoryDevice) {
+    if (!window.confirm(`Sign out "${device.deviceName || 'this device'}"?`)) return
+    try {
+      await repo.revokeInventoryDevice(device.id)
+      setDevices((prev) => (prev ?? []).filter((d) => d.id !== device.id))
+      toast('success', 'Device signed out.')
+    } catch (err) {
+      console.error('revokeInventoryDevice failed', err)
+      const detail = errorMessage(err)
+      toast('error', detail ? `Could not sign out that device: ${detail}` : 'Could not sign out that device. Please try again.')
+    }
+  }
+
+  return (
+    <Card className="space-y-4">
+      <div>
+        <h2 className="text-xl font-bold text-ink">Shared device access</h2>
+        <p className="text-base text-zinc-600">
+          Give any phone, tablet, or PC access to Scan and Inventory only — no account, no email — by sharing this
+          code. It can&apos;t see quotes, customers, or reports.
+        </p>
+      </div>
+
+      {newCode ? (
+        <div className="rounded-xl border border-green-300 bg-green-50 p-4">
+          <p className="text-sm font-semibold text-green-900">
+            New code — write it down now, it won&apos;t be shown again:
+          </p>
+          <p className="mt-1 font-mono text-2xl font-black tracking-widest text-green-900">{newCode}</p>
+          <p className="mt-2 text-sm text-green-800">
+            On the shared device, go to <span className="font-mono">/join</span> and enter this code.
+          </p>
+        </div>
+      ) : null}
+
+      <Button variant="secondary" onClick={handleRotate} disabled={rotating}>
+        <KeyRound className="h-5 w-5" aria-hidden="true" />
+        {rotating ? 'Working…' : shop?.hasStaffAccessCode ? 'Generate a new code' : 'Generate a code'}
+      </Button>
+
+      <div>
+        <h3 className="text-base font-bold text-ink">Signed-in devices</h3>
+        {devices === null ? (
+          <p className="mt-2 text-base text-zinc-600">Loading…</p>
+        ) : devices.length === 0 ? (
+          <p className="mt-2 text-base text-zinc-600">No devices have joined yet.</p>
+        ) : (
+          <ul className="mt-2 divide-y divide-zinc-100">
+            {devices.map((d) => (
+              <li key={d.id} className="flex items-center justify-between gap-3 py-2.5">
+                <div className="flex items-center gap-2">
+                  <Smartphone className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden="true" />
+                  <div>
+                    <p className="text-base font-semibold text-ink">{d.deviceName || 'Unnamed device'}</p>
+                    <p className="text-sm text-zinc-500">Joined {formatDateTime(d.joinedAt)}</p>
+                  </div>
+                </div>
+                <Button variant="danger" onClick={() => handleRevoke(d)} className="min-h-9 px-3 text-sm">
+                  Sign out
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Card>
+  )
+}
+
 function FinancingOfferForm({
   offer,
   saving,
@@ -447,7 +559,6 @@ function FinancingOfferForm({
     </div>
   )
 }
-
 type ImportTotals = Pick<ShopifyImportResult, 'created' | 'updated' | 'unchanged' | 'skipped' | 'failed'>
 
 const EMPTY_TOTALS: ImportTotals = { created: 0, updated: 0, unchanged: 0, skipped: 0, failed: 0 }

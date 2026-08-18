@@ -759,6 +759,21 @@ Deno.serve(async (req: Request) => {
     return json(200, { ok: true, candidates, cached: false })
   }
 
+  // Optional brand context — the shop's "brand lock" while receiving a
+  // shipment (see src/lib/productSearch.ts). This is the single biggest
+  // lever on result quality for a brand whose barcodes were never
+  // published: searching a bare unpublished number can never match
+  // anything, but "Nemesis Audio NA-12F" usually finds the manufacturer's
+  // own page. Part of the cache key, since the same query under a
+  // different brand is a genuinely different question.
+  const brandHint = typeof body?.brandHint === 'string' ? body.brandHint.trim().slice(0, 60) : ''
+
+  // Fast mode: cache + UPCitemdb only, no AI/web round-trip. The scan UI
+  // uses this so an unknown barcode comes back in ~a second and staff can
+  // start typing what it is, instead of waiting out a web search that, for
+  // an unpublished code, was never going to find anything.
+  const fast = body?.fast === true
+
   let normalizedKey: string
   let code: string | null = null
   let query: string | null = null
@@ -772,6 +787,7 @@ Deno.serve(async (req: Request) => {
     if (!query || query.length < 2) return fail(400, 'Type at least 2 characters to search.')
     normalizedKey = normalizeQuery(query)
   }
+  if (brandHint) normalizedKey = `${normalizeQuery(brandHint)}|${normalizedKey}`
 
   // Membership check and the cache read are independent queries (the
   // cache read doesn't depend on the membership result, only on
@@ -802,18 +818,31 @@ Deno.serve(async (req: Request) => {
   let candidates: Candidate[] = []
 
   if (kind === 'barcode') {
-    const upcHit = await resolveViaUpcItemDb(normalizedKey)
+    // The bare code, without any brand prefix the cache key may carry.
+    const rawCode = normalizeBarcode(code ?? '')
+    const upcHit = await resolveViaUpcItemDb(rawCode)
     if (upcHit) {
       candidates = [upcHit]
+    } else if (fast) {
+      // Deliberately stop here. A code absent from UPCitemdb is usually a
+      // manufacturer that never published its barcodes, and no web search
+      // can tie that number to a product -- so the honest fast answer is
+      // "not found", handed back in about a second so staff can identify
+      // it by model instead. The caller may follow up with a non-fast call
+      // in the background.
+      candidates = []
     } else {
       candidates = await resolveViaAi(
-        `A car-audio shop employee scanned a barcode/UPC that isn't in a standard barcode database: "${normalizedKey}". ` +
+        `A car-audio shop employee scanned a barcode/UPC that isn't in a standard barcode database: "${rawCode}". ` +
+          (brandHint
+            ? `The shop says this is a "${brandHint}" product, so search that manufacturer's own catalog and its retailers first. `
+            : '') +
           'Search the web (barcode lookup sites, manufacturer sites, retailer listings) to try to identify what car-audio or ' +
           'related shop product this barcode belongs to. Only set barcode_confirmed to true if a source explicitly ties this exact ' +
           "code to the product -- otherwise leave it false/null and lower your confidence, since you're inferring from a general " +
           'product search rather than a direct barcode match. Return up to 3 candidates, most-likely first, or zero if nothing ' +
           'plausible turns up -- never invent a product.',
-        normalizedKey,
+        rawCode,
       )
     }
   } else {
@@ -823,7 +852,15 @@ Deno.serve(async (req: Request) => {
     const textQuery = query ?? ''
     candidates = await resolveViaAi(
       `A car-audio shop employee is adding a new product to their catalog and has typed: "${textQuery}" ` +
-        '(a partial or full SKU, model number, or product name). Use web search to find up to 5 real, ' +
+        '(a partial or full SKU, model number, or product name). ' +
+        (brandHint
+          ? `They are currently receiving a shipment from "${brandHint}", so treat what they typed as a ${brandHint} ` +
+            `model number or SKU. Search ${brandHint}'s own website and its authorized dealers/retailers first, and ` +
+            `strongly prefer real ${brandHint} products over similarly-named products from other manufacturers. ` +
+            'Smaller car-audio manufacturers often publish full specs on their own site even when their barcodes ' +
+            'appear in no barcode database, so the manufacturer page is usually the best source here. '
+          : '') +
+        'Use web search to find up to 5 real, ' +
         'specific car-audio products (amplifiers, subwoofers, speakers, head units, wiring, enclosures, ' +
         'radios, DSPs, etc) that this could plausibly be, ranked most-likely-match first. Only include ' +
         "products you're reasonably confident are real -- return fewer than 5 results (even zero) rather " +
@@ -835,6 +872,16 @@ Deno.serve(async (req: Request) => {
   // 3. Cache the result (even an empty one, so an obscure/unresolvable
   // code or query doesn't re-trigger an AI/web call on every retry within
   // the cache window).
+  //
+  // Exception: an empty *fast* result is not an answer, it's a deliberately
+  // half-finished lookup (UPCitemdb missed and we skipped the AI step).
+  // Caching it would mean the follow-up non-fast call reads the empty entry
+  // straight back and never runs the search at all — so leave the cache
+  // untouched and let the real lookup decide what gets stored.
+  if (fast && candidates.length === 0) {
+    return json(200, { ok: true, candidates, cached: false, fast: true })
+  }
+
   const days = kind === 'barcode' ? BARCODE_CACHE_DAYS : TEXT_CACHE_DAYS
   const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
   await admin

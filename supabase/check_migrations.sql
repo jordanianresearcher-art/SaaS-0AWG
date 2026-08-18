@@ -81,12 +81,30 @@ from (
              where table_schema = 'public' and table_name = 'quotes'
                and column_name = 'show_full_addon_total')),
 
+    -- Checks for the *corrected* definitions specifically (search_path
+    -- includes `extensions`, where Supabase installs pgcrypto) — an older,
+    -- broken 0017 would read as unapplied here even if some earlier attempt
+    -- got partway through, which is the honest answer: it needs re-running.
+    ('0017 inventory merge',
+     to_regclass('public.join_attempts') is not null
+       and exists (select 1 from pg_proc p
+                   join pg_namespace n on n.oid = p.pronamespace
+                   where n.nspname = 'public'
+                     and p.proname = 'join_shop_with_access_code'
+                     and pg_get_functiondef(p.oid) like '%extensions%')),
+
     ('0018 shop logo storage',
      exists (select 1 from storage.buckets where id = 'shop-logos')),
 
     ('0019 shop financing offers',
      exists (select 1 from information_schema.columns
              where table_schema = 'public' and table_name = 'shops'
-               and column_name = 'financing_offers'))
+               and column_name = 'financing_offers')),
+
+    ('0020 import legacy inventory',
+     exists (select 1 from pg_proc p
+             join pg_namespace n on n.oid = p.pronamespace
+             where n.nspname = 'public'
+               and p.proname = 'import_legacy_inventory'))
 ) as t(migration, applied)
 order by migration;

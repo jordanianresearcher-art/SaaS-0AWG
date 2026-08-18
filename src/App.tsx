@@ -1,16 +1,21 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAppData } from './data/AppDataContext'
-import { LoadingBlock } from './components/ui'
+import { LoadingBlock, EmptyState } from './components/ui'
 import { AppLayout } from './layouts/AppLayout'
 import LandingPage from './pages/LandingPage'
 import LoginPage from './pages/LoginPage'
 import SignupPage from './pages/SignupPage'
 import AuthConfirmPage from './pages/AuthConfirmPage'
 import DemoEntryPage from './pages/DemoEntryPage'
+import JoinPage from './pages/JoinPage'
 import PublicQuotePage from './pages/PublicQuotePage'
 import OnboardingPage from './pages/OnboardingPage'
 import DashboardPage from './pages/app/DashboardPage'
 import ScanWorkspacePage from './pages/app/ScanWorkspacePage'
+import InventoryPage from './pages/app/InventoryPage'
+import InventoryDetailPage from './pages/app/InventoryDetailPage'
+import NewInventoryItemPage from './pages/app/NewInventoryItemPage'
+import InventoryCheckPage from './pages/app/InventoryCheckPage'
 import QuotesPage from './pages/app/QuotesPage'
 import NewQuotePage from './pages/app/NewQuotePage'
 import QuoteDetailPage from './pages/app/QuoteDetailPage'
@@ -29,6 +34,28 @@ function RequireShop({ children }: { children: React.ReactNode }) {
   return <Navigate to="/login" replace />
 }
 
+// Quotes, follow-ups, reports, and settings carry customer/revenue data —
+// off limits to a shared 'inventory' device (see migration 0017; RLS is
+// the real enforcement, this is just so a wrong URL reads as "not
+// available" instead of an empty/broken screen).
+function RequireFullAccess({ children }: { children: React.ReactNode }) {
+  const { role } = useAppData()
+  if (role === 'inventory') {
+    return (
+      <EmptyState
+        title="Not available on this device"
+        message="This device is signed in for inventory only. Ask a shop owner or manager to sign in with their account for this page."
+      />
+    )
+  }
+  return <>{children}</>
+}
+
+function DashboardOrInventory() {
+  const { role } = useAppData()
+  return role === 'inventory' ? <Navigate to="/app/inventory" replace /> : <DashboardPage />
+}
+
 function RequirePlatformAdmin({ children }: { children: React.ReactNode }) {
   const { authReady, session, isPlatformAdmin } = useAppData()
   if (!authReady) return <LoadingBlock label="Checking your session…" />
@@ -45,6 +72,7 @@ export default function App() {
       <Route path="/signup" element={<SignupPage />} />
       <Route path="/auth/confirm" element={<AuthConfirmPage />} />
       <Route path="/demo" element={<DemoEntryPage />} />
+      <Route path="/join" element={<JoinPage />} />
       <Route path="/q/:publicToken" element={<PublicQuotePage />} />
       <Route path="/onboarding" element={<OnboardingPage />} />
       <Route
@@ -55,14 +83,60 @@ export default function App() {
           </RequireShop>
         }
       >
-        <Route index element={<DashboardPage />} />
+        <Route index element={<DashboardOrInventory />} />
         <Route path="scan" element={<ScanWorkspacePage />} />
-        <Route path="quotes" element={<QuotesPage />} />
-        <Route path="quotes/new" element={<NewQuotePage />} />
-        <Route path="quotes/:quoteId" element={<QuoteDetailPage />} />
-        <Route path="follow-ups" element={<FollowUpsPage />} />
-        <Route path="reports" element={<ReportsPage />} />
-        <Route path="settings" element={<SettingsPage />} />
+        <Route path="inventory" element={<InventoryPage />} />
+        <Route path="inventory/new" element={<NewInventoryItemPage />} />
+        <Route path="inventory/check" element={<InventoryCheckPage />} />
+        <Route path="inventory/:itemId" element={<InventoryDetailPage />} />
+        <Route
+          path="quotes"
+          element={
+            <RequireFullAccess>
+              <QuotesPage />
+            </RequireFullAccess>
+          }
+        />
+        <Route
+          path="quotes/new"
+          element={
+            <RequireFullAccess>
+              <NewQuotePage />
+            </RequireFullAccess>
+          }
+        />
+        <Route
+          path="quotes/:quoteId"
+          element={
+            <RequireFullAccess>
+              <QuoteDetailPage />
+            </RequireFullAccess>
+          }
+        />
+        <Route
+          path="follow-ups"
+          element={
+            <RequireFullAccess>
+              <FollowUpsPage />
+            </RequireFullAccess>
+          }
+        />
+        <Route
+          path="reports"
+          element={
+            <RequireFullAccess>
+              <ReportsPage />
+            </RequireFullAccess>
+          }
+        />
+        <Route
+          path="settings"
+          element={
+            <RequireFullAccess>
+              <SettingsPage />
+            </RequireFullAccess>
+          }
+        />
       </Route>
       <Route
         path="/admin"

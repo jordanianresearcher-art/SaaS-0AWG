@@ -1,19 +1,68 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { subDays } from 'date-fns'
 import { Plus, ArrowRight } from 'lucide-react'
-import { useAppData } from '../../data/AppDataContext'
+import { useAppData, useRepo } from '../../data/AppDataContext'
 import { Card, Badge, EmptyState, LinkButton, LoadingBlock } from '../../components/ui'
 import { activeQuoteValueCents, computeMetrics, statusFunnel } from '../../lib/metrics'
 import { formatCurrency, customerDisplayName, formatVehicle, formatDateTime } from '../../lib/format'
 import { STATUS_CONFIG, RESPONSE_CONFIG } from '../../lib/status'
 import { followUpBucket } from '../../lib/followUp'
-import type { QuoteBundle } from '../../types'
+import { computeInventorySummary } from '../../lib/inventory'
+import type { CatalogItem, QuoteBundle } from '../../types'
 
 function Stat({ label, value, accent = false }: { label: string; value: string; accent?: boolean }) {
   return (
     <Card className="flex flex-col gap-1">
       <span className="text-sm font-semibold tracking-wide text-zinc-500 uppercase">{label}</span>
       <span className={`text-2xl font-black ${accent ? 'text-green-700' : 'text-ink'}`}>{value}</span>
+    </Card>
+  )
+}
+
+function InventoryCard() {
+  const repo = useRepo()
+  const { shop } = useAppData()
+  const [items, setItems] = useState<CatalogItem[] | null>(null)
+
+  useEffect(() => {
+    void repo.listCatalogItems().then(setItems)
+  }, [repo])
+
+  const summary = computeInventorySummary(items ?? [], shop?.defaultLowStockThreshold ?? 3)
+
+  return (
+    <Card>
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-bold text-ink">Inventory</h2>
+        <Link to="/app/inventory" className="flex items-center gap-1 text-base font-semibold text-brand">
+          All inventory <ArrowRight className="h-4 w-4" aria-hidden="true" />
+        </Link>
+      </div>
+      {items === null ? (
+        <p className="mt-4 text-base text-zinc-600">Loading…</p>
+      ) : items.length === 0 ? (
+        <p className="mt-4 text-base text-zinc-600">Scan or add your first product to start tracking stock.</p>
+      ) : (
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div>
+            <p className="text-sm text-zinc-500">Products</p>
+            <p className="text-xl font-bold text-ink">{summary.totalSkus}</p>
+          </div>
+          <div>
+            <p className="text-sm text-zinc-500">Units on hand</p>
+            <p className="text-xl font-bold text-ink">{summary.totalUnits}</p>
+          </div>
+          <div>
+            <p className="text-sm text-zinc-500">Value</p>
+            <p className="text-xl font-bold text-ink">{formatCurrency(summary.totalValueCents)}</p>
+          </div>
+          <div>
+            <p className="text-sm text-zinc-500">Low stock</p>
+            <p className={`text-xl font-bold ${summary.lowStockCount > 0 ? 'text-amber-700' : 'text-ink'}`}>{summary.lowStockCount}</p>
+          </div>
+        </div>
+      )}
     </Card>
   )
 }
@@ -111,6 +160,8 @@ export default function DashboardPage() {
           )}
         </Card>
       </div>
+
+      <InventoryCard />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>

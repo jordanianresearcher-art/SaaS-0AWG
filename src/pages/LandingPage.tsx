@@ -42,6 +42,9 @@ export default function LandingPage() {
         <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-4">
           <Logo className="text-2xl" />
           <div className="flex items-center gap-1">
+            <Link to="/join" className="min-h-11 rounded-xl px-4 py-2.5 text-sm font-semibold text-zinc-500 hover:bg-zinc-100">
+              Join with a shop code
+            </Link>
             <Link to="/login" className="min-h-11 rounded-xl px-4 py-2.5 text-base font-semibold text-charcoal hover:bg-zinc-100">
               Shop Login
             </Link>
