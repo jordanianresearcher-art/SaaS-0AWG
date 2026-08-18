@@ -1018,10 +1018,83 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
   }
 
   const appointments: Appointment[] = (() => {
+    // The calendar opens on today, so today has to look like a real working
+    // day — a prospect who taps Calendar during a demo and sees nothing has
+    // just watched the feature fail. Two jobs in progress now, one already
+    // finished this morning, then the days ahead.
+    const today0900 = apptStart(0, 9)
+    const today1300 = apptStart(0, 13)
+    const today1600 = apptStart(0, 16)
     const tomorrow930 = apptStart(1, 9)
     const tomorrow1400 = apptStart(1, 14)
     const nextWeek1100 = apptStart(5, 11)
     return [
+      {
+        id: 'demo-appt-today-1',
+        shopId: SHOP_ID,
+        bayId: 'demo-bay-1',
+        customerId: 'demo-cust-tahoe-gloria',
+        ...apptCustomer('demo-cust-tahoe-gloria'),
+        source: 'staff',
+        status: 'completed',
+        startsAt: today0900.toISOString(),
+        endsAt: apptEnd(today0900, 150),
+        bodyStyle: 'suv_6_window',
+        notes: null,
+        publicToken: 'demo-appt-token-today-1',
+        sourceQuoteId: null,
+        depositAmountCents: 2000,
+        depositPaidAt: daysAgo(now, 1),
+        reminderSentAt: daysAgo(now, 1),
+        cancelledAt: null,
+        services: [{ serviceId: 'demo-svc-tint', name: 'Window Tint', durationMinutes: 150, priceCents: 25000 }],
+        createdAt: daysAgo(now, 4),
+        updatedAt: daysAgo(now, 4),
+      },
+      {
+        id: 'demo-appt-today-2',
+        shopId: SHOP_ID,
+        bayId: 'demo-bay-2',
+        customerId: 'demo-cust-f150-marcus',
+        ...apptCustomer('demo-cust-f150-marcus'),
+        source: 'from_quote',
+        status: 'confirmed',
+        startsAt: today1300.toISOString(),
+        endsAt: apptEnd(today1300, 180),
+        bodyStyle: null,
+        notes: 'Keeping the rear seat storage — see quote notes.',
+        publicToken: 'demo-appt-token-today-2',
+        sourceQuoteId: 'demo-quote-f150-marcus',
+        depositAmountCents: 2000,
+        depositPaidAt: daysAgo(now, 2),
+        reminderSentAt: daysAgo(now, 1),
+        cancelledAt: null,
+        services: [{ serviceId: 'demo-svc-audio', name: 'Car Audio Install', durationMinutes: 180, priceCents: 15000 }],
+        createdAt: daysAgo(now, 6),
+        updatedAt: daysAgo(now, 2),
+      },
+      {
+        id: 'demo-appt-today-3',
+        shopId: SHOP_ID,
+        bayId: 'demo-bay-1',
+        customerId: 'demo-cust-silverado-dana',
+        ...apptCustomer('demo-cust-silverado-dana'),
+        source: 'self_serve',
+        status: 'awaiting_deposit',
+        startsAt: today1600.toISOString(),
+        endsAt: apptEnd(today1600, 90),
+        bodyStyle: 'truck_crew_cab',
+        notes: null,
+        publicToken: 'demo-appt-token-today-3',
+        sourceQuoteId: null,
+        depositAmountCents: 2000,
+        depositPaidAt: null,
+        reminderSentAt: null,
+        cancelledAt: null,
+        services: [{ serviceId: 'demo-svc-tint', name: 'Window Tint', durationMinutes: 90, priceCents: 18000 }],
+        createdAt: daysAgo(now, 1),
+        updatedAt: daysAgo(now, 1),
+      },
       {
         id: 'demo-appt-1',
         shopId: SHOP_ID,
