@@ -1,5 +1,7 @@
 // Supabase Edge Function: send-booking-email
-// Fire-and-forget booking confirmation, invoked right after book_appointment
+// Customer booking confirmation and 24h reminder, plus a plain-text heads-up
+// to the shop when a booking arrives that staff did not make themselves.
+// Fire-and-forget, invoked right after book_appointment
 // succeeds (both the public self-serve wizard and staff's "Book & send" on
 // the calendar) — same trust model as notify-shop-response: the customer's
 // own confirmation on-screen never depends on or waits for this, and no
@@ -162,6 +164,42 @@ Deno.serve(async (req: Request) => {
   } catch (err) {
     console.error('send-booking-email: send failed', err)
     return noop('send threw')
+  }
+
+  // Tell the shop, but only about a booking they didn't just make themselves.
+  // A customer can book at midnight from the public page; without this the
+  // first the shop hears of it is whenever someone next opens the calendar.
+  // Staff bookings are excluded — the person who typed it in does not need an
+  // email about it. Reminders are excluded too; nothing new happened.
+  const shopInbox = shop.reply_to_email || shop.email
+  if (kind === 'confirmation' && appt.source !== 'staff' && shopInbox) {
+    const who = [customer.first_name, customer.last_name].filter(Boolean).join(' ') || 'A customer'
+    const depositNote = needsDeposit ? ' — still awaiting deposit' : ''
+    const staffText = [
+      `${who} booked ${services} on ${dateLabel} at ${timeLabel}${depositNote}.`,
+      customer.phone ? `Phone: ${customer.phone}` : null,
+      customer.email ? `Email: ${customer.email}` : null,
+      '',
+      `Open it: ${manageUrl}`,
+    ]
+      .filter((line) => line !== null)
+      .join('\n')
+
+    try {
+      await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: emailFrom,
+          to: [shopInbox],
+          subject: `New booking — ${who}, ${dateLabel} ${timeLabel}${depositNote}`,
+          text: staffText,
+        }),
+      })
+    } catch (err) {
+      // Never fails the customer's confirmation, which already went out.
+      console.error('send-booking-email: shop notification failed', err)
+    }
   }
 
   return json(200, { ok: true, sent: true })
