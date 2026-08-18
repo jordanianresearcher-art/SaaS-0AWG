@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { format, subDays } from 'date-fns'
 import { Award, Download, Printer } from 'lucide-react'
-import { useAppData } from '../../data/AppDataContext'
+import { useAppData, useRepo } from '../../data/AppDataContext'
 import { Badge, Button, Card, LoadingBlock } from '../../components/ui'
 import { RecoveryScoreGauge } from '../../components/RecoveryScoreGauge'
 import { Confetti } from '../../components/Confetti'
-import { computeMetrics, computeMilestones, computeRecoveryScore, type RecoveryTier } from '../../lib/metrics'
+import { computeBookingMetrics, computeMetrics, computeMilestones, computeRecoveryScore, type RecoveryTier } from '../../lib/metrics'
 import { formatCurrency, formatDate } from '../../lib/format'
+import type { Appointment } from '../../types'
 
 type RangeChoice = '7' | '14' | 'custom'
 
@@ -16,6 +17,8 @@ const SEEN_MILESTONES_KEY = '0gauge-seen-milestones'
 
 export default function ReportsPage() {
   const { bundles, shop, mode, loading } = useAppData()
+  const repo = useRepo()
+  const [appointments, setAppointments] = useState<Appointment[]>([])
   const [range, setRange] = useState<RangeChoice>('14')
   const [customFrom, setCustomFrom] = useState(format(subDays(new Date(), 14), 'yyyy-MM-dd'))
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
@@ -32,6 +35,28 @@ export default function ReportsPage() {
   }, [range, customFrom, customTo])
 
   const metrics = useMemo(() => computeMetrics(bundles, from, to), [bundles, from, to])
+
+  // Appointments aren't part of the shared bundle load (the calendar fetches
+  // them per visible range), so this page pulls its own slice.
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const list = await repo.listAppointments(from.toISOString(), to.toISOString())
+        if (!cancelled) setAppointments(list)
+      } catch (err) {
+        // A report that shows quote numbers but no booking numbers is far
+        // better than a report that fails to render.
+        console.error('listAppointments for report failed', err)
+        if (!cancelled) setAppointments([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [repo, from, to])
+
+  const booking = useMemo(() => computeBookingMetrics(appointments, from, to), [appointments, from, to])
   const recoveryScore = useMemo(() => computeRecoveryScore(metrics), [metrics])
   const milestones = useMemo(() => computeMilestones(bundles), [bundles])
 
@@ -71,7 +96,17 @@ export default function ReportsPage() {
     { label: 'Customer responses', value: String(metrics.responses) },
     { label: 'Asked for a cheaper package', value: String(metrics.cheaperRequests) },
     { label: 'Asked about financing', value: String(metrics.financingRequests) },
-    { label: 'Appointments booked', value: String(metrics.appointments) },
+    { label: 'Follow-ups sent automatically', value: String(metrics.autoFollowUpsSent) },
+    { label: 'Appointments booked', value: String(booking.booked) },
+    { label: 'Reminders sent', value: String(booking.remindersSent) },
+    {
+      label: 'Showed up',
+      value: booking.showRate === null ? '—' : `${Math.round(booking.showRate * 100)}%`,
+    },
+    { label: 'No-shows', value: String(booking.noShows) },
+    ...(booking.depositsCollectedCents > 0
+      ? [{ label: 'Deposits collected', value: formatCurrency(booking.depositsCollectedCents) }]
+      : []),
     { label: 'Jobs won', value: String(metrics.wonJobs), highlight: true },
     { label: 'Recovered revenue', value: formatCurrency(metrics.recoveredRevenueCents), highlight: true },
   ]
@@ -205,8 +240,10 @@ export default function ReportsPage() {
         </table>
         <p className="mt-5 text-sm leading-relaxed text-zinc-500">
           Recovered revenue counts jobs marked won during the period, at the amount your team recorded.
-          Quote views count each time a customer opened their quote link. Email counts include only emails
-          your team pressed Send on{mode === 'demo' ? ' (demo emails in demo mode)' : ''}.
+          Quote views count each time a customer opened their quote link. "Showed up" is the share of
+          finished appointments that weren't no-shows — upcoming bookings aren't counted either way.
+          Email counts include both the emails your team sent and the follow-ups the app sent on its own
+          {mode === 'demo' ? ' (demo emails in demo mode)' : ''}.
         </p>
       </Card>
     </div>

@@ -1,42 +1,91 @@
-# 0Gauge Recovery
+# 0Gauge
 
-Quote-recovery software for independent car-audio shops. A shop employee creates a
-professional Good / Better / Insane quote, emails it to the customer, sees when the
-quote link is viewed, collects the customer's response, works a simple manual
-follow-up queue, and prints a 7/14-day pilot report showing recovered revenue.
+Shop software for independent car-audio and window-tint shops. Quote a customer,
+email it, see when they open it, follow up automatically, book the install, take
+a deposit, invoice at the counter, and keep the shelves straight — all from a
+phone.
 
 Built to be sold in person to family-owned shops: big buttons, plain language,
-phone-first layout, and nothing automated behind the owner's back — every email is
-sent by a person pressing **Send**.
+phone-first layout, scan-first data entry, and no required fields anywhere.
 
-## Current scope (Phase 1)
+The product's first real sale came from a customer tapping **"I need
+financing"** on a revived quote. That's the shape of the whole thing: make the
+next step one tap, and make the shop's own money come back.
 
-- Create quotes with 1–3 options (Good / Better / Insane or a single option)
-- Email quotes and manual follow-ups (5 templates) — **email only, no SMS**
-- Public quote page at an unguessable link, with customer response buttons
-- Quote-view tracking (first meaningful view per browser session)
-- Customer responses: book, financing, cheaper option, after payday, question, not interested
-- One-click "stop follow-up emails" opt-out, enforced server-side
-- Follow-up queue grouped by urgency with suggested next email
-- Dashboard: pipeline value, recovered revenue, views, responses, funnel
-- Printable 7-day / 14-day pilot report with CSV export
+## What it does today
+
+**Quotes and recovery**
+- One main package plus priced add-ons (the old Good/Better/Insane tiers were
+  removed — shops found three full alternatives hard to explain on the phone)
+- Drag-and-drop package builder with catalog search that understands plain
+  words ("subwoofer 12 inch", "epicenter", "amp")
+- Quote emails with product photos, one clear price, and the shop's financing
+  links; subject lines written per job type (audio vs tint) and never repeated
+  across the follow-up cadence
+- Public quote page at an unguessable link, with ranked one-tap responses
+- Quote-view tracking that structurally cannot be faked by staff previewing
+- **Automatic follow-up emails** that stop the moment a customer replies, books,
+  opts out, or the quote expires. The first email is always a human decision;
+  everything after it sends itself
+- **Tap-to-text**: prefilled `sms:` links so the owner texts from their own
+  phone, with the customer's name already written in. No SMS API, no A2P
+  registration
+- Financing offers per shop, captured by scanning the QR code on the provider's
+  counter card
+
+**Booking**
+- Staff calendar with one column per bay (capacity here is bays, not people)
+- Public self-booking page, and a "Book my install" CTA on any quote
+- Double-booking prevented in the database, not just the UI
+- Automatic 24-hour reminders — the no-show killer
+- Deposits: staff bookings hold the slot immediately, self-serve bookings hold
+  it once the deposit is paid
+
+**Inventory and the counter**
+- Scan-first item intake: barcode → free UPC database → AI + web search, with a
+  photo path for anything unlabeled
+- Consistent naming enforced structurally ("Brand Model — Descriptor"), applied
+  on write so manual entry, AI resolution, and Shopify import all converge
+- Generated codes and 4×6" label printing for products with no barcode
+- Shelf-walk stock counting; shared-device access by shop code, no accounts
+- Invoices with tax (added or included), discounts, and payment method
+  including financed sales
+
+**Reporting**
+- Printable pilot report — the instrument that converts a free pilot to paid.
+  Recovered revenue, show rate, no-shows, reminders and follow-ups sent
+- CSV export
+
+**Throughout**
 - Full demo mode with a seeded Dallas shop — runs with zero backend
 - Multi-tenant Supabase schema with RLS and sanitized public RPCs
-- Resend-backed Supabase Edge Function for real email delivery
+- Resend-backed Edge Functions for all email
 
-## In progress — selling catalog & packages
+## On automation
 
-0Gauge is evolving from quote recovery into a full visual selling system:
-universal car-audio configurations, an expanded product catalog, reusable
-package templates, a Shopify catalog import backend, and a phone/tablet
-drag-and-drop package builder (pick a vehicle + configuration, drag
-products into slots, price it, apply to a quote option) are built and
-tested. See [docs/CATALOG_AND_PACKAGES.md](docs/CATALOG_AND_PACKAGES.md)
-for the concepts and [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md)
-for exactly what's done, in progress, and deferred.
+This app used to promise that every message needed a person to press Send. That
+changed for follow-up emails only, because a four-touch cadence never survives a
+busy week by hand and that cadence is where the recovered revenue lives.
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for later phases (System Builder, package
-pages, build passport, marketplace — all intentionally not implemented).
+The current stance, and how to say it to a shop owner:
+
+> **Emails follow up automatically and stop the moment the customer answers or
+> opts out. Texts always come from you.**
+
+Sending is deliberately conservative: an allowlist of quote statuses, hard stops
+on any customer response, and no automated first contact ever. See
+`src/lib/autoFollowUp.ts`.
+
+## Docs
+
+- [docs/PILOT_PLAYBOOK.md](docs/PILOT_PLAYBOOK.md) — how to run and close a pilot
+- [docs/MVP_PLAN.md](docs/MVP_PLAN.md) — current build plan
+- [docs/CATALOG_AND_PACKAGES.md](docs/CATALOG_AND_PACKAGES.md) — catalog model
+- [docs/INVENTORY_AND_SCANNING.md](docs/INVENTORY_AND_SCANNING.md) — scanning
+- [docs/QUOTE_TRACKING.md](docs/QUOTE_TRACKING.md) — view tracking and why it's trustworthy
+- [docs/FINANCING_INTENT.md](docs/FINANCING_INTENT.md) — why financing is a first-class CTA
+- [docs/SECURITY.md](docs/SECURITY.md) — tenant isolation and roles
+- [docs/ROADMAP.md](docs/ROADMAP.md) — later phases
 
 ## Technology
 
@@ -160,13 +209,22 @@ npm run test       # vitest (add -- --run for CI mode)
 
 ## Testing
 
-79 tests cover currency parsing/formatting, quote totals, vehicle formatting,
-status transitions (advance-only, terminal protection), follow-up buckets and
-sequencing, email template rendering (including HTML escaping and PII exclusion),
-send eligibility (permission, opt-out, closed quotes), demo repository
-persistence, public-quote sanitization, and a full jsdom walkthrough of the
-public quote page (view tracking, response submission, duplicate blocking,
-opt-out).
+`npm test` runs the unit suite (500+ tests). Coverage focuses on the logic
+where a bug would be expensive or invisible:
+
+- **Money and scheduling** — currency parsing, quote totals, invoice tax and
+  discounts, availability slots (closed days, exceptions, buffers, multi-bay).
+- **Anything that emails a customer** — send eligibility (permission, opt-out,
+  closed quotes), the automatic follow-up decision rules and every hard stop,
+  template rendering including HTML escaping and PII exclusion.
+- **Data consistency** — brand/model canonicalization, catalog search
+  tokenization, Code 128 encoding and check digits.
+- **Both repositories** — demo persistence and public-quote sanitization, plus a
+  full jsdom walkthrough of the public quote page (view tracking, response
+  submission, duplicate blocking, opt-out).
+
+Playwright smoke scripts run against `vite preview` for the flows that only
+break in a real browser.
 
 ## Deploying the frontend (Cloudflare Pages)
 
@@ -185,11 +243,24 @@ opt-out).
 - Response values are validated against an allow-list server-side
 - The Resend key exists only in Edge Function secrets
 
-## Email-only, on purpose
+## No SMS API, on purpose
 
-All electronic delivery and follow-ups are email. Phone numbers are stored for
-normal shop records and click-to-call only. SMS is a postponed future decision
-(see roadmap) and is deliberately absent from the product and the codebase.
+All automated delivery is email. There is no SMS provider integration and no
+server ever sends a text.
+
+Texting still happens — it's just done by a person. Quote rows and appointments
+render `sms:` links with the message and the customer's name already written, so
+the owner taps once and sends from their own phone (`src/lib/sms.ts`).
+
+Two reasons, in order of weight. First, A2P 10DLC campaign registration is a
+weeks-long per-shop compliance process at *every* US provider, not a Twilio
+quirk — it would sit between a pilot shop and their first message. Second, a
+text from the number the customer already has in their contacts lands better
+than one from a shortcode.
+
+The tradeoff is honest: the app can never confirm a text was actually sent, so
+nothing is recorded when one of those links is tapped. Revisit only when a shop
+asks for genuinely *automated* texting and the revenue justifies the paperwork.
 
 ## Known limitations
 

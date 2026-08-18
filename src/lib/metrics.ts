@@ -1,4 +1,4 @@
-import type { QuoteBundle } from '../types'
+import type { Appointment, QuoteBundle } from '../types'
 import { quoteValueCents } from './format'
 
 // Metrics shared by the dashboard and the printable pilot reports.
@@ -9,6 +9,8 @@ export interface PilotMetrics {
   emailsSent: number
   quoteViews: number
   responses: number
+  /** Follow-ups the app sent on its own (see src/lib/autoFollowUp.ts) — the "what did this thing do for me while I worked" number. */
+  autoFollowUpsSent: number
   cheaperRequests: number
   financingRequests: number
   appointments: number
@@ -29,6 +31,7 @@ export function computeMetrics(bundles: QuoteBundle[], from: Date, to: Date): Pi
     emailsSent: 0,
     quoteViews: 0,
     responses: 0,
+    autoFollowUpsSent: 0,
     cheaperRequests: 0,
     financingRequests: 0,
     appointments: 0,
@@ -47,6 +50,8 @@ export function computeMetrics(bundles: QuoteBundle[], from: Date, to: Date): Pi
     for (const ev of b.events) {
       if (!within(ev.createdAt, from, to)) continue
       if (ev.eventType === 'quote_viewed') m.quoteViews += 1
+      // send-quote-email stamps metadata.automatic on every system send.
+      if (ev.eventType === 'email_sent' && ev.metadata?.automatic === true) m.autoFollowUpsSent += 1
       if (ev.eventType === 'appointment_booked') m.appointments += 1
       if (ev.eventType === 'deposit_paid') m.deposits += 1
       if (ev.eventType === 'marked_won') {
@@ -171,4 +176,61 @@ export function computeMilestones(bundles: QuoteBundle[]): Milestone[] {
       achieved: allTime.recoveredRevenueCents >= 100_000,
     },
   ]
+}
+
+/**
+ * Booking numbers for the pilot report.
+ *
+ * Deliberately computed from the appointments table rather than from
+ * PilotMetrics.appointments, which counts `appointment_booked` quote *events* —
+ * that only ever fires for a quote a customer responded to, so it misses every
+ * appointment staff booked over the phone, which is most of them.
+ */
+export interface BookingMetrics {
+  booked: number
+  completed: number
+  noShows: number
+  cancelled: number
+  depositsCollected: number
+  depositsCollectedCents: number
+  /** Reminders the app sent on its own — the no-show prevention story. */
+  remindersSent: number
+  /** Of appointments that already happened, the share that showed up. Null when none have. */
+  showRate: number | null
+}
+
+export function computeBookingMetrics(
+  appointments: Array<
+    Pick<Appointment, 'status' | 'startsAt' | 'depositPaidAt' | 'depositAmountCents' | 'reminderSentAt' | 'cancelledAt'>
+  >,
+  from: Date,
+  to: Date,
+): BookingMetrics {
+  const m: BookingMetrics = {
+    booked: 0,
+    completed: 0,
+    noShows: 0,
+    cancelled: 0,
+    depositsCollected: 0,
+    depositsCollectedCents: 0,
+    remindersSent: 0,
+    showRate: null,
+  }
+  for (const a of appointments) {
+    if (!within(a.startsAt, from, to)) continue
+    m.booked += 1
+    if (a.status === 'completed') m.completed += 1
+    if (a.status === 'no_show') m.noShows += 1
+    if (a.status === 'cancelled') m.cancelled += 1
+    if (a.reminderSentAt) m.remindersSent += 1
+    if (a.depositPaidAt) {
+      m.depositsCollected += 1
+      m.depositsCollectedCents += a.depositAmountCents ?? 0
+    }
+  }
+  // Only appointments with a settled outcome count — a future booking is
+  // neither a show nor a no-show, and including it would understate the rate.
+  const settled = m.completed + m.noShows
+  m.showRate = settled > 0 ? m.completed / settled : null
+  return m
 }
