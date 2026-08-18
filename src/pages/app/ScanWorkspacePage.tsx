@@ -352,18 +352,52 @@ export default function ScanWorkspacePage() {
     toast('error', message)
   }
 
-  function addCustomItem() {
+  async function addCustomItem() {
     if (!customName.trim()) return
+    const priceCents = parseDollarsToCents(customPrice) ?? 0
+    const brand = customSuggestion?.brand ?? null
+    const model = customSuggestion?.model ?? null
+    const imageUrl = customSuggestion?.imageUrl ?? null
+    const name = customName.trim()
+
+    // Selling a product IS how the catalog gets built. When the line came from
+    // a real web/AI match (not free text someone typed), file it in the
+    // catalog on the way past — canonically named, with its photo — so the
+    // second unit of that product costs zero lookups and the shop ends up with
+    // a real product database as a side effect of ordinary counter work.
+    //
+    // Best-effort on purpose: a catalog write must never block a sale. If it
+    // fails, the line still goes in the cart as a one-off.
+    let catalogItemId: string | null = null
+    if (customSuggestion) {
+      try {
+        const saved = await repo.createCatalogItem({
+          brand,
+          model,
+          name,
+          defaultPriceCents: priceCents || null,
+          imageUrl,
+          // Records where this came from, so an owner reviewing the catalog can
+          // tell AI-resolved rows from hand-typed ones.
+          importSource: 'upc_lookup',
+        })
+        catalogItemId = saved.id
+        setCatalogItems((prev) => (prev ? [...prev, saved] : prev))
+      } catch (err) {
+        console.error('inline catalog save failed', err)
+      }
+    }
+
     setCart((prev) => [
       ...prev,
       {
         id: newId(),
-        catalogItemId: null,
-        name: customName.trim(),
-        brand: customSuggestion?.brand ?? null,
-        model: customSuggestion?.model ?? null,
-        imageUrl: customSuggestion?.imageUrl ?? null,
-        unitPriceCents: parseDollarsToCents(customPrice) ?? 0,
+        catalogItemId,
+        name,
+        brand,
+        model,
+        imageUrl,
+        unitPriceCents: priceCents,
         quantity: 1,
         category: null,
       },
@@ -645,7 +679,7 @@ export default function ScanWorkspacePage() {
                   <div className="w-28">
                     <Input value={customPrice} onChange={(e) => setCustomPrice(e.target.value)} placeholder="Price" inputMode="decimal" />
                   </div>
-                  <Button variant="secondary" onClick={addCustomItem} disabled={!customName.trim()}>
+                  <Button variant="secondary" onClick={() => void addCustomItem()} disabled={!customName.trim()}>
                     <Plus className="h-4 w-4" aria-hidden="true" />
                     Add
                   </Button>
