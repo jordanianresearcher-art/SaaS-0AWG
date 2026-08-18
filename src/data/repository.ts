@@ -454,6 +454,8 @@ export interface DataRepository {
    * upc/sku fields).
    */
   generateSku(brand: string | null, model: string): Promise<string>
+  /** Stamps labelPrintedAt so a printed item drops out of the label queue. */
+  markLabelPrinted(catalogItemId: string): Promise<void>
 
   /** Local catalog match by UPC/SKU only — lookupProductByUpc below wraps this with an external-lookup fallback. */
   findCatalogItemByCode(code: string): Promise<CatalogItem | null>

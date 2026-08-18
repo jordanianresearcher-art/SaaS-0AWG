@@ -49,6 +49,7 @@ import { nextFollowUpDateAfterSend } from '../lib/followUp'
 import { computeInvoiceTotals } from '../lib/invoicePricing'
 import { buildSkuBase, nextAvailableSku } from '../lib/sku'
 import { newId } from '../lib/ids'
+import { canonicalizeProductFields } from '../lib/productNaming'
 
 const STORAGE_KEY = '0gauge-demo-db'
 
@@ -203,12 +204,16 @@ export class DemoRepository implements DataRepository {
 
   async createCatalogItem(input: NewCatalogItemInput): Promise<CatalogItem> {
     const now = new Date().toISOString()
+    // Same canonicalization the production repository applies in
+    // catalogItemRow — demo mode must behave identically or the sales demo
+    // teaches the wrong thing.
+    const canonical = canonicalizeProductFields(input)
     const item: CatalogItem = {
       id: newId(),
       shopId: this.db.shop.id,
-      brand: input.brand,
-      model: input.model,
-      name: input.name,
+      brand: canonical.brand,
+      model: canonical.model,
+      name: canonical.name,
       category: input.category ?? null,
       description: input.description ?? null,
       sku: input.sku ?? null,
@@ -1159,6 +1164,14 @@ export class DemoRepository implements DataRepository {
     if (status === 'cancelled') appt.cancelledAt = new Date().toISOString()
     appt.updatedAt = new Date().toISOString()
     this.persist()
+  }
+
+  async markLabelPrinted(catalogItemId: string): Promise<void> {
+    const item = this.db.catalogItems.find((i) => i.id === catalogItemId)
+    if (item) {
+      item.labelPrintedAt = new Date().toISOString()
+      this.persist()
+    }
   }
 
   async markAppointmentReminderSent(appointmentId: string): Promise<void> {

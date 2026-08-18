@@ -51,3 +51,31 @@ body {
     border: none !important;
   }
 }
+
+/* 4x6" product labels (/app/inventory/labels).
+   4x6 is the standard thermal label size (Rollo, Zebra, DYMO), so `size`
+   drives those printers directly; the same dialog's "Save as PDF" covers a
+   shop that just wants a file. The label area is hidden on screen and becomes
+   the entire printed document — one label per page. */
+@media print {
+  .label-print-area {
+    display: block !important;
+  }
+  .label-print-area .label-sheet {
+    width: 4in;
+    height: 6in;
+    page-break-after: always;
+    break-after: page;
+    border: none !important;
+  }
+  .label-print-area .label-sheet:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+}
+
+/* NOTE: the `@page { size: 4in 6in }` rule that labels need is deliberately
+   NOT declared here. `@page` cannot be scoped to a selector, so a global rule
+   would also force invoices and quote documents (SalesDocument) onto 4x6
+   paper. LabelPrintPage injects it just for the duration of its own print
+   call — see printLabels() there. */

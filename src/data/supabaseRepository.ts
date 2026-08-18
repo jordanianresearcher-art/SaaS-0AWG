@@ -1,5 +1,6 @@
 import { FunctionsHttpError, type SupabaseClient } from '@supabase/supabase-js'
 import { sanitizeFinancingOffers } from '../lib/financing'
+import { canonicalizeProductFields } from '../lib/productNaming'
 import type {
   Appointment,
   Bay,
@@ -407,10 +408,15 @@ function mapInvoice(r: Row): Invoice {
  * lands at its schema default when the field is omitted on insert.
  */
 function catalogItemRow(input: NewCatalogItemInput): Row {
+  // Canonicalize on write — the single choke point every path funnels through
+  // (manual entry, barcode/photo/text AI resolution, Shopify import). Doing it
+  // here rather than at each call site is what makes "kicker", "KICKER" and
+  // "Kicker Audio" one brand in the catalog instead of three.
+  const canonical = canonicalizeProductFields(input)
   const row: Row = {
-    brand: input.brand,
-    model: input.model,
-    name: input.name,
+    brand: canonical.brand,
+    model: canonical.model,
+    name: canonical.name,
     default_price_cents: input.defaultPriceCents,
   }
   if (input.category !== undefined) row.category = input.category
@@ -1574,6 +1580,15 @@ export class SupabaseRepository implements DataRepository {
     const row: Row = { status }
     if (status === 'cancelled') row.cancelled_at = new Date().toISOString()
     const { error } = await this.supabase.from('appointments').update(row).eq('id', appointmentId)
+    if (error) throw error
+  }
+
+  async markLabelPrinted(catalogItemId: string): Promise<void> {
+    const { error } = await this.supabase
+      .from('catalog_items')
+      .update({ label_printed_at: new Date().toISOString() })
+      .eq('id', catalogItemId)
+      .eq('shop_id', this.shopId)
     if (error) throw error
   }
 

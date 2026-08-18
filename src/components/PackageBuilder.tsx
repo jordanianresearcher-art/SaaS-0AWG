@@ -39,6 +39,7 @@ import { CategoryIcon } from './categoryIcon'
 import { ProductSuggestField } from './ProductSuggestField'
 import { Button, Field, Input } from './ui'
 import type { CatalogItem, ProductCategory } from '../types'
+import { filterCatalog } from '../lib/catalogSearch'
 
 export interface PackageBuilderValue {
   items: BuilderLineItem[]
@@ -311,11 +312,12 @@ function CatalogTray({
     [catalogItems],
   )
 
-  const q = search.trim().toLowerCase()
-  const filtered = usageSorted
-    .filter((i) => i.active && i.approvalStatus === 'approved')
-    .filter((i) => !category || i.category === category)
-    .filter((i) => !q || [i.name, i.brand, i.model].filter((v): v is string => Boolean(v)).some((s) => s.toLowerCase().includes(q)))
+  const filtered = filterCatalog(
+    usageSorted
+      .filter((i) => i.active && i.approvalStatus === 'approved')
+      .filter((i) => !category || i.category === category),
+    search,
+  )
   const ordered =
     sort === 'name'
       ? [...filtered].sort((a, b) => a.name.localeCompare(b.name))

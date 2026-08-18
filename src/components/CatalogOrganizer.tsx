@@ -22,6 +22,7 @@ import { formatCurrency } from '../lib/format'
 import { useToast } from './Toast'
 import { Button } from './ui'
 import type { CatalogItem, ProductCategory } from '../types'
+import { filterCatalog } from '../lib/catalogSearch'
 
 interface CatalogOrganizerProps {
   items: CatalogItem[]
@@ -50,10 +51,10 @@ export default function CatalogOrganizer({ items, onSetCategory }: CatalogOrgani
 
   const uncategorizedCount = items.filter((i) => !i.category).length
 
-  const q = search.trim().toLowerCase()
-  const visibleItems = items
-    .filter((i) => !uncategorizedOnly || !i.category)
-    .filter((i) => !q || [i.name, i.brand, i.model].filter((v): v is string => Boolean(v)).some((s) => s.toLowerCase().includes(q)))
+  const visibleItems = filterCatalog(
+    items.filter((i) => !uncategorizedOnly || !i.category),
+    search,
+  )
 
   async function assign(itemId: string, category: ProductCategory) {
     try {

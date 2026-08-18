@@ -19,6 +19,7 @@ import InventoryPage from './pages/app/InventoryPage'
 import InventoryDetailPage from './pages/app/InventoryDetailPage'
 import NewInventoryItemPage from './pages/app/NewInventoryItemPage'
 import InventoryCheckPage from './pages/app/InventoryCheckPage'
+import LabelPrintPage from './pages/app/LabelPrintPage'
 import QuotesPage from './pages/app/QuotesPage'
 import NewQuotePage from './pages/app/NewQuotePage'
 import QuoteDetailPage from './pages/app/QuoteDetailPage'
@@ -93,6 +94,7 @@ export default function App() {
         <Route path="inventory" element={<InventoryPage />} />
         <Route path="inventory/new" element={<NewInventoryItemPage />} />
         <Route path="inventory/check" element={<InventoryCheckPage />} />
+        <Route path="inventory/labels" element={<LabelPrintPage />} />
         <Route path="inventory/:itemId" element={<InventoryDetailPage />} />
         <Route
           path="calendar"

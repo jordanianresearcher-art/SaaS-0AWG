@@ -235,16 +235,41 @@ const COPY: Record<TemplateType, { subject: (c: EmailContext) => string; intro: 
   },
 }
 
+/**
+ * Mirror of formatItemDisplayName in src/lib/productNaming.ts (Deno cannot
+ * import from src/). The canonical customer-facing name is
+ * "Brand Model — Descriptor"; keeping the two in sync is what stops the same
+ * product reading differently in the app and in the email a customer receives.
+ *
+ * The brand-casing map is deliberately NOT duplicated here — brands are
+ * canonicalized on write (when the item is saved), so by the time a quote item
+ * reaches this function its brand is already stored in canonical form.
+ */
+function formatItemDisplayName(item: { brand?: string | null; model?: string | null; name?: string | null }): string {
+  const brand = item.brand?.trim() || ''
+  let model = item.model?.trim().replace(/\s+/g, ' ') || ''
+  if (brand && model.toLowerCase().startsWith(`${brand.toLowerCase()} `)) {
+    model = model.slice(brand.length).trim()
+  }
+  const identity = [brand, model].filter(Boolean).join(' ')
+  let descriptor = item.name?.trim().replace(/\s+/g, ' ') || ''
+  for (const prefix of [brand, model]) {
+    if (!prefix) continue
+    const lower = descriptor.toLowerCase()
+    if (lower.startsWith(`${prefix.toLowerCase()} `)) {
+      descriptor = descriptor.slice(prefix.length).replace(/^\s*[-–—]?\s*/, '').trim()
+    }
+  }
+  if (identity && descriptor) return `${identity} — ${descriptor}`
+  if (identity) return identity
+  return descriptor || 'Item'
+}
+
 function itemRowsHtml(items: EmailQuoteItem[]): string {
   if (items.length === 0) return ''
   return items
     .map((item) => {
-      const label = [
-        item.quantity > 1 ? `${item.quantity}× ` : '',
-        [item.brand, item.model].filter(Boolean).join(' '),
-        item.brand || item.model ? ' — ' : '',
-        item.name.trim() || 'Item',
-      ].join('')
+      const label = `${item.quantity > 1 ? `${item.quantity}× ` : ''}${formatItemDisplayName(item)}`
       const img = item.imageUrl
         ? `<img src="${escapeHtml(item.imageUrl)}" width="36" height="36" alt="" style="display:block;width:36px;height:36px;border-radius:8px;object-fit:contain;background:#f4f4f5;" />`
         : `<div style="width:36px;height:36px;border-radius:8px;background:#f4f4f5;"></div>`

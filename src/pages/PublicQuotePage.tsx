@@ -5,6 +5,7 @@ import type { PublicQuote, ResponseType } from '../types'
 import { resolvePublicQuoteApi, type PublicQuoteApi } from '../data/publicQuote'
 import { RESPONSE_CONFIG } from '../lib/status'
 import { formatCurrency, formatDate } from '../lib/format'
+import { formatItemDisplayName } from '../lib/productNaming'
 import { summarizeWindowTint } from '../lib/windowTint'
 import { addonOptions, computeAddonBreakdown, fullTotalCents, mainOption } from '../lib/quotePricing'
 import { Button, LoadingBlock } from '../components/ui'
@@ -20,9 +21,7 @@ function ItemPreviewList({ items }: { items: PublicQuote['options'][number]['ite
             {item.imageUrl ? <img src={item.imageUrl} alt="" className="h-full w-full object-cover" /> : null}
           </span>
           {item.quantity > 1 ? `${item.quantity}× ` : ''}
-          {[item.brand, item.model].filter(Boolean).join(' ')}
-          {item.brand || item.model ? ' — ' : ''}
-          {item.name.trim() || 'Item'}
+          {formatItemDisplayName(item)}
         </li>
       ))}
     </ul>

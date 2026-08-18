@@ -16,6 +16,7 @@ import { SalesDocument, type SalesDocumentItem } from '../../components/SalesDoc
 import { EmailPreviewModal, publicQuoteUrl } from '../../components/EmailPreviewModal'
 import { formatCurrency, formatDateTime, parseDollarsToCents } from '../../lib/format'
 import { newId } from '../../lib/ids'
+import { filterCatalog } from '../../lib/catalogSearch'
 import { useHardwareScanner } from '../../lib/useHardwareScanner'
 import {
   addOrIncrementCartItem,
@@ -480,10 +481,7 @@ export default function ScanWorkspacePage() {
 
   const filteredCatalog = useMemo(() => {
     if (!catalogItems || !manualQuery.trim()) return []
-    const q = manualQuery.trim().toLowerCase()
-    return catalogItems
-      .filter((i) => i.active && [i.name, i.brand, i.model].filter((v): v is string => Boolean(v)).some((v) => v.toLowerCase().includes(q)))
-      .slice(0, 8)
+    return filterCatalog(catalogItems.filter((i) => i.active), manualQuery).slice(0, 8)
   }, [catalogItems, manualQuery])
 
   return (

@@ -3,6 +3,7 @@ import { formatCurrency, formatDate, formatVehicle } from './format'
 import { addonOptions, computeAddonBreakdown, fullTotalCents, mainOption } from './quotePricing'
 import { summarizeWindowTint } from './windowTint'
 import { sanitizeFinancingOffers } from './financing'
+import { formatItemDisplayName } from './productNaming'
 
 // All five manual email templates. Emails stay short and drive the customer to
 // the public quote page — the full quote never rides inside the email.
@@ -91,12 +92,8 @@ function itemRowsHtml(items: QuoteOption['items']): string {
   if (items.length === 0) return ''
   return items
     .map((item) => {
-      const label = [
-        item.quantity > 1 ? `${item.quantity}× ` : '',
-        [item.brand, item.model].filter(Boolean).join(' '),
-        item.brand || item.model ? ' — ' : '',
-        item.name.trim() || 'Item',
-      ].join('')
+      // One canonical name everywhere — see src/lib/productNaming.ts.
+      const label = `${item.quantity > 1 ? `${item.quantity}× ` : ''}${formatItemDisplayName(item)}`
       const img = item.imageUrl
         ? `<img src="${escapeHtml(item.imageUrl)}" width="36" height="36" alt="" style="display:block;width:36px;height:36px;border-radius:8px;object-fit:contain;background:#f4f4f5;" />`
         : `<div style="width:36px;height:36px;border-radius:8px;background:#f4f4f5;"></div>`
