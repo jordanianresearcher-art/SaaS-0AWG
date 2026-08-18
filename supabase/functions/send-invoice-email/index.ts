@@ -86,6 +86,8 @@ function renderInvoiceEmail(shop: any, invoice: any, items: any[], recipientName
     ...itemLines,
     '',
     `Subtotal: ${formatCurrency(invoice.subtotal_cents)}`,
+    (invoice.discount_cents ?? 0) > 0 ? `Discount: -${formatCurrency(invoice.discount_cents)}` : null,
+    (invoice.tax_cents ?? 0) > 0 ? `Tax: ${formatCurrency(invoice.tax_cents)}` : null,
     `Total: ${formatCurrency(invoice.total_cents)}`,
     paidLine,
     '',
@@ -144,6 +146,8 @@ function renderInvoiceEmail(shop: any, invoice: any, items: any[], recipientName
       </table>
       <div style="margin-top:16px;text-align:right;">
         <div style="color:#71717a;font-size:14px;">Subtotal: ${formatCurrency(invoice.subtotal_cents)}</div>
+        ${(invoice.discount_cents ?? 0) > 0 ? `<div style="color:#71717a;font-size:14px;">Discount: -${formatCurrency(invoice.discount_cents)}</div>` : ''}
+        ${(invoice.tax_cents ?? 0) > 0 ? `<div style="color:#71717a;font-size:14px;">Tax: ${formatCurrency(invoice.tax_cents)}</div>` : ''}
         <div style="margin-top:4px;font-size:18px;font-weight:800;color:#18181b;">Total: ${formatCurrency(invoice.total_cents)}</div>
       </div>
       <p style="margin:20px 0 0;color:#52525b;font-size:14px;">Questions? Call <a href="tel:${escapeHtml(shop.phone)}" style="color:${color};">${escapeHtml(shop.phone)}</a> or just reply to this email.</p>

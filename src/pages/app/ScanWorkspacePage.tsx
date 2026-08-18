@@ -17,6 +17,7 @@ import { EmailPreviewModal, publicQuoteUrl } from '../../components/EmailPreview
 import { formatCurrency, formatDateTime, parseDollarsToCents } from '../../lib/format'
 import { newId } from '../../lib/ids'
 import { filterCatalog } from '../../lib/catalogSearch'
+import { computeInvoiceTotals } from '../../lib/invoicePricing'
 import { useHardwareScanner } from '../../lib/useHardwareScanner'
 import {
   addOrIncrementCartItem,
@@ -58,6 +59,7 @@ const PAYMENT_METHOD_LABELS: Record<InvoicePaymentMethod, string> = {
   venmo: 'Venmo',
   paypal: 'PayPal',
   link: 'Payment link',
+  financed: 'Financed (Snap, Acima, …)',
   other: 'Other',
 }
 
@@ -156,16 +158,34 @@ export default function ScanWorkspacePage() {
   const [paymentMethod, setPaymentMethod] = useState<InvoicePaymentMethod>('cash')
   const [paymentAmount, setPaymentAmount] = useState('')
   const [markingPaid, setMarkingPaid] = useState(false)
-  // Typed after the invoice exists, purely for the printed "Bill to" line
-  // and as the email recipient — deliberately not persisted to the
-  // invoice record itself (this flow is walk-in/fast by design; a real
-  // Customer record is what NewQuotePage's fuller intake is for).
+  // The walk-in customer's details. Persisted onto the invoice record
+  // itself (migration 0017's customer_name/phone/email columns) so a
+  // reopened or reprinted invoice still says who bought it — previously
+  // this was component state only and was lost on reload.
   const [customerName, setCustomerName] = useState('')
   const [customerEmail, setCustomerEmail] = useState('')
   const [sendingEmail, setSendingEmail] = useState(false)
+  // Tax and discount are set before the invoice is created, because both
+  // change the total the cashier reads out loud. Rate is entered as a
+  // percentage ("8.25") and stored as a fraction.
+  const [taxPercent, setTaxPercent] = useState('')
+  // "Price includes tax" is how most shops here actually quote — the sticker
+  // is the out-the-door number. In that mode no tax line is added; the rate
+  // is recorded as 0 so the printed total and what the customer pays match.
+  const [taxIncluded, setTaxIncluded] = useState(false)
+  const [discountDollars, setDiscountDollars] = useState('')
 
   const building = invoice === null && quote === null
   const subtotalCents = building ? cartSubtotalCents(cart) : invoice ? invoice.subtotalCents : (quote!.options[0]?.priceCents ?? 0)
+  // Tax-included mode adds no tax line — the price on the shelf is the
+  // out-the-door price, which is how these shops quote.
+  const cartTaxRate = taxIncluded ? 0 : (Number(taxPercent) || 0) / 100
+  const cartDiscountCents = parseDollarsToCents(discountDollars) ?? 0
+  const cartTotals = computeInvoiceTotals(
+    cart.map((line) => ({ unitPriceCents: line.unitPriceCents, quantity: line.quantity })),
+    cartTaxRate,
+    cartDiscountCents,
+  )
 
   // Auto-focus the dedicated scan input on mount, and again whenever we
   // return to "building" after starting a new session — a hardware
@@ -357,7 +377,13 @@ export default function ScanWorkspacePage() {
   async function handleCreateInvoice() {
     setCreatingInvoice(true)
     try {
-      const created = await repo.createInvoice({ items: cartToInvoiceItemInputs(cart) })
+      const created = await repo.createInvoice({
+        items: cartToInvoiceItemInputs(cart),
+        taxRate: cartTaxRate,
+        discountCents: cartDiscountCents,
+        customerName: customerName.trim() || null,
+        customerEmail: customerEmail.trim() || null,
+      })
       setInvoice(created)
       setPaymentAmount((created.totalCents / 100).toString())
     } catch (err) {
@@ -711,6 +737,8 @@ export default function ScanWorkspacePage() {
               customerEmail={customerEmail}
               items={invoiceToDocumentItems(invoice)}
               subtotalCents={invoice.subtotalCents}
+              taxCents={invoice.taxCents}
+              discountCents={invoice.discountCents}
               totalCents={invoice.totalCents}
               paidCents={invoice.status === 'paid' ? invoice.paymentAmountCents : null}
             />
@@ -774,9 +802,59 @@ export default function ScanWorkspacePage() {
               </>
             ) : null}
 
-            <div className="flex items-center justify-between border-t border-zinc-100 pt-3 text-sm">
-              <span className="text-zinc-500">Subtotal</span>
-              <span className="text-base font-bold text-ink">{formatCurrency(subtotalCents)}</span>
+            <div className="space-y-2 border-t border-zinc-100 pt-3 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-500">Subtotal</span>
+                <span className="text-base font-bold text-ink">{formatCurrency(subtotalCents)}</span>
+              </div>
+              {building && docType === 'invoice' ? (
+                <>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={taxPercent}
+                      onChange={(e) => setTaxPercent(e.target.value)}
+                      inputMode="decimal"
+                      placeholder="Tax %"
+                      aria-label="Tax rate percent"
+                      className="h-11 w-24"
+                      disabled={taxIncluded}
+                    />
+                    <label className="flex items-center gap-2 text-sm text-zinc-600">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-brand"
+                        checked={taxIncluded}
+                        onChange={(e) => setTaxIncluded(e.target.checked)}
+                      />
+                      Price includes tax
+                    </label>
+                  </div>
+                  <Input
+                    value={discountDollars}
+                    onChange={(e) => setDiscountDollars(e.target.value)}
+                    inputMode="decimal"
+                    placeholder="Discount $"
+                    aria-label="Discount amount"
+                    className="h-11 w-32"
+                  />
+                  {cartTotals.taxCents > 0 ? (
+                    <div className="flex items-center justify-between">
+                      <span className="text-zinc-500">Tax</span>
+                      <span className="text-zinc-700">{formatCurrency(cartTotals.taxCents)}</span>
+                    </div>
+                  ) : null}
+                  {cartTotals.discountCents > 0 ? (
+                    <div className="flex items-center justify-between">
+                      <span className="text-zinc-500">Discount</span>
+                      <span className="text-zinc-700">-{formatCurrency(cartTotals.discountCents)}</span>
+                    </div>
+                  ) : null}
+                  <div className="flex items-center justify-between border-t border-zinc-100 pt-2">
+                    <span className="font-semibold text-ink">Total</span>
+                    <span className="text-lg font-black text-ink">{formatCurrency(cartTotals.totalCents)}</span>
+                  </div>
+                </>
+              ) : null}
             </div>
 
             {building ? (

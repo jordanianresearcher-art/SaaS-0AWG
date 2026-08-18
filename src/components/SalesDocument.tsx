@@ -49,6 +49,8 @@ export function SalesDocument({
   customerEmail,
   items,
   subtotalCents,
+  taxCents,
+  discountCents,
   totalCents,
   paidCents,
   extraStatusLine,
@@ -63,6 +65,9 @@ export function SalesDocument({
   customerEmail: string
   items: SalesDocumentItem[]
   subtotalCents: number
+  /** Omit or 0 to hide the line — a tax-included sale shows no tax row. */
+  taxCents?: number
+  discountCents?: number
   totalCents: number
   /** e.g. "Paid $250.00 — Cash" for a paid invoice. */
   paidCents?: number | null
@@ -171,6 +176,18 @@ export function SalesDocument({
             <span>Subtotal</span>
             <span>{formatCurrency(subtotalCents)}</span>
           </div>
+          {discountCents ? (
+            <div className="flex items-center justify-between text-sm text-zinc-500">
+              <span>Discount</span>
+              <span>-{formatCurrency(discountCents)}</span>
+            </div>
+          ) : null}
+          {taxCents ? (
+            <div className="flex items-center justify-between text-sm text-zinc-500">
+              <span>Tax</span>
+              <span>{formatCurrency(taxCents)}</span>
+            </div>
+          ) : null}
           <div className="flex items-center justify-between border-t border-zinc-200 pt-1.5 text-base font-bold text-ink">
             <span>Total</span>
             <span>{formatCurrency(totalCents)}</span>

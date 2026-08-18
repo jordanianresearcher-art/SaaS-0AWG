@@ -127,6 +127,12 @@ from (
        and exists (select 1 from pg_proc p
                    join pg_namespace n on n.oid = p.pronamespace
                    where n.nspname = 'public'
-                     and p.proname = 'list_due_follow_ups'))
+                     and p.proname = 'list_due_follow_ups')),
+
+    ('0024 invoice financed payment',
+     exists (select 1 from pg_enum e
+             join pg_type t on t.oid = e.enumtypid
+             where t.typname = 'invoice_payment_method'
+               and e.enumlabel = 'financed'))
 ) as t(migration, applied)
 order by migration;

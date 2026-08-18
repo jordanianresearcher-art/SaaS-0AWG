@@ -61,6 +61,8 @@ export function renderInvoiceEmail(ctx: InvoiceEmailContext): RenderedInvoiceEma
     ...itemLines,
     '',
     `Subtotal: ${formatCurrency(invoice.subtotalCents)}`,
+    invoice.discountCents > 0 ? `Discount: -${formatCurrency(invoice.discountCents)}` : null,
+    invoice.taxCents > 0 ? `Tax: ${formatCurrency(invoice.taxCents)}` : null,
     `Total: ${formatCurrency(invoice.totalCents)}`,
     paidLine,
     '',
@@ -121,6 +123,8 @@ export function renderInvoiceEmail(ctx: InvoiceEmailContext): RenderedInvoiceEma
       </table>
       <div style="margin-top:16px;text-align:right;">
         <div style="color:#71717a;font-size:14px;">Subtotal: ${formatCurrency(invoice.subtotalCents)}</div>
+        ${invoice.discountCents > 0 ? `<div style="color:#71717a;font-size:14px;">Discount: -${formatCurrency(invoice.discountCents)}</div>` : ''}
+        ${invoice.taxCents > 0 ? `<div style="color:#71717a;font-size:14px;">Tax: ${formatCurrency(invoice.taxCents)}</div>` : ''}
         <div style="margin-top:4px;font-size:18px;font-weight:800;color:#18181b;">Total: ${formatCurrency(invoice.totalCents)}</div>
       </div>
       <p style="margin:20px 0 0;color:#52525b;font-size:14px;">Questions? Call <a href="tel:${escapeHtml(shop.phone)}" style="color:${color};">${escapeHtml(shop.phone)}</a> or just reply to this email.</p>

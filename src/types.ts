@@ -69,7 +69,7 @@ export type MembershipRole = 'owner' | 'manager' | 'staff' | 'inventory'
 export type PaymentMethod = 'link' | 'zelle' | 'cashapp' | 'venmo' | 'paypal'
 
 /** How an invoice was actually paid — broader than PaymentMethod above (that one is specifically for online deposit-payment links on a quote); an invoice is usually paid in person. */
-export type InvoicePaymentMethod = 'cash' | 'card' | 'zelle' | 'cashapp' | 'venmo' | 'paypal' | 'link' | 'other'
+export type InvoicePaymentMethod = 'cash' | 'card' | 'zelle' | 'cashapp' | 'venmo' | 'paypal' | 'link' | 'financed' | 'other'
 
 export type InvoiceStatus = 'draft' | 'paid' | 'void'
 
