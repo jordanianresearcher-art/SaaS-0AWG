@@ -118,6 +118,15 @@ from (
              join pg_namespace n on n.oid = p.pronamespace
              where n.nspname = 'public'
                and p.proname = 'get_public_quote'
-               and pg_get_functiondef(p.oid) like '%shopSlug%'))
+               and pg_get_functiondef(p.oid) like '%shopSlug%')),
+
+    ('0023 auto follow-ups',
+     exists (select 1 from information_schema.columns
+             where table_schema = 'public' and table_name = 'shops'
+               and column_name = 'auto_follow_up_enabled')
+       and exists (select 1 from pg_proc p
+                   join pg_namespace n on n.oid = p.pronamespace
+                   where n.nspname = 'public'
+                     and p.proname = 'list_due_follow_ups'))
 ) as t(migration, applied)
 order by migration;

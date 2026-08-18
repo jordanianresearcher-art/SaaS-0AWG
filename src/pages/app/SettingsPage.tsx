@@ -37,6 +37,7 @@ const schema = z.object({
       .string()
       .regex(/^\d+(\s*,\s*\d+)*$/, 'Use numbers separated by commas, like 2, 3, 5'),
     quoteDisclaimer: z.string().min(10, 'A short disclaimer is required'),
+    autoFollowUpEnabled: z.boolean(),
   })
 
 type FormValues = z.infer<typeof schema>
@@ -70,6 +71,7 @@ export default function SettingsPage() {
         primaryColor: shop.primaryColor,
         quoteExpirationDays: shop.quoteExpirationDays,
         followUpSchedule: shop.followUpScheduleDays.join(', '),
+        autoFollowUpEnabled: shop.autoFollowUpEnabled,
         quoteDisclaimer: shop.quoteDisclaimer,
       })
     }
@@ -90,6 +92,7 @@ export default function SettingsPage() {
         primaryColor: values.primaryColor,
         quoteExpirationDays: values.quoteExpirationDays,
         followUpScheduleDays: values.followUpSchedule.split(',').map((n) => parseInt(n.trim(), 10)),
+        autoFollowUpEnabled: values.autoFollowUpEnabled,
         quoteDisclaimer: values.quoteDisclaimer,
       })
       await refresh()
@@ -158,6 +161,23 @@ export default function SettingsPage() {
           >
             <Input id="s-schedule" {...register('followUpSchedule')} />
           </Field>
+          {/* The one switch that decides whether the app emails customers on
+             its own. Worth its own explanatory line — it is the only place in
+             the product that sends without a human. */}
+          <label className="flex items-start gap-3 rounded-xl border border-zinc-200 p-4">
+            <input
+              type="checkbox"
+              className="mt-1 h-5 w-5 shrink-0 accent-brand"
+              {...register('autoFollowUpEnabled')}
+            />
+            <span>
+              <span className="block text-base font-semibold text-ink">Send follow-ups automatically</span>
+              <span className="mt-0.5 block text-sm text-zinc-600">
+                Follow-up emails go out on schedule and stop the moment a customer replies, books, or opts out. Texts
+                are never automatic.
+              </span>
+            </span>
+          </label>
           <Field label="Quote disclaimer" htmlFor="s-disclaimer" error={errors.quoteDisclaimer?.message}>
             <Textarea id="s-disclaimer" rows={3} {...register('quoteDisclaimer')} />
           </Field>

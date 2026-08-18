@@ -5,13 +5,15 @@
 // what, nothing optional in the way.
 
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, Plus, X } from 'lucide-react'
-import { useRepo } from '../../data/AppDataContext'
+import { ChevronLeft, ChevronRight, MessageSquare, Plus, X } from 'lucide-react'
+import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
 import { Button, Card, EmptyState, Field, Input, LoadingBlock, Modal, Select } from '../../components/ui'
 import { errorMessage } from '../../lib/errors'
 import { availableSlotsForDay, minuteToTimeString, timeStringToMinute } from '../../lib/scheduling'
 import { BODY_STYLE_INFO, BODY_STYLE_ORDER } from '../../lib/windowTint'
+import { buildBookingConfirmationSmsBody, buildBookingReminderSmsBody, buildSmsLink } from '../../lib/sms'
+import { env } from '../../lib/env'
 import type { Appointment, Bay, BusinessHoursDay, ScheduleException, Service, TintBodyStyle } from '../../types'
 
 function toDateKey(d: Date): string {
@@ -35,6 +37,7 @@ const STATUS_STYLE: Record<Appointment['status'], string> = {
 
 export default function CalendarPage() {
   const repo = useRepo()
+  const { shop } = useAppData()
   const toast = useToast()
   const [date, setDate] = useState(() => new Date())
   const [bays, setBays] = useState<Bay[] | null>(null)
@@ -168,7 +171,23 @@ export default function CalendarPage() {
       </Modal>
 
       <Modal open={detail !== null} onClose={() => setDetail(null)} title="Appointment">
-        {detail ? (
+        {detail ? ((() => {
+          const start = new Date(detail.startsAt)
+          const whenLabel = `${start.toLocaleDateString(undefined, { weekday: 'long' })} at ${start.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
+          const smsCtx = {
+            firstName: detail.customerFirstName || null,
+            shopName: shop?.name ?? 'the shop',
+            serviceName: detail.services.map((s) => s.name).join(', ') || null,
+            whenLabel,
+            manageUrl: `${env.appUrl}/booking/${detail.publicToken}`,
+          }
+          const smsLink = buildSmsLink(
+            detail.customerPhone,
+            detail.status === 'awaiting_deposit'
+              ? buildBookingConfirmationSmsBody(smsCtx)
+              : buildBookingReminderSmsBody(smsCtx),
+          )
+          return (
           <div className="space-y-4">
             <div>
               <p className="text-lg font-bold text-ink">
@@ -176,10 +195,26 @@ export default function CalendarPage() {
                 {' – '}
                 {new Date(detail.endsAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
               </p>
+              <p className="text-base font-semibold text-ink">
+                {[detail.customerFirstName, detail.customerLastName].filter(Boolean).join(' ') || 'Customer'}
+              </p>
               <p className="text-base text-zinc-600">{detail.services.map((s) => s.name).join(', ')}</p>
               {detail.notes ? <p className="mt-2 text-sm text-zinc-600">{detail.notes}</p> : null}
             </div>
             <div className="flex flex-wrap gap-2">
+              {/* Tap-to-text. The reminder wording is used once the appointment
+                 is in the future and already confirmed; right after booking,
+                 the "you're booked" phrasing is what staff want to fire off
+                 while the customer is still on the phone. */}
+              {smsLink ? (
+                <a
+                  href={smsLink}
+                  className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-zinc-300 bg-white px-4 text-base font-semibold text-ink hover:bg-zinc-50"
+                >
+                  <MessageSquare className="h-5 w-5" aria-hidden="true" />
+                  {detail.reminderSentAt ? 'Text again' : 'Text reminder'}
+                </a>
+              ) : null}
               {detail.status !== 'completed' && detail.status !== 'cancelled' ? (
                 <Button variant="secondary" onClick={() => void setStatus(detail, 'completed')}>
                   Mark completed
@@ -197,7 +232,8 @@ export default function CalendarPage() {
               ) : null}
             </div>
           </div>
-        ) : null}
+          )
+        })()) : null}
       </Modal>
     </div>
   )

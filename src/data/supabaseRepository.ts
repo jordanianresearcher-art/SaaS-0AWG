@@ -87,6 +87,8 @@ function mapShop(r: Row): Shop {
     lowStockAlertEmail: r.low_stock_alert_email ?? null,
     hasStaffAccessCode: r.has_staff_access_code ?? false,
     bookingDepositCents: r.booking_deposit_cents ?? null,
+    // Default true: a pilot shop should get automatic follow-ups without configuring anything.
+    autoFollowUpEnabled: r.auto_follow_up_enabled ?? true,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }
@@ -325,6 +327,9 @@ function mapAppointment(r: Row): Appointment {
     shopId: r.shop_id,
     bayId: r.bay_id,
     customerId: r.customer_id,
+    customerFirstName: r.customers?.first_name ?? '',
+    customerLastName: r.customers?.last_name ?? null,
+    customerPhone: r.customers?.phone ?? null,
     source: r.source,
     status: r.status,
     startsAt: r.starts_at,
@@ -525,6 +530,7 @@ export class SupabaseRepository implements DataRepository {
     if (patch.defaultLowStockThreshold !== undefined) row.default_low_stock_threshold = patch.defaultLowStockThreshold
     if (patch.lowStockAlertEmail !== undefined) row.low_stock_alert_email = patch.lowStockAlertEmail
     if (patch.bookingDepositCents !== undefined) row.booking_deposit_cents = patch.bookingDepositCents
+    if (patch.autoFollowUpEnabled !== undefined) row.auto_follow_up_enabled = patch.autoFollowUpEnabled
     const { data, error } = await this.supabase
       .from('shops')
       .update(row)
@@ -1479,7 +1485,7 @@ export class SupabaseRepository implements DataRepository {
   async listAppointments(rangeStart: string, rangeEnd: string): Promise<Appointment[]> {
     const { data, error } = await this.supabase
       .from('appointments')
-      .select('*, appointment_services(service_id, name, duration_minutes, price_cents, position)')
+      .select('*, customers(first_name, last_name, phone), appointment_services(service_id, name, duration_minutes, price_cents, position)')
       .eq('shop_id', this.shopId)
       .gte('starts_at', rangeStart)
       .lt('starts_at', rangeEnd)

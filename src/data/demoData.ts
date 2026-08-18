@@ -445,6 +445,7 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
     // $20, so the demo shows the awaiting_deposit self-serve path without
     // needing Stripe configured — demo mode fakes payment (see DemoRepository).
     bookingDepositCents: 2000,
+    autoFollowUpEnabled: true,
     createdAt: daysAgo(now, 40),
     updatedAt: daysAgo(now, 40),
   }
@@ -1004,6 +1005,18 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
   }
   const apptEnd = (start: Date, minutes: number) => new Date(start.getTime() + minutes * 60_000).toISOString()
 
+  // Derived from the customer records rather than hardcoded, so a change to a
+  // demo customer's name or phone can never leave the calendar showing stale
+  // contact details.
+  const apptCustomer = (id: string) => {
+    const c = customers.find((x) => x.id === id)
+    return {
+      customerFirstName: c?.firstName ?? '',
+      customerLastName: c?.lastName ?? null,
+      customerPhone: c?.phone ?? null,
+    }
+  }
+
   const appointments: Appointment[] = (() => {
     const tomorrow930 = apptStart(1, 9)
     const tomorrow1400 = apptStart(1, 14)
@@ -1014,6 +1027,7 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
         shopId: SHOP_ID,
         bayId: 'demo-bay-1',
         customerId: 'demo-cust-f150-marcus',
+        ...apptCustomer('demo-cust-f150-marcus'),
         source: 'staff',
         status: 'confirmed',
         startsAt: tomorrow930.toISOString(),
@@ -1035,6 +1049,7 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
         shopId: SHOP_ID,
         bayId: 'demo-bay-2',
         customerId: 'demo-cust-tahoe-gloria',
+        ...apptCustomer('demo-cust-tahoe-gloria'),
         source: 'self_serve',
         status: 'awaiting_deposit',
         startsAt: tomorrow1400.toISOString(),
@@ -1056,6 +1071,7 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
         shopId: SHOP_ID,
         bayId: 'demo-bay-1',
         customerId: 'demo-cust-silverado-dana',
+        ...apptCustomer('demo-cust-silverado-dana'),
         source: 'staff',
         status: 'confirmed',
         startsAt: nextWeek1100.toISOString(),

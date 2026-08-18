@@ -43,6 +43,10 @@ Deno.serve(async (req: Request) => {
   const body = await req.json().catch(() => null)
   const publicToken = typeof body?.publicToken === 'string' ? body.publicToken : ''
   if (!publicToken) return noop('missing publicToken')
+  // 'confirmation' right after booking, 'reminder' the day before. Same
+  // appointment lookup and layout — only the framing changes, so the two can
+  // never drift apart in styling or in what they link to.
+  const kind: 'confirmation' | 'reminder' = body?.kind === 'reminder' ? 'reminder' : 'confirmation'
 
   const admin = createClient(
     Deno.env.get('SUPABASE_URL')!,
@@ -80,9 +84,20 @@ Deno.serve(async (req: Request) => {
   const timeLabel = `${start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} – ${end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
 
   const needsDeposit = appt.status === 'awaiting_deposit'
-  const subject = needsDeposit
-    ? `Almost set — pay your deposit to confirm ${dateLabel}`
-    : `You're booked — ${dateLabel} at ${shop.name}`
+  const isReminder = kind === 'reminder'
+  const subject = isReminder
+    ? needsDeposit
+      ? `Tomorrow — your deposit still holds this slot`
+      : `See you ${dateLabel} at ${shop.name}`
+    : needsDeposit
+      ? `Almost set — pay your deposit to confirm ${dateLabel}`
+      : `You're booked — ${dateLabel} at ${shop.name}`
+
+  // A reminder for an appointment that is cancelled or already done would be
+  // worse than no reminder at all.
+  if (isReminder && appt.status !== 'confirmed' && appt.status !== 'awaiting_deposit') {
+    return noop(`reminder skipped for status ${appt.status}`)
+  }
 
   const depositLine = needsDeposit && appt.deposit_amount_cents
     ? `A ${formatCurrency(appt.deposit_amount_cents)} deposit holds this slot — pay it here: ${manageUrl}`
@@ -91,9 +106,11 @@ Deno.serve(async (req: Request) => {
   const text = [
     `Hi ${customer.first_name || 'there'},`,
     '',
-    needsDeposit
-      ? `Your ${services} appointment at ${shop.name} is set for ${dateLabel}, ${timeLabel} — pending your deposit.`
-      : `You're booked for ${services} at ${shop.name} on ${dateLabel}, ${timeLabel}.`,
+    isReminder
+      ? `Reminder: your ${services} at ${shop.name} is coming up ${dateLabel}, ${timeLabel}.`
+      : needsDeposit
+        ? `Your ${services} appointment at ${shop.name} is set for ${dateLabel}, ${timeLabel} — pending your deposit.`
+        : `You're booked for ${services} at ${shop.name} on ${dateLabel}, ${timeLabel}.`,
     depositLine,
     '',
     `Manage or cancel: ${manageUrl}`,
@@ -115,7 +132,7 @@ Deno.serve(async (req: Request) => {
     <div style="padding:24px;color:#27272a;font-size:16px;line-height:1.6;">
       <p style="margin:0 0 16px;">Hi ${escapeHtml(customer.first_name || 'there')},</p>
       <p style="margin:0 0 16px;">
-        ${needsDeposit ? `Your <strong>${escapeHtml(services)}</strong> appointment is set for` : `You're booked for <strong>${escapeHtml(services)}</strong> on`}
+        ${isReminder ? `Just a reminder — your <strong>${escapeHtml(services)}</strong> is coming up` : needsDeposit ? `Your <strong>${escapeHtml(services)}</strong> appointment is set for` : `You're booked for <strong>${escapeHtml(services)}</strong> on`}
         <strong style="color:#18181b;">${escapeHtml(dateLabel)}, ${escapeHtml(timeLabel)}</strong>${needsDeposit ? ' — pending your deposit.' : '.'}
       </p>
       ${

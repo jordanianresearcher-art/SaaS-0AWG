@@ -116,6 +116,7 @@ export interface ShopSettingsPatch {
   defaultLowStockThreshold?: number
   lowStockAlertEmail?: string | null
   bookingDepositCents?: number | null
+  autoFollowUpEnabled?: boolean
 }
 
 export interface NewCatalogItemInput {

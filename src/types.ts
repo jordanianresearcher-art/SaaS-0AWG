@@ -230,6 +230,8 @@ export interface Shop {
   hasStaffAccessCode: boolean
   /** Shop-wide deposit amount for a self-serve booking; null/0 = no deposit required, self-serve confirms immediately. */
   bookingDepositCents: number | null
+  /** When true, due follow-up emails send themselves. Per-quote pause is Quote.emailFollowUpAllowed. */
+  autoFollowUpEnabled: boolean
   createdAt: string
   updatedAt: string
 }
@@ -669,6 +671,10 @@ export interface Appointment {
   shopId: string
   bayId: string
   customerId: string
+  /** Denormalized from the customer row so the calendar can show who's coming in — and build a tap-to-text reminder — without a second query per appointment. */
+  customerFirstName: string
+  customerLastName: string | null
+  customerPhone: string | null
   source: AppointmentSource
   status: AppointmentStatus
   /** ISO timestamp. */

@@ -1122,11 +1122,15 @@ export class DemoRepository implements DataRepository {
     )
     if (conflict) throw new Error('That bay is already booked for part of this time.')
 
+    const apptCustomer = this.db.customers.find((c) => c.id === customerId)
     const appointment: Appointment = {
       id: newId(),
       shopId: this.db.shop.id,
       bayId: input.bayId,
       customerId,
+      customerFirstName: apptCustomer?.firstName ?? '',
+      customerLastName: apptCustomer?.lastName ?? null,
+      customerPhone: apptCustomer?.phone ?? null,
       source: input.source,
       status: 'confirmed',
       startsAt: input.startsAt,
@@ -1272,11 +1276,15 @@ export class DemoRepository implements DataRepository {
     const status: 'confirmed' | 'awaiting_deposit' =
       this.db.shop.bookingDepositCents && this.db.shop.bookingDepositCents > 0 ? 'awaiting_deposit' : 'confirmed'
 
+    const publicCustomer = this.db.customers.find((c) => c.id === customerId)
     const appointment: Appointment = {
       id: newId(),
       shopId: this.db.shop.id,
       bayId: availableBay.id,
       customerId,
+      customerFirstName: publicCustomer?.firstName ?? '',
+      customerLastName: publicCustomer?.lastName ?? null,
+      customerPhone: publicCustomer?.phone ?? null,
       source: sourceQuoteId ? 'from_quote' : 'self_serve',
       status,
       startsAt: input.startsAt,

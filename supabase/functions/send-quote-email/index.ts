@@ -479,18 +479,39 @@ Deno.serve(async (req) => {
   }
   const template = templateType as TemplateType
 
-  // Client bound to the caller's JWT — used only to identify the user.
-  const authHeader = req.headers.get('Authorization') ?? ''
-  const userClient = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_ANON_KEY')!,
-    { global: { headers: { Authorization: authHeader } } },
-  )
-  const {
-    data: { user },
-  } = await userClient.auth.getUser()
-  if (!user) {
-    return fail(401, 'You must be signed in to send emails.')
+  // Two ways in.
+  //
+  // 1. A signed-in staff member pressing Send (the original path). Their user
+  //    id is recorded on the email and the timeline event.
+  // 2. The scheduled follow-up sender (send-quote-followups), which has no
+  //    human behind it and authenticates with CRON_SECRET instead. Sends are
+  //    then recorded with a null actor and an `automatic: true` marker, so the
+  //    timeline never implies a person pressed the button.
+  //
+  // The membership check below is skipped for (2) — there is no user to check
+  // — but every other guard (shop active, customer permission, opt-out, quote
+  // status) still runs exactly the same, which is the point of routing
+  // automated sends through this function rather than duplicating it.
+  const cronSecret = Deno.env.get('CRON_SECRET')
+  const providedCronSecret = req.headers.get('X-Cron-Secret')
+  const isSystemSend = Boolean(cronSecret && providedCronSecret && providedCronSecret === cronSecret)
+
+  let user: { id: string } | null = null
+  if (!isSystemSend) {
+    // Client bound to the caller's JWT — used only to identify the user.
+    const authHeader = req.headers.get('Authorization') ?? ''
+    const userClient = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_ANON_KEY')!,
+      { global: { headers: { Authorization: authHeader } } },
+    )
+    const {
+      data: { user: authedUser },
+    } = await userClient.auth.getUser()
+    if (!authedUser) {
+      return fail(401, 'You must be signed in to send emails.')
+    }
+    user = authedUser
   }
 
   // Service-role client for reads/writes after we verify membership ourselves.
@@ -508,15 +529,19 @@ Deno.serve(async (req) => {
     return fail(404, 'Quote not found.')
   }
 
-  // The caller must be a member of the quote's shop.
-  const { data: membership } = await admin
-    .from('shop_memberships')
-    .select('id')
-    .eq('shop_id', quote.shop_id)
-    .eq('user_id', user.id)
-    .maybeSingle()
-  if (!membership) {
-    return fail(403, 'You are not a member of this shop.')
+  // The caller must be a member of the quote's shop. Skipped for a system
+  // send, which has no user — the scheduler already scoped its candidates to
+  // shops with automation enabled.
+  if (user) {
+    const { data: membership } = await admin
+      .from('shop_memberships')
+      .select('id')
+      .eq('shop_id', quote.shop_id)
+      .eq('user_id', user.id)
+      .maybeSingle()
+    if (!membership) {
+      return fail(403, 'You are not a member of this shop.')
+    }
   }
 
   const customer = quote.customers
@@ -632,7 +657,7 @@ Deno.serve(async (req) => {
       template_type: template,
       subject,
       status: 'sending',
-      sent_by: user.id,
+      sent_by: user?.id ?? null,
     })
     .select('id, delivery_token')
     .single()
@@ -699,8 +724,8 @@ Deno.serve(async (req) => {
     await admin.from('quote_events').insert({
       quote_id: quoteId,
       event_type: 'email_failed',
-      metadata: { templateType: template },
-      created_by: user.id,
+      metadata: { templateType: template, automatic: isSystemSend },
+      created_by: user?.id ?? null,
     })
     return fail(502, 'The email provider rejected the message. Nothing was sent.')
   }
@@ -739,8 +764,8 @@ Deno.serve(async (req) => {
   await admin.from('quote_events').insert({
     quote_id: quoteId,
     event_type: 'email_sent',
-    metadata: { templateType: template },
-    created_by: user.id,
+    metadata: { templateType: template, automatic: isSystemSend },
+    created_by: user?.id ?? null,
   })
 
   // Safe response: no provider IDs, no internals.
