@@ -105,8 +105,15 @@ supplies source diagrams** (see §6).
 - Landing page: what it does, who it's for, pricing.
 - Onboarding: a shop owner should get from signup to first quote without a
   phone call.
-- Refresh `docs/PILOT_PLAYBOOK.md` — it still describes the removed
-  Good/Better/Insane tier system and needs rewriting for main + add-ons.
+- ~~Refresh `docs/PILOT_PLAYBOOK.md`~~ ✅ rewritten around a 30-day cycle
+  closing on the printed report; tiers and the removed deposit-link field are
+  gone, booking/deposits/financing-QR/shared-device are in.
+- ~~README truth pass~~ ✅ no longer claims tiers, slot-based building, "79
+  tests", or that SMS is absent from the codebase.
+
+**Still open in this stream:** demo data quality (a filled calendar and real
+product photos are the biggest remaining gap — `/demo` is what a prospect
+sees), and landing-page pricing copy.
 
 ### Stream E — Integration & QA
 Owned by the planner. Branch merges, conflict resolution, full regression
@@ -129,10 +136,23 @@ never happens.
   (`0020_import_legacy_inventory.sql`, renumbered from its original `0018`
   to avoid the collision above)
 - `0021` → Stream B (booking) — every "migration 0017"/"0019"/"0020"
-  reference below in the Booking spec means `0021` now
-- `0022`+ → reserved, unassigned
+  reference below in the Booking spec means `0021` now. **Applied? No.**
+- `0022` → `0022_public_quote_shop_slug.sql` (the "Book my install" CTA needs
+  the shop slug on the public quote payload). **Applied? No.**
+- `0023` → `0023_auto_follow_ups.sql` (shops.auto_follow_up_enabled +
+  list_due_follow_ups). **Applied? No.**
+- `0024` → `0024_invoice_financed_payment.sql` — a single `ALTER TYPE`; must be
+  run on its own, see the file header. **Applied? No.**
+- `0025`+ → reserved, unassigned. Stripe Connect deposits will take the next
+  number when that work starts.
 - Stream C needs no migration.
 - Never write a migration number you haven't been assigned.
+
+**Applied-to-production status is the thing that bites.** Run
+`supabase/check_migrations.sql` in the SQL editor before assuming anything —
+it probes each migration's real effect rather than trusting bookkeeping. As of
+this writing production has `0001`–`0016` plus `0018`/`0019`; everything from
+`0017` and `0020` onward is written but not yet applied.
 
 **Shared files are append-only.** These are touched by nearly every stream:
 
