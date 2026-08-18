@@ -28,7 +28,8 @@ import {
 } from '../../lib/packageBuilder'
 import { errorMessage } from '../../lib/errors'
 import { formatCurrency, parseDollarsToCents } from '../../lib/format'
-import { COMMON_MAKES, OTHER_MAKE, VEHICLE_YEARS, fetchModelsForMakeYear } from '../../lib/vehicleData'
+import { COMMON_MAKES, OTHER_MAKE, POPULAR_MAKES, VEHICLE_YEARS, fetchModelsForMakeYear } from '../../lib/vehicleData'
+import { LogoTile } from '../../components/LogoTile'
 import {
   TINT_VLT_PERCENTS,
   createDefaultWindowTintFormValues,
@@ -585,6 +586,25 @@ export default function NewQuotePage() {
           </div>
           {vehicleOpen ? (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            {/* One-tap tiles for the makes that actually roll in, above the full
+               list. People recognize a badge faster than they read a dropdown —
+               and a make with no logo file renders as a wordmark tile, which is
+               the design rather than a broken state (see LogoTile). */}
+            <div className="col-span-2 grid grid-cols-4 gap-1.5 sm:col-span-4 sm:grid-cols-8">
+              {POPULAR_MAKES.map((make) => (
+                <LogoTile
+                  key={make}
+                  name={make}
+                  kind="car"
+                  selected={watchedMake === make}
+                  onClick={() => {
+                    setCustomMake(false)
+                    setValue('vehicleMake', make, { shouldDirty: true })
+                  }}
+                />
+              ))}
+            </div>
+
               <Field label="Year" htmlFor="q-year" error={errors.vehicleYear?.message}>
                 <Select id="q-year" defaultValue="" {...register('vehicleYear')}>
                   <option value="" disabled>

@@ -25,6 +25,16 @@ export const COMMON_MAKES: string[] = [
   'Volkswagen', 'Volvo', OTHER_MAKE,
 ]
 
+/**
+ * The handful of makes that cover most of a Dallas-area shop's customers,
+ * offered as one-tap tiles above the full list. Order is roughly by how often
+ * they roll into these bays, not alphabetical — the point is that the common
+ * case is the first thing your thumb lands on.
+ */
+export const POPULAR_MAKES: string[] = [
+  'Ford', 'Chevrolet', 'Toyota', 'Honda', 'Nissan', 'Dodge', 'GMC', 'Jeep',
+]
+
 interface NhtsaModelResult {
   Make_Name?: string
   Model_Name?: string

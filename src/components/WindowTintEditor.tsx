@@ -15,6 +15,7 @@ import {
 import { TINT_VISUAL_SLOT_POSITIONS, type TintVisualSlot } from '../lib/carDiagrams'
 import { formatCurrency } from '../lib/format'
 import { Field, Input } from './ui'
+import { BodyStyleSilhouette } from './BodyStyleSilhouette'
 
 interface WindowTintEditorProps {
   /** Scopes this entry's DOM ids when a quote carries several tint options. */
@@ -129,24 +130,30 @@ export default function WindowTintEditor({ index, value, onChange }: WindowTintE
 
   return (
     <div className="space-y-4">
-      {/* Body style still drives which window rows exist below (a single-cab
-         truck has no rear doors, a coupe has quarter glass instead) — it's
-         just a plain label picker now. The car-diagram thumbnails that used
-         to sit here are pulled pending the top-down redesign. */}
+      {/* Body style drives which window rows exist below (a single-cab truck
+         has no rear doors, a coupe has quarter glass instead). Shown as
+         silhouettes rather than labels: "SUV (4 window)" and "SUV (6 window)"
+         are hard to tell apart as words while a customer waits at the counter,
+         and instant to tell apart as shapes. */}
       <div>
         <p className="mb-1.5 text-sm font-semibold text-ink">What kind of vehicle is this?</p>
-        <div className="flex flex-wrap gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           {BODY_STYLE_ORDER.map((style) => (
             <button
               key={style}
               type="button"
               onClick={() => onChange({ ...value, bodyStyle: style, windows: windowsForBodyStyle(style) })}
               aria-pressed={bodyStyle === style}
-              className={`min-h-11 rounded-xl border-2 px-3.5 text-sm font-semibold transition-colors ${
-                bodyStyle === style ? 'border-brand bg-blue-50 text-ink' : 'border-zinc-200 text-zinc-600 hover:border-zinc-300'
+              className={`flex min-h-20 flex-col items-center justify-center gap-1 rounded-xl border-2 px-2 py-2 transition-colors ${
+                bodyStyle === style
+                  ? 'border-brand bg-blue-50 text-brand'
+                  : 'border-zinc-200 text-zinc-400 hover:border-zinc-300'
               }`}
             >
-              {BODY_STYLE_INFO[style].label}
+              <BodyStyleSilhouette bodyStyle={style} className="h-9 w-full" />
+              <span className={`text-xs font-semibold ${bodyStyle === style ? 'text-ink' : 'text-zinc-600'}`}>
+                {BODY_STYLE_INFO[style].label}
+              </span>
             </button>
           ))}
         </div>
