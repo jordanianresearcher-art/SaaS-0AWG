@@ -573,6 +573,8 @@ export interface QuoteBundle {
 /** Sanitized shape returned to the anonymous public quote page. */
 export interface PublicQuote {
   shopName: string
+  /** Feeds the "Book my install" CTA -> /book/:shopSlug?quote=<token>. */
+  shopSlug: string
   shopLogoUrl: string | null
   shopPhone: string
   shopEmail: string

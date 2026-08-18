@@ -9,6 +9,7 @@ import { Button, Card, EmptyState, Field, Input, LoadingBlock, Modal, Select, Te
 import CatalogOrganizer from '../../components/CatalogOrganizer'
 import { ProductSuggestField } from '../../components/ProductSuggestField'
 import { LogoUploadField } from '../../components/LogoUploadField'
+import { BookingSettingsSection } from '../../components/BookingSettingsSection'
 import { errorMessage } from '../../lib/errors'
 import { formatCurrency, formatDateTime, parseDollarsToCents } from '../../lib/format'
 import {
@@ -165,6 +166,8 @@ export default function SettingsPage() {
           </Button>
         </Card>
       </form>
+
+      <BookingSettingsSection />
 
       <FinancingSection />
 

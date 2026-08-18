@@ -9,9 +9,12 @@ import AuthConfirmPage from './pages/AuthConfirmPage'
 import DemoEntryPage from './pages/DemoEntryPage'
 import JoinPage from './pages/JoinPage'
 import PublicQuotePage from './pages/PublicQuotePage'
+import BookingPage from './pages/BookingPage'
+import BookingManagePage from './pages/BookingManagePage'
 import OnboardingPage from './pages/OnboardingPage'
 import DashboardPage from './pages/app/DashboardPage'
 import ScanWorkspacePage from './pages/app/ScanWorkspacePage'
+import CalendarPage from './pages/app/CalendarPage'
 import InventoryPage from './pages/app/InventoryPage'
 import InventoryDetailPage from './pages/app/InventoryDetailPage'
 import NewInventoryItemPage from './pages/app/NewInventoryItemPage'
@@ -74,6 +77,8 @@ export default function App() {
       <Route path="/demo" element={<DemoEntryPage />} />
       <Route path="/join" element={<JoinPage />} />
       <Route path="/q/:publicToken" element={<PublicQuotePage />} />
+      <Route path="/book/:shopSlug" element={<BookingPage />} />
+      <Route path="/booking/:publicToken" element={<BookingManagePage />} />
       <Route path="/onboarding" element={<OnboardingPage />} />
       <Route
         path="/app"
@@ -89,6 +94,14 @@ export default function App() {
         <Route path="inventory/new" element={<NewInventoryItemPage />} />
         <Route path="inventory/check" element={<InventoryCheckPage />} />
         <Route path="inventory/:itemId" element={<InventoryDetailPage />} />
+        <Route
+          path="calendar"
+          element={
+            <RequireFullAccess>
+              <CalendarPage />
+            </RequireFullAccess>
+          }
+        />
         <Route
           path="quotes"
           element={

@@ -69,6 +69,12 @@ export async function resolvePublicBookingApi(shopSlug: string): Promise<PublicB
         })
         if (error) throw error
         const result = data as { publicToken: string; status: AppointmentStatus }
+        // Fire-and-forget — the customer's own on-screen confirmation
+        // (navigating to /booking/:publicToken) never depends on or waits
+        // for this. Same trust model as notifyHighIntent in publicQuote.ts.
+        void supabase.functions.invoke('send-booking-email', { body: { publicToken: result.publicToken } }).catch((err) => {
+          console.error('send-booking-email failed', err)
+        })
         return result
       },
     }

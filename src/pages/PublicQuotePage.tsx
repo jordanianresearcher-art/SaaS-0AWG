@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { MapPin, Phone, Mail, CreditCard, Check } from 'lucide-react'
 import type { PublicQuote, ResponseType } from '../types'
 import { resolvePublicQuoteApi, type PublicQuoteApi } from '../data/publicQuote'
@@ -341,17 +341,21 @@ export default function PublicQuotePage() {
           ) : (
             <div className="space-y-3">
               {/* 1 — the primary action. Filled, full-width, one tap, no
-                 form in the way. This is what the email is asking for. */}
-              <button
-                type="button"
+                 form in the way. Now a real booking flow (pick a real date
+                 and time) rather than only a "call me" signal — the quote
+                 token carries the customer's info forward so booking skips
+                 straight to picking a time. Also fires the same
+                 'ready_to_book' response so shop-side tracking/reporting
+                 keeps working exactly as before. */}
+              <Link
+                to={`/book/${quote.shopSlug}?quote=${publicToken}`}
                 onClick={() => void submit('ready_to_book', selectedOption, null)}
-                disabled={submitting}
-                className="flex min-h-16 w-full items-center justify-center gap-2 rounded-2xl text-lg font-black text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-60"
+                className="flex min-h-16 w-full items-center justify-center gap-2 rounded-2xl text-lg font-black text-white transition-opacity"
                 style={{ backgroundColor: color }}
               >
                 <Check className="h-6 w-6" aria-hidden="true" />
-                {submitting ? 'Sending…' : "I'm ready to book"}
-              </button>
+                Book my install
+              </Link>
 
               {/* 2 — removes the price objection. Outlined, still one tap. */}
               <button

@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Barcode, Boxes, FileText, BellRing, BarChart3, Settings, LogOut } from 'lucide-react'
+import { LayoutDashboard, Barcode, Boxes, FileText, CalendarDays, BellRing, BarChart3, Settings, LogOut } from 'lucide-react'
 import { useAppData } from '../data/AppDataContext'
 import { Logo } from '../components/ui'
 import type { ReactNode } from 'react'
@@ -11,6 +11,7 @@ const FULL_NAV = [
   // below (not one of the flanking slots, see bottomFlankItems).
   { to: '/app/scan', label: 'Scan', icon: Barcode, end: false },
   { to: '/app/inventory', label: 'Inventory', icon: Boxes, end: false },
+  { to: '/app/calendar', label: 'Calendar', icon: CalendarDays, end: false },
   { to: '/app/quotes', label: 'Quotes', icon: FileText, end: false },
   { to: '/app/follow-ups', label: 'Follow-ups', icon: BellRing, end: false },
   { to: '/app/reports', label: 'Reports', icon: BarChart3, end: false },
@@ -74,9 +75,13 @@ export function AppLayout() {
   // Mobile bottom nav flanks the center Scan button with up to two items a
   // side. Reports is desktop-nav/Home-only — five items don't split evenly
   // around a center button, and Inventory earns the slot Reports gives up.
+  // Calendar takes Follow-ups' slot here: booking is the on-the-go, glance-
+  // at-it-between-customers task; Follow-ups stays one tap away on the
+  // desktop nav and becomes an oversight queue rather than a daily to-do
+  // once auto follow-ups ship (see docs/MVP_PLAN.md's Phase 5 notes).
   const bottomFlankItems = isInventoryOnly
     ? nav.filter((item) => item.to !== '/app/scan')
-    : nav.filter((item) => ['/app', '/app/inventory', '/app/quotes', '/app/follow-ups'].includes(item.to))
+    : nav.filter((item) => ['/app', '/app/inventory', '/app/calendar', '/app/quotes'].includes(item.to))
 
   return (
     <div className="flex min-h-screen flex-col">

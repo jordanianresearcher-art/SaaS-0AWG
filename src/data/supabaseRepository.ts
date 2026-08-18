@@ -1547,6 +1547,15 @@ export class SupabaseRepository implements DataRepository {
     )
     if (servicesError) throw servicesError
 
+    // Fire-and-forget confirmation email — staff already told the customer
+    // verbally on the phone in the common case, but a written confirmation
+    // with the manage/cancel link is still worth sending, and never worth
+    // blocking "Book & send" on. Same trust model as notifyHighIntent: a
+    // failure here must never surface to the person who just booked.
+    void this.supabase.functions.invoke('send-booking-email', { body: { publicToken: (appt as Row).public_token } }).catch((err) => {
+      console.error('send-booking-email failed', err)
+    })
+
     return mapAppointment({
       ...(appt as Row),
       appointment_services: input.services.map((s, i) => ({

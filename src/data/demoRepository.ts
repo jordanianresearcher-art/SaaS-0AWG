@@ -842,6 +842,7 @@ export class DemoRepository implements DataRepository {
     // Sanitized: no last name, phone, email, notes, or internal metadata.
     return {
       shopName: shop.name,
+      shopSlug: shop.slug,
       shopLogoUrl: shop.logoUrl,
       shopPhone: shop.phone,
       shopEmail: shop.email,

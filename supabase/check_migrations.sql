@@ -111,6 +111,13 @@ from (
      to_regclass('public.appointments') is not null
        and exists (select 1 from information_schema.columns
                    where table_schema = 'public' and table_name = 'shops'
-                     and column_name = 'booking_deposit_cents'))
+                     and column_name = 'booking_deposit_cents')),
+
+    ('0022 public quote shop slug',
+     exists (select 1 from pg_proc p
+             join pg_namespace n on n.oid = p.pronamespace
+             where n.nspname = 'public'
+               and p.proname = 'get_public_quote'
+               and pg_get_functiondef(p.oid) like '%shopSlug%'))
 ) as t(migration, applied)
 order by migration;

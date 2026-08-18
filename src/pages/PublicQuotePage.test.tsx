@@ -12,6 +12,8 @@ function renderPage(token: string, query = '') {
     <MemoryRouter initialEntries={[`/q/${token}${query}`]}>
       <Routes>
         <Route path="/q/:publicToken" element={<PublicQuotePage />} />
+        {/* Stub so the "Book my install" link's navigation resolves cleanly — this page's own content isn't under test here. */}
+        <Route path="/book/:shopSlug" element={<div>Booking wizard</div>} />
       </Routes>
     </MemoryRouter>,
   )
@@ -102,22 +104,30 @@ describe('PublicQuotePage', () => {
     expect(target.events.filter((e) => e.eventType === 'quote_viewed')).toHaveLength(1) // still just the seeded one
   })
 
-  it('books in a single tap — the primary action needs no form', async () => {
-    const user = userEvent.setup()
+  it('the primary action links straight to real booking, carrying the quote token, with no form in the way', async () => {
     renderPage(token)
     await screen.findByText(/here's your quote/i)
 
-    // "I'm ready to book" is the ranked primary action: one tap submits, with
-    // no option picker or message box in the way.
-    await user.click(screen.getByRole('button', { name: /i'm ready to book/i }))
+    // "Book my install" is the ranked primary action: a real link to the
+    // booking wizard (not another response-only submit), pre-filled with
+    // this quote's shop and token so the customer skips re-entering their
+    // info — see src/pages/BookingPage.tsx's ?quote= handling.
+    const link = screen.getByRole('link', { name: /book my install/i })
+    expect(link).toHaveAttribute('href', expect.stringContaining(`/book/big-tex-audio?quote=${token}`))
+  })
 
-    expect(await screen.findByText(/got it — thanks!/i)).toBeInTheDocument()
+  it('still records the ready_to_book signal for shop-side tracking when the booking link is clicked', async () => {
+    const user = userEvent.setup()
+    renderPage(token)
+    await screen.findByText(/here's your quote/i)
+    await user.click(screen.getByRole('link', { name: /book my install/i }))
 
-    const fresh = new DemoRepository()
-    const bundles = await fresh.listQuoteBundles()
-    const target = bundles.find((b) => b.quote.publicToken === token)!
-    expect(target.responses[0].responseType).toBe('ready_to_book')
-    expect(target.quote.status).toBe('responded')
+    await waitFor(async () => {
+      const fresh = new DemoRepository()
+      const bundles = await fresh.listQuoteBundles()
+      const target = bundles.find((b) => b.quote.publicToken === token)!
+      expect(target.responses[0]?.responseType).toBe('ready_to_book')
+    })
   })
 
   it('lets a lower-intent response carry a written message', async () => {
