@@ -5,6 +5,7 @@
 // what, nothing optional in the way.
 
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, MessageSquare, Plus, X } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
@@ -380,6 +381,25 @@ function AddAppointmentModal({ dateKey, onBooked }: { dateKey: string; onBooked:
   return (
     <div className="space-y-4">
       <Field label="Services" htmlFor="appt-services" required>
+        {/* A required field with nothing in it is a dead end: Save demands a
+            service, the time picker stays hidden (it needs a duration), and
+            nothing on this screen can resolve it. Say what's missing and link
+            to where it's fixed. Migration 0025 seeds starter services so a new
+            shop never lands here — this covers a shop that deleted them all. */}
+        {services.length === 0 ? (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-4">
+            <p className="text-base font-semibold text-amber-900">No services yet</p>
+            <p className="mt-1 text-sm text-amber-800">
+              Add what you can book — a system install, a tint job — then come back and schedule it.
+            </p>
+            <Link
+              to="/app/settings"
+              className="mt-3 inline-flex min-h-11 items-center justify-center rounded-xl bg-amber-900 px-4 text-base font-semibold text-white hover:bg-amber-950"
+            >
+              Add a service in Settings
+            </Link>
+          </div>
+        ) : null}
         <div className="flex flex-wrap gap-2">
           {services.map((s) => {
             const active = selectedServiceIds.includes(s.id)
@@ -454,7 +474,14 @@ function AddAppointmentModal({ dateKey, onBooked }: { dateKey: string; onBooked:
           {error}
         </p>
       ) : null}
-      <Button className="w-full" disabled={saving} onClick={() => void save()}>
+      {/* Disabled rather than clickable-then-rejected: an error you cannot act
+          on from the screen you are looking at is worse than a button that
+          plainly isn't ready yet. */}
+      <Button
+        className="w-full"
+        disabled={saving || services.length === 0 || selectedServiceIds.length === 0 || !startTime}
+        onClick={() => void save()}
+      >
         {saving ? 'Booking…' : 'Book & send'}
       </Button>
     </div>

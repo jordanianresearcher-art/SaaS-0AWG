@@ -349,7 +349,9 @@ describe('DemoRepository', () => {
 
   it('resolveProduct never makes a real AI/web-search call, and text queries always resolve to no candidates', async () => {
     const result = await repo.resolveProduct({ kind: 'text', query: 'NA-12F' })
-    expect(result).toEqual({ candidates: [], retainedInput: 'NA-12F' })
+    // aiConfigured is true in demo mode: its results are canned, not absent —
+    // an empty list here is a real 'found nothing', not 'nothing looked'.
+    expect(result).toEqual({ candidates: [], retainedInput: 'NA-12F', aiConfigured: true })
   })
 
   it('resolveProduct simulates a resolved-but-unconfirmed barcode deterministically, for the fixed demo code', async () => {
@@ -361,7 +363,7 @@ describe('DemoRepository', () => {
 
   it('resolveProduct genuinely finds nothing for any other unrecognized barcode — never dead-ends silently, retains the code', async () => {
     const result = await repo.resolveProduct({ kind: 'barcode', code: '000000000000' })
-    expect(result).toEqual({ candidates: [], retainedInput: '000000000000' })
+    expect(result).toEqual({ candidates: [], retainedInput: '000000000000', aiConfigured: true })
   })
 
   it('resolveProduct never makes a real vision call for photo lookups, and deterministically returns candidates so the confirmation UI is exercisable', async () => {

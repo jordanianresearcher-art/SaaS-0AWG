@@ -335,6 +335,11 @@ export default function ScanWorkspacePage() {
         setResolveKind('photo')
         setResolveCandidates(resolved.candidates)
         openedCandidateModal = true
+      } else if (!resolved.aiConfigured) {
+        // Distinct from a genuine miss: nothing looked at all, because no AI
+        // provider key is funded. Saying "couldn't identify" here sends the
+        // shop hunting for a better photo of a problem that is pure config.
+        toast('error', "Product lookup isn't set up yet — an admin needs to add an AI key in Supabase. You can still type the details in.")
       } else {
         toast('error', "Couldn't identify a product in that photo. Add it manually below.")
       }

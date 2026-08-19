@@ -806,7 +806,7 @@ export class SupabaseRepository implements DataRepository {
         if (!(error instanceof FunctionsHttpError) || error.context?.status !== 404) {
           console.error('resolve-product failed', error)
         }
-        return { candidates: [], retainedInput }
+        return { candidates: [], retainedInput, aiConfigured: true }
       }
       const raw = Array.isArray(data?.candidates) ? (data.candidates as Row[]) : []
       const mapped: ProductResolutionCandidate[] = raw
@@ -833,10 +833,18 @@ export class SupabaseRepository implements DataRepository {
           warnings: Array.isArray(c.warnings) ? c.warnings.filter((w: unknown): w is string => typeof w === 'string') : [],
         }))
         .filter((c) => c.name.length > 0)
-      return { candidates: rankCandidates(dedupeCandidates(mapped), retainedInput), retainedInput }
+      return {
+        candidates: rankCandidates(dedupeCandidates(mapped), retainedInput),
+        retainedInput,
+        // Only a definite `false` from the function means unconfigured. An
+        // older deploy that doesn't send the field, or any transport
+        // failure, must not be reported to the shop as "lookup isn't set
+        // up" — that would send them chasing a config problem they don't have.
+        aiConfigured: (data as Row)?.aiConfigured !== false,
+      }
     } catch (err) {
       console.error('resolve-product failed', err)
-      return { candidates: [], retainedInput }
+      return { candidates: [], retainedInput, aiConfigured: true }
     }
   }
 

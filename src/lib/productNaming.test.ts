@@ -179,4 +179,45 @@ describe('canonicalizeProductFields', () => {
   it('never produces an empty name', () => {
     expect(canonicalizeProductFields({ brand: null, model: null, name: null }).name).toBe('Item')
   })
+  it('does not restore a brand+model name as the descriptor — the intake duplication bug', () => {
+    // Rapid intake used to build name as brand + query, so a DS18 Project 360
+    // arrived as brand "DS18", model "DS18 Project 360", name "DS18 DS18
+    // Project 360". The descriptor correctly collapses to nothing; the old
+    // fallback then put the whole string back and the tape read
+    // "DS18 Project 360 DS18 Project 360".
+    const out = canonicalizeProductFields({
+      brand: 'DS18',
+      model: 'DS18 Project 360',
+      name: 'DS18 DS18 Project 360',
+    })
+    expect(out.brand).toBe('DS18')
+    expect(out.model).toBe('Project 360')
+    expect(out.name).toBe('')
+    expect(formatItemDisplayName(out)).toBe('DS18 Project 360')
+  })
+
+  it('leaves an empty descriptor empty whenever there is a brand or model to carry the name', () => {
+    expect(canonicalizeProductFields({ brand: 'Kicker', model: 'CompR 12', name: 'Kicker CompR 12' }).name).toBe('')
+    expect(canonicalizeProductFields({ brand: 'Kicker', model: null, name: 'Kicker' }).name).toBe('')
+    expect(canonicalizeProductFields({ brand: null, model: 'CompR 12', name: 'CompR 12' }).name).toBe('')
+  })
+
+  it('still falls back to something readable when there is no identity at all', () => {
+    expect(canonicalizeProductFields({ brand: null, model: null, name: 'Custom fab work' }).name).toBe(
+      'Custom fab work',
+    )
+    expect(canonicalizeProductFields({ brand: null, model: null, name: null }).name).toBe('Item')
+  })
+
+  it('round-trips: canonicalize then display never repeats a word', () => {
+    for (const input of [
+      { brand: 'DS18', model: 'DS18 Project 360', name: 'DS18 DS18 Project 360' },
+      { brand: 'kicker', model: 'Kicker CompR 12', name: 'Kicker CompR 12' },
+      { brand: 'Skar', model: 'SDR-12', name: 'Skar SDR-12 subwoofer' },
+    ]) {
+      const display = formatItemDisplayName(canonicalizeProductFields(input))
+      const words = display.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(Boolean)
+      expect(new Set(words).size).toBe(words.length)
+    }
+  })
 })

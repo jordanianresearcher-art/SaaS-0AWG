@@ -435,20 +435,20 @@ export class DemoRepository implements DataRepository {
     // one fixed "known unknown" code returns a couple of plausible-looking
     // candidates, and everything else genuinely resolves to nothing.
     if (request.kind === 'text') {
-      return { candidates: [], retainedInput: request.query.trim() }
+      return { candidates: [], retainedInput: request.query.trim(), aiConfigured: true }
     }
     if (request.kind === 'photo') {
       // Same rule: no real vision call in demo mode. Deterministically
       // "succeeds" with the same canned candidates as the fixed unresolved
       // barcode, purely so the photo-lookup confirmation UI is exercisable
       // in demo/Playwright without a camera or network access.
-      return { candidates: DEMO_RESOLVED_CANDIDATES, retainedInput: 'photo' }
+      return { candidates: DEMO_RESOLVED_CANDIDATES, retainedInput: 'photo', aiConfigured: true }
     }
     const code = request.code.trim()
     if (code === DEMO_UNRESOLVED_BARCODE) {
-      return { candidates: DEMO_RESOLVED_CANDIDATES, retainedInput: code }
+      return { candidates: DEMO_RESOLVED_CANDIDATES, retainedInput: code, aiConfigured: true }
     }
-    return { candidates: [], retainedInput: code }
+    return { candidates: [], retainedInput: code, aiConfigured: true }
   }
 
   async listInvoices(): Promise<Invoice[]> {

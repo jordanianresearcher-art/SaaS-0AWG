@@ -133,6 +133,16 @@ from (
      exists (select 1 from pg_enum e
              join pg_type t on t.oid = e.enumtypid
              where t.typname = 'invoice_payment_method'
-               and e.enumlabel = 'financed'))
+               and e.enumlabel = 'financed')),
+
+    -- Probed by effect: the RPC now seeds booking defaults, so its body
+    -- mentions the bays table. A shop created before this ran has an empty
+    -- calendar and cannot book.
+    ('0025 seed new shop booking',
+     exists (select 1 from pg_proc p
+             join pg_namespace n on n.oid = p.pronamespace
+             where n.nspname = 'public'
+               and p.proname = 'create_shop_with_owner'
+               and pg_get_functiondef(p.oid) like '%insert into bays%'))
 ) as t(migration, applied)
 order by migration;

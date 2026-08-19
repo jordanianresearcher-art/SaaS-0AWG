@@ -170,13 +170,39 @@ export function canonicalizeModel(raw: string | null | undefined, brand?: string
   return trimmed || null
 }
 
-/** Strip a leading brand and model from a descriptor so the rendered name doesn't repeat them. */
-function cleanDescriptor(descriptor: string, brand: string | null, model: string | null): string {
+/**
+ * Strip a leading brand and model from a descriptor so the rendered name
+ * doesn't repeat them.
+ *
+ * Both the canonical AND the raw as-typed forms are stripped, because they
+ * often differ: `canonicalizeBrand('Skar')` expands to "Skar Audio", but the
+ * descriptor the operator typed still says "Skar SDR-12 subwoofer". Stripping
+ * only the canonical form leaves the short one behind and the display reads
+ * "Skar Audio SDR-12 — Skar SDR-12 subwoofer".
+ *
+ * Stripping repeats until nothing more matches, so a descriptor carrying both
+ * the brand and the model as a prefix is fully reduced regardless of order.
+ */
+function cleanDescriptor(descriptor: string, ...prefixes: (string | null | undefined)[]): string {
   let out = descriptor.trim().replace(/\s+/g, ' ')
-  for (const prefix of [brand, model]) {
-    if (!prefix) continue
-    const pattern = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*[-–—]?\\s*`, 'i')
-    out = out.replace(pattern, '').trim()
+  const candidates = prefixes
+    .map((p) => p?.trim())
+    .filter((p): p is string => Boolean(p))
+    // Longest first: strip "Skar Audio" before "Skar", so the longer match
+    // isn't left with a dangling "Audio".
+    .sort((a, b) => b.length - a.length)
+
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const prefix of candidates) {
+      const pattern = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*[-–—]?\\s*`, 'i')
+      const next = out.replace(pattern, '').trim()
+      if (next !== out) {
+        out = next
+        changed = true
+      }
+    }
   }
   return out
 }
@@ -198,7 +224,7 @@ export function formatItemDisplayName(item: NameableItem): string {
   const brand = canonicalizeBrand(item.brand)
   const model = canonicalizeModel(item.model, item.brand)
   const rawName = item.name?.trim() ?? ''
-  const descriptor = rawName ? cleanDescriptor(rawName, brand, model) : ''
+  const descriptor = rawName ? cleanDescriptor(rawName, brand, item.brand, model, item.model) : ''
 
   const identity = [brand, model].filter(Boolean).join(' ')
   if (identity && descriptor) return `${identity} — ${descriptor}`
@@ -267,15 +293,26 @@ export function canonicalizeProductFields(input: {
   const model = canonicalizeModel(input.model, input.brand)
   const descriptor =
     buildDescriptorFromSpecs(input.specs, input.name) ?? (input.name?.trim() || null)
-  const name = descriptor ? cleanDescriptor(descriptor, brand, model) : ''
+  const name = descriptor ? cleanDescriptor(descriptor, brand, input.brand, model, input.model) : ''
+
+  // `name` holds the DESCRIPTOR half only — brand and model live in their own
+  // columns and formatItemDisplayName reassembles them for display.
+  //
+  // An empty descriptor is a correct, meaningful result: it means the incoming
+  // name was nothing but the brand and model repeated (intake often builds
+  // `name` as brand + query, e.g. "DS18" + "DS18 Project 360"). Falling back to
+  // the raw input here would restore that concatenation and undo the split we
+  // just performed — which is exactly the duplication this file exists to
+  // prevent, and is what produced "DS18 Project 360 DS18 Project 360" on the
+  // intake tape.
+  //
+  // So only reach for a fallback when there is genuinely nothing to show: no
+  // brand, no model, and no descriptor.
+  const hasIdentity = Boolean(brand || model)
   return {
     brand,
     model,
-    // `name` holds the descriptor half only — the brand and model live in their
-    // own columns, and formatItemDisplayName reassembles them. Storing the full
-    // string here would reintroduce exactly the duplication this file exists to
-    // prevent.
-    name: name || input.name?.trim() || 'Item',
+    name: name || (hasIdentity ? '' : input.name?.trim() || 'Item'),
   }
 }
 

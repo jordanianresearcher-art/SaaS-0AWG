@@ -392,6 +392,14 @@ export interface ProductResolveResult {
   candidates: ProductResolutionCandidate[]
   /** The original code/query, always returned — even an empty-candidates result never loses what was scanned/typed, so the caller can fall back to a custom item with it prefilled. */
   retainedInput: string
+  /**
+   * False when the backend has no AI provider key funded, so nothing actually
+   * looked the product up. Without this an unconfigured install is
+   * indistinguishable from a genuine miss — both come back with zero
+   * candidates — and a shop concludes lookup is broken. Demo mode reports
+   * true: its results are canned, not absent.
+   */
+  aiConfigured: boolean
 }
 
 export interface ShopifyImportOptions {

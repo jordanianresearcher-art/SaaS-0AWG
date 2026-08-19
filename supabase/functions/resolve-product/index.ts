@@ -717,6 +717,13 @@ Deno.serve(async (req: Request) => {
     return fail(401, 'You must be signed in to resolve a product.')
   }
 
+  // Whether ANY AI provider is funded. Reported on every response so the app
+  // can tell "the AI looked and found nothing" apart from "no AI key is set,
+  // so nothing ever looked". Those are identical from the client's side
+  // otherwise — both return zero candidates — and the shop is left thinking
+  // lookup is broken when it was simply never switched on.
+  const aiConfigured = Boolean(Deno.env.get('OPENAI_API_KEY') || Deno.env.get('ANTHROPIC_API_KEY'))
+
   const body = await req.json().catch(() => null)
   const shopId = typeof body?.shopId === 'string' ? body.shopId : ''
   const kind = body?.kind === 'barcode' || body?.kind === 'text' || body?.kind === 'photo' ? body.kind : null
@@ -756,7 +763,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const candidates = await resolveViaVision(imageBase64, mediaType)
-    return json(200, { ok: true, candidates, cached: false })
+    return json(200, { ok: true, candidates, cached: false, aiConfigured })
   }
 
   // Optional brand context — the shop's "brand lock" while receiving a
@@ -811,7 +818,7 @@ Deno.serve(async (req: Request) => {
       ...c,
       source: 'resolution_cache' as const,
     }))
-    return json(200, { ok: true, candidates, cached: true })
+    return json(200, { ok: true, candidates, cached: true, aiConfigured })
   }
 
   // 2. Resolve fresh.
@@ -879,7 +886,7 @@ Deno.serve(async (req: Request) => {
   // straight back and never runs the search at all — so leave the cache
   // untouched and let the real lookup decide what gets stored.
   if (fast && candidates.length === 0) {
-    return json(200, { ok: true, candidates, cached: false, fast: true })
+    return json(200, { ok: true, candidates, cached: false, fast: true, aiConfigured })
   }
 
   const days = kind === 'barcode' ? BARCODE_CACHE_DAYS : TEXT_CACHE_DAYS
@@ -891,5 +898,5 @@ Deno.serve(async (req: Request) => {
       { onConflict: 'shop_id,kind,normalized_key' },
     )
 
-  return json(200, { ok: true, candidates, cached: false })
+  return json(200, { ok: true, candidates, cached: false, aiConfigured })
 })

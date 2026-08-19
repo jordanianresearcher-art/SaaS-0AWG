@@ -289,8 +289,16 @@ export default function NewInventoryItemPage() {
       ])
       if (resolved.status === 'fulfilled' && resolved.value.candidates.length > 0) {
         const top = resolved.value.candidates[0]
-        setQuery([top.brand, top.model ?? top.name].filter(Boolean).join(' '))
+        // Brand is locked separately below, so seed the query with the MODEL
+        // only. Prefixing the brand here is what made saveNew build a name of
+        // "DS18 DS18 Project 360" and print a doubled title on the tape.
+        setQuery(top.model ?? top.name)
+        if (top.brand) setBrand(top.brand)
         if (top.referencePriceCents != null) setPrice(String(top.referencePriceCents / 100))
+      } else if (resolved.status === 'fulfilled' && !resolved.value.aiConfigured) {
+        toast('error', "Product lookup isn't set up yet — an admin needs to add an AI key in Supabase. You can still type the details in.")
+      } else if (resolved.status === 'fulfilled') {
+        toast('error', "Couldn't identify that product from the photo. Type the model below.")
       }
       if (upload.status === 'rejected') toast('error', 'Photo upload failed — the product can still be saved.')
     } finally {
@@ -338,7 +346,14 @@ export default function NewInventoryItemPage() {
     if (!typed) return
     const resolvedBrand = fromHit?.brand ?? effectiveBrand ?? null
     const model = fromHit?.model ?? query.trim()
-    const name = fromHit?.name ?? [resolvedBrand, query.trim()].filter(Boolean).join(' ')
+    // `name` carries the DESCRIPTOR only — never brand or model, which have
+    // their own columns. Building it as brand + query (what this used to do)
+    // put the same words in twice and rendered as "DS18 Project 360 DS18
+    // Project 360" on the tape. canonicalizeProductFields strips repeats on
+    // write, but the honest fix is not to duplicate them here in the first
+    // place: when all the operator typed was the brand and model, there simply
+    // is no descriptor yet, and an empty one is correct.
+    const name = fromHit?.name ?? ''
     const priceCents = price.trim() ? parseDollarsToCents(price) : (fromHit?.priceCents ?? null)
 
     setSaving(true)
