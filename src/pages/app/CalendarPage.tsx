@@ -9,7 +9,7 @@ import { Link } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, MessageSquare, Plus, X } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
-import { Button, Card, EmptyState, Field, Input, LoadingBlock, Modal, Select } from '../../components/ui'
+import { Button, Card, EmptyState, Field, Input, LoadingBlock, Modal, PageHeader, Select } from '../../components/ui'
 import { errorMessage } from '../../lib/errors'
 import { formatTime } from '../../lib/format'
 import { availableSlotsForDay, minuteToTimeString, timeStringToMinute } from '../../lib/scheduling'
@@ -82,17 +82,15 @@ export default function CalendarPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-black text-ink">Calendar</h1>
-          <p className="mt-1 text-base text-zinc-600">
-            {date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
-          </p>
-        </div>
-        <Button onClick={() => setAdding(true)}>
-          <Plus className="h-5 w-5" aria-hidden="true" /> Add appointment
-        </Button>
-      </div>
+      <PageHeader
+        title="Calendar"
+        subtitle={date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
+        actions={
+          <Button onClick={() => setAdding(true)}>
+            <Plus className="h-5 w-5" aria-hidden="true" /> Add appointment
+          </Button>
+        }
+      />
 
       <div className="flex items-center gap-2">
         <button

@@ -9,7 +9,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Minus, Plus } from 'lucide-react'
 import { useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
-import { Button, Card, EmptyState, LoadingBlock, Select } from '../../components/ui'
+import { Button, Card, EmptyState, LoadingBlock, PageHeader, Select } from '../../components/ui'
 import { CategoryIcon } from '../../components/categoryIcon'
 import { PRODUCT_CATEGORY_INFO, PRODUCT_CATEGORIES } from '../../lib/audioConfigs'
 import { pickOverdueItem } from '../../lib/inventory'
@@ -81,13 +81,12 @@ export default function InventoryCheckPage() {
   if (!items) return <LoadingBlock label="Loading inventory…" />
 
   return (
-    <div className="mx-auto max-w-lg space-y-4">
-      <div>
-        <h1 className="text-3xl font-black text-ink">Check inventory</h1>
-        <p className="text-base text-zinc-600">
-          {checkedCount > 0 ? `${checkedCount} checked this session` : 'Confirm stock counts, one item at a time.'}
-        </p>
-      </div>
+    <div className="mx-auto max-w-xl space-y-5">
+      <PageHeader
+        back={{ to: '/app/inventory', label: 'Inventory' }}
+        title="Check inventory"
+        subtitle={checkedCount > 0 ? `${checkedCount} checked this session` : 'Confirm stock counts, one item at a time.'}
+      />
 
       {categories.length > 0 ? (
         <Select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Filter by category">

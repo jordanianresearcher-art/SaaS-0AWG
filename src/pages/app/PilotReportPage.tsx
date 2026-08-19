@@ -10,11 +10,11 @@
 // hands it the range Home is currently showing via ?days=.
 
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 import { format, subDays } from 'date-fns'
-import { ArrowLeft, Download, Printer } from 'lucide-react'
+import { Download, Printer } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
-import { Button, Card, LoadingBlock } from '../../components/ui'
+import { Button, Card, LoadingBlock, PageHeader } from '../../components/ui'
 import { computeBookingMetrics, computeMetrics } from '../../lib/metrics'
 import { formatCurrency, formatDate } from '../../lib/format'
 import type { Appointment } from '../../types'
@@ -105,27 +105,25 @@ export default function PilotReportPage() {
 
   return (
     <div className="space-y-5">
-      <div className="no-print flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <Link to="/app" className="flex items-center gap-1 text-base font-semibold text-brand">
-            <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Home
-          </Link>
-          <h1 className="mt-1 text-3xl font-black text-ink">Pilot report</h1>
-          <p className="mt-1 text-base text-zinc-600">
-            Last {days} days. Print it and put it on the counter — the numbers speak for themselves.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" onClick={exportCsv}>
-            <Download className="h-5 w-5" aria-hidden="true" /> CSV
-          </Button>
-          <Button onClick={() => window.print()}>
-            <Printer className="h-5 w-5" aria-hidden="true" /> Print report
-          </Button>
-        </div>
+      <div className="no-print">
+        <PageHeader
+          back={{ to: '/app', label: 'Home' }}
+          title="Pilot report"
+          subtitle={`Last ${days} days. Print it and put it on the counter — the numbers speak for themselves.`}
+          actions={
+            <>
+              <Button variant="secondary" onClick={exportCsv}>
+                <Download className="h-5 w-5" aria-hidden="true" /> CSV
+              </Button>
+              <Button onClick={() => window.print()}>
+                <Printer className="h-5 w-5" aria-hidden="true" /> Print report
+              </Button>
+            </>
+          }
+        />
       </div>
 
-      <Card className="print-block mx-auto max-w-2xl p-6 sm:p-8">
+      <Card tone="raised" className="print-block mx-auto max-w-2xl p-6 sm:p-8">
         <div className="border-b border-zinc-200 pb-5 text-center">
           <p className="text-sm font-bold tracking-widest text-brand uppercase">0Gauge Recovery — Pilot Report</p>
           <h2 className="mt-2 text-2xl font-black text-ink">{shop?.name}</h2>

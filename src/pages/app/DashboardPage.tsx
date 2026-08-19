@@ -14,7 +14,7 @@ import { Link } from 'react-router-dom'
 import { isSameDay, subDays } from 'date-fns'
 import { Plus, ArrowRight, Award, CalendarDays, BellRing, MessageSquare, Printer } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
-import { Card, Badge, Button, EmptyState, LinkButton, LoadingBlock } from '../../components/ui'
+import { Card, Badge, Button, EmptyState, LinkButton, LoadingBlock, PageHeader, SectionHeader } from '../../components/ui'
 import { RecoveryScoreGauge } from '../../components/RecoveryScoreGauge'
 import { Confetti } from '../../components/Confetti'
 import {
@@ -109,12 +109,14 @@ function InventoryCard() {
 
   return (
     <Card>
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-ink">Inventory</h2>
-        <Link to="/app/inventory" className="flex items-center gap-1 text-base font-semibold text-brand">
-          All inventory <ArrowRight className="h-4 w-4" aria-hidden="true" />
-        </Link>
-      </div>
+      <SectionHeader
+        title="Inventory"
+        action={
+          <Link to="/app/inventory" className="flex items-center gap-1 text-sm font-semibold text-brand">
+            All inventory <ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </Link>
+        }
+      />
       {items === null ? (
         <p className="mt-4 text-base text-zinc-600">Loading…</p>
       ) : items.length === 0 ? (
@@ -246,17 +248,19 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-3xl font-black text-ink">Home</h1>
-        <div className="flex flex-wrap gap-2">
-          <LinkButton to={`/app/report?days=${days}`} variant="secondary">
-            <Printer className="h-5 w-5" aria-hidden="true" /> Print report
-          </LinkButton>
-          <LinkButton to="/app/quotes/new">
-            <Plus className="h-5 w-5" aria-hidden="true" /> Create Quote
-          </LinkButton>
-        </div>
-      </div>
+      <PageHeader
+        title="Home"
+        actions={
+          <>
+            <LinkButton to={`/app/report?days=${days}`} variant="secondary">
+              <Printer className="h-5 w-5" aria-hidden="true" /> Print report
+            </LinkButton>
+            <LinkButton to="/app/quotes/new">
+              <Plus className="h-5 w-5" aria-hidden="true" /> Create Quote
+            </LinkButton>
+          </>
+        }
+      />
 
       <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Time period">
         {RANGE_CHOICES.map((choice) => (
@@ -275,7 +279,7 @@ export default function DashboardPage() {
           this page to answer. */}
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
-          <h2 className="text-xl font-bold text-ink">Money</h2>
+          <SectionHeader title="Money" />
           <div className="mt-4 grid grid-cols-2 gap-4">
             <Figure
               label="Recovered"
@@ -294,7 +298,7 @@ export default function DashboardPage() {
         </Card>
 
         <Card>
-          <h2 className="text-xl font-bold text-ink">Today</h2>
+          <SectionHeader title="Today" />
           <ul className="mt-2 -mx-2">
             <TodayRow
               icon={CalendarDays}
@@ -331,7 +335,7 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      <Card className="relative overflow-hidden p-6 text-center sm:p-8">
+      <Card tone="raised" className="relative overflow-hidden p-6 text-center sm:p-8">
         <Confetti trigger={confettiTrigger} />
         <p className="text-sm font-bold tracking-widest text-brand uppercase">Recovery Score</p>
         <div className="mt-4 flex justify-center">
@@ -362,12 +366,14 @@ export default function DashboardPage() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-bold text-ink">Follow-ups due today</h2>
-            <Link to="/app/follow-ups" className="flex items-center gap-1 text-base font-semibold text-brand">
-              All follow-ups <ArrowRight className="h-4 w-4" aria-hidden="true" />
-            </Link>
-          </div>
+          <SectionHeader
+            title="Follow-ups due today"
+            action={
+              <Link to="/app/follow-ups" className="flex items-center gap-1 text-sm font-semibold text-brand">
+                All follow-ups <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              </Link>
+            }
+          />
           {dueToday.length === 0 ? (
             <p className="mt-4 text-base text-zinc-600">Nothing due today. Nice and caught up.</p>
           ) : (
@@ -388,7 +394,7 @@ export default function DashboardPage() {
         </Card>
 
         <Card>
-          <h2 className="text-xl font-bold text-ink">Recent customer responses</h2>
+          <SectionHeader title="Recent customer responses" />
           {recentResponses.length === 0 ? (
             <p className="mt-4 text-base text-zinc-600">No responses yet. They&apos;ll show up here the moment a customer answers a quote.</p>
           ) : (
@@ -414,10 +420,7 @@ export default function DashboardPage() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
-          <div className="flex items-baseline justify-between gap-3">
-            <h2 className="text-xl font-bold text-ink">Where your quotes stand</h2>
-            <span className="text-xs text-zinc-500">All open quotes</span>
-          </div>
+          <SectionHeader title="Where your quotes stand" note="All open quotes" />
           {funnel.length === 0 ? (
             <p className="mt-4 text-base text-zinc-600">Create your first quote to see the pipeline.</p>
           ) : (
@@ -443,7 +446,7 @@ export default function DashboardPage() {
         </Card>
 
         <Card>
-          <h2 className="text-xl font-bold text-ink">Recent activity</h2>
+          <SectionHeader title="Recent activity" />
           {recentActivity.length === 0 ? (
             <p className="mt-4 text-base text-zinc-600">Activity like sent emails and quote views will appear here.</p>
           ) : (

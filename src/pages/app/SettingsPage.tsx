@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { CreditCard, Download, KeyRound, LayoutGrid, Package, Pencil, Plus, QrCode, RotateCcw, Smartphone, Trash2 } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
-import { Button, Card, EmptyState, Field, Input, LoadingBlock, Modal, Select, Textarea } from '../../components/ui'
+import { Button, Card, EmptyState, Field, Input, LoadingBlock, Modal, PageHeader, Select, Textarea } from '../../components/ui'
 import CatalogOrganizer from '../../components/CatalogOrganizer'
 import { ProductSuggestField } from '../../components/ProductSuggestField'
 import { LogoUploadField } from '../../components/LogoUploadField'
@@ -107,10 +107,7 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <div>
-        <h1 className="text-3xl font-black text-ink">Settings</h1>
-        <p className="mt-1 text-base text-zinc-600">This is what customers see on quotes and in emails.</p>
-      </div>
+      <PageHeader title="Settings" subtitle="This is what customers see on quotes and in emails." />
 
       <form onSubmit={handleSubmit(onSubmit)} noValidate>
         <Card className="space-y-4">

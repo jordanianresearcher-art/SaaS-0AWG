@@ -4,7 +4,7 @@ import { format } from 'date-fns'
 import { CalendarClock, CheckCheck, ExternalLink, Mail, Ban, MessageSquare, Bot } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
-import { Badge, Button, Card, EmptyState, Field, Input, LoadingBlock, Modal } from '../../components/ui'
+import { Badge, Button, Card, EmptyState, Field, Input, LoadingBlock, Modal, PageHeader } from '../../components/ui'
 import { EmailPreviewModal } from '../../components/EmailPreviewModal'
 import { BUCKET_CONFIG, BUCKET_ORDER, followUpBucket, suggestNextTemplate, type FollowUpBucket } from '../../lib/followUp'
 import { describeAutoFollowUp } from '../../lib/autoFollowUp'
@@ -42,14 +42,14 @@ export default function FollowUpsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-black text-ink">Follow-ups</h1>
-        <p className="mt-1 text-base text-zinc-600">
-          {shop?.autoFollowUpEnabled
+      <PageHeader
+        title="Follow-ups"
+        subtitle={
+          shop?.autoFollowUpEnabled
             ? 'Emails go out on their own and stop the moment a customer replies. Texts are always sent by you.'
-            : 'Automatic follow-ups are off — every email here waits for you. Turn them on in Settings.'}
-        </p>
-      </div>
+            : 'Automatic follow-ups are off — every email here waits for you. Turn them on in Settings.'
+        }
+      />
 
       {total === 0 ? (
         <EmptyState

@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ClipboardCheck, Plus, Search, Tag } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
-import { Badge, EmptyState, Input, LinkButton, LoadingBlock, Select } from '../../components/ui'
+import { Badge, EmptyState, Input, LinkButton, LoadingBlock, PageHeader, Select } from '../../components/ui'
 import { CategoryIcon } from '../../components/categoryIcon'
 import { PRODUCT_CATEGORY_INFO, PRODUCT_CATEGORIES } from '../../lib/audioConfigs'
 import { computeInventorySummary, isLowStock, needsUpc } from '../../lib/inventory'
@@ -67,25 +67,23 @@ export default function InventoryPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-black text-ink">Inventory</h1>
-          <p className="text-base text-zinc-600">
-            {summary.totalSkus} products · {summary.totalUnits} units on hand · {formatCurrency(summary.totalValueCents)} value
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <LinkButton to="/app/inventory/labels" variant="secondary">
-            <Tag className="h-5 w-5" aria-hidden="true" /> Labels
-          </LinkButton>
-          <LinkButton to="/app/inventory/check" variant="secondary">
-            <ClipboardCheck className="h-5 w-5" aria-hidden="true" /> Check stock
-          </LinkButton>
-          <LinkButton to="/app/inventory/new">
-            <Plus className="h-5 w-5" aria-hidden="true" /> Add item
-          </LinkButton>
-        </div>
-      </div>
+      <PageHeader
+        title="Inventory"
+        subtitle={`${summary.totalSkus} products · ${summary.totalUnits} units on hand · ${formatCurrency(summary.totalValueCents)} value`}
+        actions={
+          <>
+            <LinkButton to="/app/inventory/labels" variant="secondary">
+              <Tag className="h-5 w-5" aria-hidden="true" /> Labels
+            </LinkButton>
+            <LinkButton to="/app/inventory/check" variant="secondary">
+              <ClipboardCheck className="h-5 w-5" aria-hidden="true" /> Check stock
+            </LinkButton>
+            <LinkButton to="/app/inventory/new">
+              <Plus className="h-5 w-5" aria-hidden="true" /> Add item
+            </LinkButton>
+          </>
+        }
+      />
 
       <div className="space-y-3">
         <div className="relative">

@@ -26,10 +26,10 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, Camera, Check, Loader2, Package, Sparkles, X } from 'lucide-react'
+import { Camera, Check, Loader2, Package, Sparkles, X } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
-import { Badge, Button, Card, Field, Input, LoadingBlock } from '../../components/ui'
+import { Badge, Button, Card, Field, Input, LoadingBlock, PageHeader } from '../../components/ui'
 import { knownBrands, mergeSearchHits, searchLocalCatalog, type ProductSearchHit } from '../../lib/productSearch'
 import { guessCategoryFromName } from '../../lib/categorize'
 import { formatCurrency, parseDollarsToCents } from '../../lib/format'
@@ -418,21 +418,19 @@ export default function NewInventoryItemPage() {
   if (!catalog) return <LoadingBlock label="Loading catalog…" />
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <Link to="/app/inventory" className="inline-flex items-center gap-1 text-base font-semibold text-brand">
-            <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Inventory
-          </Link>
-          <h1 className="text-3xl font-black text-ink">Rapid intake</h1>
-        </div>
-        {lines.length > 0 ? (
-          <div className="text-right">
-            <div className="text-2xl font-black text-ink">{totalUnits}</div>
-            <div className="text-sm text-zinc-500">units this session</div>
-          </div>
-        ) : null}
-      </div>
+    <div className="mx-auto max-w-5xl space-y-5">
+      <PageHeader
+        back={{ to: '/app/inventory', label: 'Inventory' }}
+        title="Rapid intake"
+        actions={
+          lines.length > 0 ? (
+            <div className="text-right">
+              <div className="text-2xl font-black text-ink">{totalUnits}</div>
+              <div className="text-sm text-zinc-500">units this session</div>
+            </div>
+          ) : undefined
+        }
+      />
 
       {/* Brand lock */}
       <Card className="space-y-2">
@@ -489,7 +487,7 @@ export default function NewInventoryItemPage() {
         ) : null}
       </Card>
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <div className="space-y-4">
           {cameraOpen ? (
             <Suspense fallback={<LoadingBlock label="Loading camera…" />}>

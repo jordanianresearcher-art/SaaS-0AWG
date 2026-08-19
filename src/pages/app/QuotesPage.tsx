@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { CreditCard, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
-import { Badge, Button, Card, EmptyState, Input, LinkButton, LoadingBlock, Modal, Select } from '../../components/ui'
+import { Badge, Button, Card, EmptyState, Input, LinkButton, LoadingBlock, Modal, PageHeader, Select } from '../../components/ui'
 import { isTerminal, STATUS_CONFIG } from '../../lib/status'
 import { errorMessage } from '../../lib/errors'
 import { customerDisplayName, formatCurrency, formatDate, formatVehicle, quoteValueCents } from '../../lib/format'
@@ -56,12 +56,14 @@ export default function QuotesPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-3xl font-black text-ink">Quotes</h1>
-        <LinkButton to="/app/quotes/new">
-          <Plus className="h-5 w-5" aria-hidden="true" /> Create Quote
-        </LinkButton>
-      </div>
+      <PageHeader
+        title="Quotes"
+        actions={
+          <LinkButton to="/app/quotes/new">
+            <Plus className="h-5 w-5" aria-hidden="true" /> Create Quote
+          </LinkButton>
+        }
+      />
 
       <div className="flex flex-col gap-3 sm:flex-row">
         <div className="relative flex-1">

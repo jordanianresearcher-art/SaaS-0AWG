@@ -35,10 +35,10 @@ function NavItem({ to, label, icon: Icon, end, bottom }: NavEntry & { bottom?: b
       className={({ isActive }) =>
         bottom
           ? `flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-xs font-semibold ${isActive ? 'text-brand' : 'text-zinc-500'}`
-          : `flex items-center gap-3 rounded-xl px-4 py-3 text-base font-semibold ${isActive ? 'bg-blue-50 text-brand' : 'text-charcoal hover:bg-zinc-100'}`
+          : `flex items-center gap-2 rounded-xl px-3 py-2.5 text-[15px] font-semibold whitespace-nowrap transition-colors ${isActive ? 'bg-brand-tint text-brand' : 'text-charcoal hover:bg-zinc-100'}`
       }
     >
-      <Icon className={bottom ? 'h-6 w-6' : 'h-5 w-5'} aria-hidden="true" />
+      <Icon className={bottom ? 'h-6 w-6' : 'h-[18px] w-[18px]'} aria-hidden="true" />
       {label}
     </NavLink>
   )
@@ -70,6 +70,15 @@ export function AppLayout() {
   const navigate = useNavigate()
 
   const isInventoryOnly = role === 'inventory'
+  // Up to two letters from the shop's name — enough to recognise at a glance,
+  // and it degrades to a single character rather than an empty box.
+  const shopInitials =
+    (shop?.name ?? '')
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0]?.toUpperCase() ?? '')
+      .join('') || '0G'
   const nav = isInventoryOnly ? INVENTORY_ONLY_NAV : FULL_NAV
   // Mobile bottom nav flanks the center Scan button with up to two items a
   // side. Calendar takes Follow-ups' slot here: booking is the on-the-go,
@@ -88,15 +97,17 @@ export function AppLayout() {
           <NavLink to={isInventoryOnly ? '/app/inventory' : '/app'} className="shrink-0">
             <Logo className="text-2xl" />
           </NavLink>
-          <div className="hidden items-center gap-1 md:flex">
+          <div className="hidden min-w-0 flex-1 items-center justify-center gap-0.5 md:flex">
             {nav.map((item) => (
               <NavItem key={item.to} {...item} />
             ))}
           </div>
-          <div className="flex items-center gap-2">
-            <span className="hidden max-w-40 truncate text-sm font-semibold text-zinc-600 sm:block">
-              {shop?.name}
-            </span>
+          {/* The shop name used to sit as loose text beside two loose icon
+              buttons, which is what made the header feel cramped — three
+              unrelated things competing with the nav for the same row. They
+              collapse into one account chip: initials, name, and the actions
+              that belong to the account. */}
+          <div className="flex shrink-0 items-center gap-1">
             {!isInventoryOnly ? (
               <NavLink
                 to="/app/settings"
@@ -106,19 +117,30 @@ export function AppLayout() {
                 <Settings className="h-5 w-5" aria-hidden="true" />
               </NavLink>
             ) : null}
-            {mode === 'production' ? (
-              <button
-                type="button"
-                onClick={async () => {
-                  await signOut()
-                  navigate('/')
-                }}
-                className="flex h-11 w-11 items-center justify-center rounded-xl text-zinc-500 hover:bg-zinc-100"
-                aria-label="Sign out"
+            <div className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 py-1 pr-1 pl-2">
+              <span
+                aria-hidden="true"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand text-xs font-black text-white"
               >
-                <LogOut className="h-5 w-5" aria-hidden="true" />
-              </button>
-            ) : null}
+                {shopInitials}
+              </span>
+              <span className="hidden max-w-32 truncate text-sm font-semibold text-charcoal lg:block">
+                {shop?.name}
+              </span>
+              {mode === 'production' ? (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await signOut()
+                    navigate('/')
+                  }}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-500 hover:bg-white hover:text-ink"
+                  aria-label="Sign out"
+                >
+                  <LogOut className="h-4 w-4" aria-hidden="true" />
+                </button>
+              ) : null}
+            </div>
           </div>
         </div>
       </header>

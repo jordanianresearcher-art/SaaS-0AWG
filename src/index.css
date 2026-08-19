@@ -3,8 +3,18 @@
 @theme {
   --color-brand: #1d4ed8;
   --color-brand-dark: #1e40af;
+  /* The tint behind selected/active chrome. Named rather than reaching for
+     blue-50 inline, so the accent can move without a find-and-replace. */
+  --color-brand-tint: #eff6ff;
   --color-ink: #18181b;
   --color-charcoal: #3f3f46;
+
+  /* Two elevation steps instead of one flat `shadow-sm` everywhere. A card
+     that sits on the page and a card that floats above it should not look
+     identical — that sameness is most of what reads as "generic". Both are
+     soft and low-contrast; this is depth, not drop shadows. */
+  --shadow-card: 0 1px 2px rgb(24 24 27 / 0.04), 0 1px 3px rgb(24 24 27 / 0.06);
+  --shadow-raised: 0 2px 4px rgb(24 24 27 / 0.04), 0 8px 20px -6px rgb(24 24 27 / 0.12);
 }
 
 html {
@@ -12,7 +22,11 @@ html {
 }
 
 body {
-  @apply bg-zinc-50 text-ink antialiased;
+  /* zinc-100, not zinc-50. A near-white canvas made every white card vanish
+     into it, which is what "too much empty white space" actually was — not
+     too much space, too little separation between the page and the things
+     on it. */
+  @apply bg-zinc-100 text-ink antialiased;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 }
 

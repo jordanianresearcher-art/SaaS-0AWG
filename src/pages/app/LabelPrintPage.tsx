@@ -15,11 +15,10 @@
 // direct-to-printer path.
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { Printer, Tag } from 'lucide-react'
 import { useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
-import { Button, Card, EmptyState, LoadingBlock } from '../../components/ui'
+import { Button, Card, EmptyState, LoadingBlock, PageHeader } from '../../components/ui'
 import { code128SvgMarkup } from '../../lib/barcode'
 import { formatItemDisplayName, formatItemShortName } from '../../lib/productNaming'
 import { formatCurrency } from '../../lib/format'
@@ -153,20 +152,13 @@ export default function LabelPrintPage() {
   if (items === null) return <LoadingBlock label="Loading products…" />
 
   return (
-    <div className="space-y-6">
-      <div className="no-print flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-black text-ink">Print labels</h1>
-          <p className="mt-1 text-base text-zinc-600">
-            Stick a code on anything without one. After that it scans instantly, every time.
-          </p>
-        </div>
-        <Link
-          to="/app/inventory"
-          className="inline-flex min-h-12 items-center justify-center rounded-xl border border-zinc-300 bg-white px-4 text-base font-semibold text-ink hover:bg-zinc-50"
-        >
-          Back to inventory
-        </Link>
+    <div className="mx-auto max-w-4xl space-y-6">
+      <div className="no-print">
+        <PageHeader
+          back={{ to: '/app/inventory', label: 'Inventory' }}
+          title="Print labels"
+          subtitle="Stick a code on anything without one. After that it scans instantly, every time."
+        />
       </div>
 
       {queue.length === 0 ? (
