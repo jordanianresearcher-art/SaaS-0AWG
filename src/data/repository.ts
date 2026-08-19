@@ -400,6 +400,32 @@ export interface ProductResolveResult {
    * true: its results are canned, not absent.
    */
   aiConfigured: boolean
+  /**
+   * Set when a provider key IS funded but the call to it failed — a wrong
+   * model name, an account out of credit, a revoked key, a network timeout.
+   * Carries a short, safe summary ("OpenAI returned 404 (model_not_found)"),
+   * never the provider's raw body, which can quote the request back.
+   *
+   * `aiConfigured` alone was not enough: with a key set, a broken provider and
+   * a genuine miss both come back with zero candidates and `aiConfigured:
+   * true`, so a shop whose key is present but not working is told to look for
+   * a better photo forever. Null on a healthy lookup and on cached hits, where
+   * no provider was asked anything.
+   */
+  aiError: string | null
+}
+
+/**
+ * Typing a model number is the primary intake path, and it used to fail
+ * completely silently: the dropdown just said "No matches found" whether the
+ * search genuinely came up empty, no AI key was funded, or the provider
+ * rejected the call. Carrying the same two diagnostic fields the photo path
+ * already had means the typed path can say which of the three happened.
+ */
+export interface ProductSuggestionResult {
+  suggestions: ProductSuggestion[]
+  aiConfigured: boolean
+  aiError: string | null
 }
 
 export interface ShopifyImportOptions {
@@ -475,7 +501,7 @@ export interface DataRepository {
    */
   lookupProductByUpc(code: string, options?: { fast?: boolean; brandHint?: string | null }): Promise<UpcLookupResult>
   /** AI+web-search autocomplete for a partially-typed SKU/model/name when adding a new catalog product. `brandHint` scopes the search to the brand being received. Demo mode never makes a real call — always resolves []. Production degrades to [] on any failure rather than throwing, same pattern as lookupProductByUpc. Delegates to resolveProduct() underneath. */
-  lookupProductSuggestions(query: string, brandHint?: string | null): Promise<ProductSuggestion[]>
+  lookupProductSuggestions(query: string, brandHint?: string | null): Promise<ProductSuggestionResult>
   /**
    * The universal resolver: called when a barcode or typed query doesn't
    * match anything already in this shop's catalog. Never throws and never

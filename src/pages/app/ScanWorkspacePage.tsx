@@ -341,6 +341,10 @@ export default function ScanWorkspacePage() {
         // provider key is funded. Saying "couldn't identify" here sends the
         // shop hunting for a better photo of a problem that is pure config.
         toast('error', "Product lookup isn't set up yet — an admin needs to add an AI key in Supabase. You can still type the details in.")
+      } else if (resolved.aiError) {
+        // A key IS set, so this is not the config case above — the provider
+        // itself refused. Naming it turns an invisible failure into a fix.
+        toast('error', `Product lookup failed — ${resolved.aiError}. Add it manually below.`)
       } else {
         toast('error', "Couldn't identify a product in that photo. Add it manually below.")
       }

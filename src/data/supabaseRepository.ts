@@ -45,7 +45,7 @@ import type {
   ProductResolutionCandidate,
   ProductResolveRequest,
   ProductResolveResult,
-  ProductSuggestion,
+  ProductSuggestionResult,
   SendEmailResult,
   ShopifyImportOptions,
   ShopifyImportResult,
@@ -777,18 +777,22 @@ export class SupabaseRepository implements DataRepository {
     }
   }
 
-  async lookupProductSuggestions(query: string, brandHint?: string | null): Promise<ProductSuggestion[]> {
+  async lookupProductSuggestions(query: string, brandHint?: string | null): Promise<ProductSuggestionResult> {
     const trimmed = query.trim()
-    if (trimmed.length < 2) return []
+    if (trimmed.length < 2) return { suggestions: [], aiConfigured: true, aiError: null }
     const result = await this.resolveProduct({ kind: 'text', query: trimmed, brandHint })
-    return result.candidates.map((c) => ({
-      name: c.name,
-      brand: c.brand,
-      model: c.model,
-      unitPriceCents: c.referencePriceCents,
-      imageUrl: c.imageUrl,
-      sourceUrl: c.priceSourceUrl,
-    }))
+    return {
+      suggestions: result.candidates.map((c) => ({
+        name: c.name,
+        brand: c.brand,
+        model: c.model,
+        unitPriceCents: c.referencePriceCents,
+        imageUrl: c.imageUrl,
+        sourceUrl: c.priceSourceUrl,
+      })),
+      aiConfigured: result.aiConfigured,
+      aiError: result.aiError,
+    }
   }
 
   async resolveProduct(request: ProductResolveRequest): Promise<ProductResolveResult> {
@@ -803,10 +807,18 @@ export class SupabaseRepository implements DataRepository {
         body: { shopId: this.shopId, ...request },
       })
       if (error) {
-        if (!(error instanceof FunctionsHttpError) || error.context?.status !== 404) {
-          console.error('resolve-product failed', error)
+        const notDeployed = error instanceof FunctionsHttpError && error.context?.status === 404
+        if (!notDeployed) console.error('resolve-product failed', error)
+        return {
+          candidates: [],
+          retainedInput,
+          aiConfigured: true,
+          // A 404 from functions.invoke means the Edge Function itself was
+          // never deployed to this project — the single most invisible way
+          // lookup can be "broken", since it produces no logs anywhere and
+          // looks identical to a search that found nothing. Say so.
+          aiError: notDeployed ? 'the resolve-product function is not deployed to this project' : null,
         }
-        return { candidates: [], retainedInput, aiConfigured: true }
       }
       const raw = Array.isArray(data?.candidates) ? (data.candidates as Row[]) : []
       const mapped: ProductResolutionCandidate[] = raw
@@ -841,10 +853,11 @@ export class SupabaseRepository implements DataRepository {
         // failure, must not be reported to the shop as "lookup isn't set
         // up" — that would send them chasing a config problem they don't have.
         aiConfigured: (data as Row)?.aiConfigured !== false,
+        aiError: typeof (data as Row)?.aiError === 'string' ? ((data as Row).aiError as string) : null,
       }
     } catch (err) {
       console.error('resolve-product failed', err)
-      return { candidates: [], retainedInput, aiConfigured: true }
+      return { candidates: [], retainedInput, aiConfigured: true, aiError: null }
     }
   }
 

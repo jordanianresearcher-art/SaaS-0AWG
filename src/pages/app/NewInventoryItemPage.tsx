@@ -78,6 +78,9 @@ export default function NewInventoryItemPage() {
   const [price, setPrice] = useState('')
   const [webHits, setWebHits] = useState<ProductSearchHit[]>([])
   const [webSearching, setWebSearching] = useState(false)
+  // Why the web half of the search is empty, when it is empty for a reason
+  // other than "no match": no AI key funded, or a provider that refused.
+  const [lookupNote, setLookupNote] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
   const scanRef = useRef<HTMLInputElement>(null)
@@ -108,6 +111,7 @@ export default function NewInventoryItemPage() {
     const q = query.trim()
     if (q.length < MIN_WEB_QUERY) {
       setWebHits([])
+      setLookupNote(null)
       setWebSearching(false)
       return
     }
@@ -116,10 +120,20 @@ export default function NewInventoryItemPage() {
     const timer = setTimeout(() => {
       void repo
         .lookupProductSuggestions(q, effectiveBrand || null)
-        .then((suggestions) => {
+        .then((result) => {
           if (cancelled) return
+          // An empty web half is normal. An empty web half *because lookup is
+          // switched off or broken* is not, and staring at a blank list is how
+          // a shop concludes the whole feature doesn't work.
+          setLookupNote(
+            !result.aiConfigured
+              ? "Product lookup isn't set up yet — an admin needs to add an AI key in Supabase. Type the details in below."
+              : result.aiError
+                ? `Product lookup failed — ${result.aiError}. Type the details in below.`
+                : null,
+          )
           setWebHits(
-            suggestions.map((s, i) => ({
+            result.suggestions.map((s, i) => ({
               key: `web:${i}:${s.name}`,
               source: 'web' as const,
               brand: s.brand,
@@ -310,6 +324,10 @@ export default function NewInventoryItemPage() {
         if (top.referencePriceCents != null) setPrice(String(top.referencePriceCents / 100))
       } else if (resolved.status === 'fulfilled' && !resolved.value.aiConfigured) {
         toast('error', "Product lookup isn't set up yet — an admin needs to add an AI key in Supabase. You can still type the details in.")
+      } else if (resolved.status === 'fulfilled' && resolved.value.aiError) {
+        // The key is funded but the provider rejected the call. Say what it
+        // said, so the fix is one reading rather than a support thread.
+        toast('error', `Product lookup failed — ${resolved.value.aiError}. Type the model below.`)
       } else if (resolved.status === 'fulfilled') {
         toast('error', "Couldn't identify that product from the photo. Type the model below.")
       }
@@ -598,6 +616,8 @@ export default function NewInventoryItemPage() {
                   <Sparkles className="h-4 w-4 animate-pulse text-brand" aria-hidden="true" />
                   Searching {effectiveBrand || 'the web'}…
                 </p>
+              ) : lookupNote ? (
+                <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">{lookupNote}</p>
               ) : null}
 
               <Field label="Price (optional — fills in automatically if left blank)" htmlFor="intake-price">

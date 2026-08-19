@@ -38,6 +38,11 @@ export function ProductSuggestField({
 }) {
   const repo = useRepo()
   const [suggestions, setSuggestions] = useState<ProductSuggestion[]>([])
+  // Why the list is empty, when it is empty for a reason other than "no
+  // match" — an unfunded key or a provider that refused the call. Shown in
+  // the dropdown rather than as a toast: this fires on a debounced keystroke,
+  // and a toast per keystroke would be unusable.
+  const [lookupNote, setLookupNote] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   // True once a search has actually come back for the current query — lets
   // the dropdown distinguish "haven't searched yet" (show nothing) from
@@ -51,6 +56,7 @@ export function ProductSuggestField({
     const query = value.trim()
     if (query.length < MIN_QUERY_LENGTH) {
       setSuggestions([])
+      setLookupNote(null)
       setLoading(false)
       setSearched(false)
       return
@@ -60,9 +66,16 @@ export function ProductSuggestField({
     const timer = setTimeout(() => {
       void repo
         .lookupProductSuggestions(query)
-        .then((results) => {
+        .then((result) => {
           if (cancelled) return
-          setSuggestions(results)
+          setSuggestions(result.suggestions)
+          setLookupNote(
+            !result.aiConfigured
+              ? "Product lookup isn't set up yet — an admin needs to add an AI key in Supabase."
+              : result.aiError
+                ? `Product lookup failed — ${result.aiError}.`
+                : null,
+          )
           setSearched(true)
           setOpen(true)
         })
@@ -126,7 +139,9 @@ export function ProductSuggestField({
       {showDropdown ? (
         <div className="mt-1 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-lg">
           {suggestions.length === 0 ? (
-            <p className="px-3 py-2.5 text-sm text-zinc-500">{loading ? 'Searching the web…' : 'No matches found.'}</p>
+            <p className={`px-3 py-2.5 text-sm ${!loading && lookupNote ? 'text-amber-800' : 'text-zinc-500'}`}>
+              {loading ? 'Searching the web…' : (lookupNote ?? 'No matches found.')}
+            </p>
           ) : (
             <ul className="max-h-72 divide-y divide-zinc-100 overflow-y-auto">
               {suggestions.map((s, i) => (

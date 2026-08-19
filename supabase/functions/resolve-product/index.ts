@@ -318,6 +318,50 @@ interface RawAiCandidate {
   evidence: unknown
 }
 
+// A funded key is not the same as a working one. A wrong model name, an
+// account with no credit, a revoked key and a rate limit all come back as a
+// non-2xx from the provider, and every one of them used to end the same way:
+// console.error on a log nobody reads, then an empty candidate list that is
+// indistinguishable from "the AI looked and found nothing". The shop concludes
+// lookup is broken and has no way to learn why.
+//
+// So each request carries this scratchpad down to whichever provider call it
+// makes, and the handler reports what it collected. Per-request rather than
+// module-level on purpose: Deno serves concurrent requests from one isolate,
+// and a shared mutable would let one shop's failure surface in another's UI.
+interface ProviderDiag {
+  error: string | null
+}
+
+/**
+ * Turn a provider's error body into something safe to show a shop owner.
+ *
+ * The raw body is NOT forwarded — it can quote the request back, which for the
+ * photo path means a base64 image, and for any path means our prompt. Only the
+ * provider's own short machine-readable code is extracted, and only when it
+ * looks like a code rather than prose. That is enough to tell the three cases
+ * that actually happen apart: model_not_found, insufficient_quota,
+ * invalid_api_key.
+ */
+function providerErrorCode(body: string): string | null {
+  try {
+    const parsed = JSON.parse(body)
+    const err = parsed?.error ?? parsed
+    const code = err?.code ?? err?.type ?? null
+    if (typeof code === 'string' && /^[a-z0-9_.:-]{1,60}$/i.test(code)) return code
+  } catch {
+    // Not JSON (an HTML error page from a proxy, say) — the status alone tells
+    // the story well enough.
+  }
+  return null
+}
+
+function noteProviderError(diag: ProviderDiag, provider: string, status: number, body: string): void {
+  const code = providerErrorCode(body)
+  diag.error = `${provider} returned ${status}${code ? ` (${code})` : ''}`
+  console.error(`resolve-product: ${provider} API error`, status, body.slice(0, 500))
+}
+
 // Shared by both providers: parse a provider's raw structured-output text
 // into candidates, applying the same barcode-confirmation confidence cap
 // either way. `providerLabel` is only for the console.error breadcrumb.
@@ -372,7 +416,7 @@ function parseAiCandidates(rawText: string | null | undefined, upc: string | nul
     .filter((c): c is Candidate => c !== null)
 }
 
-async function resolveViaClaude(apiKey: string, prompt: string, upc: string | null): Promise<Candidate[]> {
+async function resolveViaClaude(apiKey: string, prompt: string, upc: string | null, diag: ProviderDiag): Promise<Candidate[]> {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -390,8 +434,7 @@ async function resolveViaClaude(apiKey: string, prompt: string, upc: string | nu
   })
 
   if (!res.ok) {
-    const errText = await res.text().catch(() => '')
-    console.error('resolve-product: Anthropic API error', res.status, errText.slice(0, 500))
+    noteProviderError(diag, 'Anthropic', res.status, await res.text().catch(() => ''))
     return []
   }
 
@@ -525,6 +568,7 @@ async function resolveViaVisionClaude(
   apiKey: string,
   imageBase64: string,
   mediaType: 'image/jpeg' | 'image/png' | 'image/webp',
+  diag: ProviderDiag,
 ): Promise<Candidate[]> {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -551,8 +595,7 @@ async function resolveViaVisionClaude(
   })
 
   if (!res.ok) {
-    const errText = await res.text().catch(() => '')
-    console.error('resolve-product: Anthropic vision API error', res.status, errText.slice(0, 500))
+    noteProviderError(diag, 'Anthropic vision', res.status, await res.text().catch(() => ''))
     return []
   }
 
@@ -582,6 +625,7 @@ async function resolveViaVisionOpenAi(
   apiKey: string,
   imageBase64: string,
   mediaType: 'image/jpeg' | 'image/png' | 'image/webp',
+  diag: ProviderDiag,
 ): Promise<Candidate[]> {
   const res = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
@@ -606,8 +650,7 @@ async function resolveViaVisionOpenAi(
   })
 
   if (!res.ok) {
-    const errText = await res.text().catch(() => '')
-    console.error('resolve-product: OpenAI vision API error', res.status, errText.slice(0, 500))
+    noteProviderError(diag, 'OpenAI vision', res.status, await res.text().catch(() => ''))
     return []
   }
 
@@ -633,13 +676,20 @@ async function resolveViaVisionOpenAi(
 async function resolveViaVision(
   imageBase64: string,
   mediaType: 'image/jpeg' | 'image/png' | 'image/webp',
+  diag: ProviderDiag,
 ): Promise<Candidate[]> {
   const openAiKey = Deno.env.get('OPENAI_API_KEY')
-  if (openAiKey) return resolveViaVisionOpenAi(openAiKey, imageBase64, mediaType)
-
   const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY')
-  if (anthropicKey) return resolveViaVisionClaude(anthropicKey, imageBase64, mediaType)
-
+  try {
+    if (openAiKey) return await resolveViaVisionOpenAi(openAiKey, imageBase64, mediaType, diag)
+    if (anthropicKey) return await resolveViaVisionClaude(anthropicKey, imageBase64, mediaType, diag)
+  } catch (err) {
+    // A throw here is the network layer, not the provider: DNS, TLS, or the
+    // Edge Function's own wall-clock limit. Worth reporting for the same
+    // reason a 4xx is — silence looks like "found nothing".
+    diag.error = 'Could not reach the AI provider'
+    console.error('resolve-product: vision request threw', err)
+  }
   return []
 }
 
@@ -649,7 +699,7 @@ async function resolveViaVision(
 // candidate shape is provider-agnostic. The tool call itself shows up as a
 // separate `web_search_call` item in `output`; the actual structured JSON
 // is the `message` item's `output_text` content part.
-async function resolveViaOpenAi(apiKey: string, prompt: string, upc: string | null): Promise<Candidate[]> {
+async function resolveViaOpenAi(apiKey: string, prompt: string, upc: string | null, diag: ProviderDiag): Promise<Candidate[]> {
   const res = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
     headers: {
@@ -665,8 +715,7 @@ async function resolveViaOpenAi(apiKey: string, prompt: string, upc: string | nu
   })
 
   if (!res.ok) {
-    const errText = await res.text().catch(() => '')
-    console.error('resolve-product: OpenAI API error', res.status, errText.slice(0, 500))
+    noteProviderError(diag, 'OpenAI', res.status, await res.text().catch(() => ''))
     return []
   }
 
@@ -686,13 +735,16 @@ async function resolveViaOpenAi(apiKey: string, prompt: string, upc: string | nu
 // the current ask; either key alone is enough to light up AI resolution,
 // and neither being set degrades gracefully to no AI candidates, same as
 // always).
-async function resolveViaAi(prompt: string, upc: string | null): Promise<Candidate[]> {
+async function resolveViaAi(prompt: string, upc: string | null, diag: ProviderDiag): Promise<Candidate[]> {
   const openAiKey = Deno.env.get('OPENAI_API_KEY')
-  if (openAiKey) return resolveViaOpenAi(openAiKey, prompt, upc)
-
   const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY')
-  if (anthropicKey) return resolveViaClaude(anthropicKey, prompt, upc)
-
+  try {
+    if (openAiKey) return await resolveViaOpenAi(openAiKey, prompt, upc, diag)
+    if (anthropicKey) return await resolveViaClaude(anthropicKey, prompt, upc, diag)
+  } catch (err) {
+    diag.error = 'Could not reach the AI provider'
+    console.error('resolve-product: AI request threw', err)
+  }
   return []
 }
 
@@ -723,6 +775,9 @@ Deno.serve(async (req: Request) => {
   // otherwise — both return zero candidates — and the shop is left thinking
   // lookup is broken when it was simply never switched on.
   const aiConfigured = Boolean(Deno.env.get('OPENAI_API_KEY') || Deno.env.get('ANTHROPIC_API_KEY'))
+  // Collects the first provider failure of this request, so a key that is set
+  // but not working says so instead of looking like an empty result.
+  const diag: ProviderDiag = { error: null }
 
   const body = await req.json().catch(() => null)
   const shopId = typeof body?.shopId === 'string' ? body.shopId : ''
@@ -762,8 +817,8 @@ Deno.serve(async (req: Request) => {
       return fail(403, 'You are not a member of this shop.')
     }
 
-    const candidates = await resolveViaVision(imageBase64, mediaType)
-    return json(200, { ok: true, candidates, cached: false, aiConfigured })
+    const candidates = await resolveViaVision(imageBase64, mediaType, diag)
+    return json(200, { ok: true, candidates, cached: false, aiConfigured, aiError: diag.error })
   }
 
   // Optional brand context — the shop's "brand lock" while receiving a
@@ -850,6 +905,7 @@ Deno.serve(async (req: Request) => {
           'product search rather than a direct barcode match. Return up to 3 candidates, most-likely first, or zero if nothing ' +
           'plausible turns up -- never invent a product.',
         rawCode,
+        diag,
       )
     }
   } else {
@@ -873,6 +929,7 @@ Deno.serve(async (req: Request) => {
         "products you're reasonably confident are real -- return fewer than 5 results (even zero) rather " +
         "than guessing or inventing a product that doesn't exist.",
       null,
+      diag,
     )
   }
 
@@ -886,7 +943,7 @@ Deno.serve(async (req: Request) => {
   // straight back and never runs the search at all — so leave the cache
   // untouched and let the real lookup decide what gets stored.
   if (fast && candidates.length === 0) {
-    return json(200, { ok: true, candidates, cached: false, fast: true, aiConfigured })
+    return json(200, { ok: true, candidates, cached: false, fast: true, aiConfigured, aiError: diag.error })
   }
 
   const days = kind === 'barcode' ? BARCODE_CACHE_DAYS : TEXT_CACHE_DAYS
@@ -898,5 +955,5 @@ Deno.serve(async (req: Request) => {
       { onConflict: 'shop_id,kind,normalized_key' },
     )
 
-  return json(200, { ok: true, candidates, cached: false, aiConfigured })
+  return json(200, { ok: true, candidates, cached: false, aiConfigured, aiError: diag.error })
 })
