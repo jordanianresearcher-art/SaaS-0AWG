@@ -33,6 +33,7 @@ import { Badge, Button, Card, Field, Input, LoadingBlock } from '../../component
 import { knownBrands, mergeSearchHits, searchLocalCatalog, type ProductSearchHit } from '../../lib/productSearch'
 import { guessCategoryFromName } from '../../lib/categorize'
 import { formatCurrency, parseDollarsToCents } from '../../lib/format'
+import { formatItemShortName, splitItemName } from '../../lib/productNaming'
 import { useHardwareScanner } from '../../lib/useHardwareScanner'
 import { errorMessage } from '../../lib/errors'
 import type { CatalogItem } from '../../types'
@@ -46,8 +47,10 @@ const MIN_WEB_QUERY = 2
 interface IntakeLine {
   id: string
   catalogItemId: string
+  /** Descriptor half only — brand and model carry the identity. */
   name: string
   brand: string | null
+  model: string | null
   code: string | null
   quantity: number
   isNewProduct: boolean
@@ -158,7 +161,17 @@ export default function NewInventoryItemPage() {
           return prev.map((l) => (l.catalogItemId === item.id ? { ...l, quantity: l.quantity + 1 } : l))
         }
         return [
-          { id: item.id, catalogItemId: item.id, name: item.name, brand: item.brand, code, quantity: 1, isNewProduct: isNew, enriching: false },
+          {
+            id: item.id,
+            catalogItemId: item.id,
+            name: item.name,
+            brand: item.brand,
+            model: item.model,
+            code,
+            quantity: 1,
+            isNewProduct: isNew,
+            enriching: false,
+          },
           ...prev,
         ]
       })
@@ -328,7 +341,7 @@ export default function NewInventoryItemPage() {
           upcIsGenerated: false,
         })
         setCatalog((prev) => (prev ?? []).map((i) => (i.id === item.id ? target : i)))
-        toast('success', `Barcode learned — ${target.name} will scan instantly from now on.`)
+        toast('success', `Barcode learned — ${formatItemShortName(target)} will scan instantly from now on.`)
       }
       await receiveExisting(target, pendingCode)
       resetIdentify()
@@ -559,9 +572,9 @@ export default function NewInventoryItemPage() {
                           </span>
                         )}
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate font-semibold text-ink">{hit.name}</span>
+                          <span className="block truncate font-semibold text-ink">{splitItemName(hit).title}</span>
                           <span className="block truncate text-sm text-zinc-500">
-                            {[hit.brand, hit.model].filter(Boolean).join(' · ') || '—'}
+                            {splitItemName(hit).descriptor ?? '—'}
                           </span>
                         </span>
                         <span className="shrink-0 text-right">
@@ -617,14 +630,17 @@ export default function NewInventoryItemPage() {
             <p className="mt-2 text-sm text-zinc-600">Nothing taken in yet. Scan a box to start.</p>
           ) : (
             <ul className="mt-2 divide-y divide-zinc-100">
-              {lines.map((line) => (
+              {lines.map((line) => {
+                const title = formatItemShortName(line)
+                const detail = line.name.trim() && line.name.trim() !== title ? line.name.trim() : line.brand
+                return (
                 <li key={line.id} className="flex items-center gap-2 py-2">
                   <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-green-100 text-green-800">
                     <Check className="h-3.5 w-3.5" aria-hidden="true" />
                   </span>
                   <span className="min-w-0 flex-1">
                     <Link to={`/app/inventory/${line.catalogItemId}`} className="block truncate text-sm font-semibold text-ink hover:text-brand">
-                      {line.name}
+                      {title}
                     </Link>
                     <span className="flex items-center gap-1.5 text-xs text-zinc-500">
                       {line.isNewProduct ? <Badge className="bg-blue-50 px-1.5 py-0 text-[11px] text-brand">New</Badge> : null}
@@ -633,13 +649,14 @@ export default function NewInventoryItemPage() {
                           <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" /> finding photo…
                         </span>
                       ) : (
-                        line.brand ?? '—'
+                        detail ?? '—'
                       )}
                     </span>
                   </span>
                   <span className="shrink-0 text-base font-black text-ink">×{line.quantity}</span>
                 </li>
-              ))}
+                )
+              })}
             </ul>
           )}
           {mode === 'demo' ? (

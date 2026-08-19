@@ -6,6 +6,7 @@ import {
   canonicalizeProductFields,
   formatItemDisplayName,
   formatItemShortName,
+  splitItemName,
 } from './productNaming'
 
 describe('canonicalizeBrand', () => {
@@ -218,6 +219,49 @@ describe('canonicalizeProductFields', () => {
       const display = formatItemDisplayName(canonicalizeProductFields(input))
       const words = display.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(Boolean)
       expect(new Set(words).size).toBe(words.length)
+    }
+  })
+})
+
+describe('splitItemName', () => {
+  it('puts the identity on the title line and the descriptor beneath', () => {
+    expect(splitItemName({ brand: 'kicker', model: 'CompR 12', name: '12" Subwoofer, Dual 2Ω' })).toEqual({
+      title: 'Kicker CompR 12',
+      descriptor: '12" Subwoofer, Dual 2Ω',
+    })
+  })
+
+  it('returns no descriptor when the second line would repeat the first', () => {
+    // This is the case that used to render a blank row title: after
+    // canonicalization an item whose typed name was only its brand and model
+    // stores name = ''. The title must still be the identity.
+    expect(splitItemName({ brand: 'DS18', model: 'Project 360', name: '' })).toEqual({
+      title: 'DS18 Project 360',
+      descriptor: null,
+    })
+    expect(splitItemName({ brand: 'Kicker', model: null, name: 'Kicker' })).toEqual({
+      title: 'Kicker',
+      descriptor: null,
+    })
+  })
+
+  it('never leaves a hand-typed line item untitled', () => {
+    expect(splitItemName({ brand: null, model: null, name: 'Custom fab work' })).toEqual({
+      title: 'Custom fab work',
+      descriptor: null,
+    })
+    expect(splitItemName({})).toEqual({ title: 'Item', descriptor: null })
+  })
+
+  it('agrees with formatItemDisplayName — joining the two lines reproduces it', () => {
+    for (const input of [
+      { brand: 'kicker', model: 'CompR 12', name: '12" subwoofer' },
+      { brand: 'DS18', model: 'DS18 Project 360', name: 'DS18 DS18 Project 360' },
+      { brand: null, model: null, name: 'Custom fab work' },
+      { brand: 'Skar', model: 'SDR-12', name: 'Skar SDR-12 subwoofer' },
+    ]) {
+      const { title, descriptor } = splitItemName(input)
+      expect([title, descriptor].filter(Boolean).join(' — ')).toBe(formatItemDisplayName(input))
     }
   })
 })

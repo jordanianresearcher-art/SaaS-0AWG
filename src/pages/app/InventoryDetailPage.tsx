@@ -13,6 +13,7 @@ import { CategoryIcon } from '../../components/categoryIcon'
 import { PRODUCT_CATEGORY_INFO, PRODUCT_CATEGORIES } from '../../lib/audioConfigs'
 import { effectiveThreshold, isLowStock } from '../../lib/inventory'
 import { formatCurrency, formatDateTime, parseDollarsToCents } from '../../lib/format'
+import { formatItemShortName } from '../../lib/productNaming'
 import type { CatalogItem, ProductCategory, StockMovement } from '../../types'
 import type { NewCatalogItemInput } from '../../data/repository'
 
@@ -140,7 +141,7 @@ export default function InventoryDetailPage() {
 
   async function handleDelete() {
     if (!item) return
-    if (!window.confirm(`Remove "${item.name}" from your catalog? This can't be undone.`)) return
+    if (!window.confirm(`Remove "${formatItemShortName(item)}" from your catalog? This can't be undone.`)) return
     try {
       await repo.deleteCatalogItem(item.id)
       toast('success', 'Removed from your catalog.')
@@ -151,6 +152,11 @@ export default function InventoryDetailPage() {
   }
 
   const categoryLabel = useMemo(() => (item?.category ? PRODUCT_CATEGORY_INFO[item.category].label : null), [item])
+  // The heading is the item's identity (brand + model); `name` carries only the
+  // descriptor and is legitimately empty when the typed name was nothing but
+  // brand and model. Rendering it raw here used to leave the page untitled.
+  const displayName = item ? formatItemShortName(item) : ''
+  const descriptor = item && item.name.trim() && item.name.trim() !== displayName ? item.name.trim() : null
 
   if (item === undefined) return <LoadingBlock label="Loading item…" />
   if (item === null) {
@@ -183,8 +189,8 @@ export default function InventoryDetailPage() {
           {!editing ? (
             <>
               <div>
-                <h1 className="text-2xl font-black text-ink">{item.name}</h1>
-                <p className="text-base text-zinc-600">{[item.brand, item.model].filter(Boolean).join(' · ') || '—'}</p>
+                <h1 className="text-2xl font-black text-ink">{displayName}</h1>
+                <p className="text-base text-zinc-600">{descriptor ?? '—'}</p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 {categoryLabel ? <Badge className="bg-zinc-100 text-zinc-700">{categoryLabel}</Badge> : null}

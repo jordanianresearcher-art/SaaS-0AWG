@@ -22,6 +22,7 @@ import {
 import { PRODUCT_CATEGORIES, PRODUCT_CATEGORY_INFO } from '../../lib/audioConfigs'
 import type { CatalogItem, FinancingOffer, InventoryDevice, ProductCategory } from '../../types'
 import type { NewCatalogItemInput, ShopifyImportResult } from '../../data/repository'
+import { formatItemDisplayName } from '../../lib/productNaming'
 
 const schema = z.object({
     name: z.string().min(2, 'Enter your shop name'),
@@ -811,9 +812,7 @@ function CatalogSection({ reloadSignal }: { reloadSignal: number }) {
                 </span>
                 <div>
                   <p className="text-base font-bold text-ink">
-                    {[item.brand, item.model].filter(Boolean).join(' ')}
-                    {item.brand || item.model ? ' — ' : ''}
-                    {item.name}
+                    {formatItemDisplayName(item)}
                   </p>
                   <p className="flex items-center gap-1.5 text-sm text-zinc-500">
                     {item.defaultPriceCents !== null ? formatCurrency(item.defaultPriceCents) : null}

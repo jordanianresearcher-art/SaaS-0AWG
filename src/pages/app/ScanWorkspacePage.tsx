@@ -31,6 +31,7 @@ import {
 } from '../../lib/scanCart'
 import type { CatalogItem, Invoice, InvoicePaymentMethod, QuoteBundle } from '../../types'
 import type { ProductResolutionCandidate, ProductSuggestion } from '../../data/repository'
+import { splitItemName } from '../../lib/productNaming'
 
 const CONFIDENCE_BADGE: Record<ProductResolutionCandidate['confidenceLevel'], string> = {
   high: 'bg-green-100 text-green-800',
@@ -717,9 +718,9 @@ export default function ScanWorkspacePage() {
                         </span>
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-semibold text-ink">
-                            {[candidate.brand, candidate.model].filter(Boolean).join(' ') || candidate.name}
+                            {splitItemName(candidate).title}
                           </p>
-                          <p className="truncate text-xs text-zinc-500">{candidate.name}</p>
+                          <p className="truncate text-xs text-zinc-500">{splitItemName(candidate).descriptor ?? '—'}</p>
                           <div className="mt-1 flex flex-wrap items-center gap-1.5">
                             <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${CONFIDENCE_BADGE[candidate.confidenceLevel]}`}>
                               {CONFIDENCE_LABEL[candidate.confidenceLevel]}
@@ -1084,8 +1085,8 @@ function CartRowCard({
           </div>
         ) : (
           <>
-            <p className="truncate text-sm font-semibold text-ink">{row.name}</p>
-            <p className="truncate text-xs text-zinc-500">{[row.brand, row.model].filter(Boolean).join(' · ') || '—'}</p>
+            <p className="truncate text-sm font-semibold text-ink">{splitItemName(row).title}</p>
+            <p className="truncate text-xs text-zinc-500">{splitItemName(row).descriptor ?? '—'}</p>
           </>
         )}
         <div className="flex items-center gap-3">

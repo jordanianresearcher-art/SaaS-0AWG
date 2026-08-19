@@ -23,6 +23,7 @@ import { useToast } from './Toast'
 import { Button } from './ui'
 import type { CatalogItem, ProductCategory } from '../types'
 import { filterCatalog } from '../lib/catalogSearch'
+import { formatItemDisplayName } from '../lib/productNaming'
 
 interface CatalogOrganizerProps {
   items: CatalogItem[]
@@ -196,9 +197,7 @@ function OrganizerItemCard({ item, selected, onSelect }: { item: CatalogItem; se
       {...attributes}
     >
       <p className="line-clamp-2 font-semibold text-ink">
-        {[item.brand, item.model].filter(Boolean).join(' ')}
-        {item.brand || item.model ? ' — ' : ''}
-        {item.name}
+        {formatItemDisplayName(item)}
       </p>
       <p className="mt-0.5 text-xs text-zinc-500">
         {item.category ? PRODUCT_CATEGORY_INFO[item.category].label : 'Uncategorized'}

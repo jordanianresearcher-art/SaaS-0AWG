@@ -38,6 +38,7 @@ import {
 } from '../../lib/windowTint'
 import type { NewQuoteInput } from '../../data/repository'
 import type { CatalogItem, ProductCategory, QuoteBundle } from '../../types'
+import { formatItemDisplayName } from '../../lib/productNaming'
 
 const optionalDollarSchema = z
   .string()
@@ -944,9 +945,7 @@ function ItemRows({
                   )}
                 </span>
                 <span className="text-base font-semibold text-ink">
-                  {[catalogItem.brand, catalogItem.model].filter(Boolean).join(' ')}
-                  {catalogItem.brand || catalogItem.model ? ' — ' : ''}
-                  {catalogItem.name}
+                  {formatItemDisplayName(catalogItem)}
                 </span>
               </button>
             </li>

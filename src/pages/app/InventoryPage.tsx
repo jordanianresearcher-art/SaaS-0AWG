@@ -12,6 +12,7 @@ import { CategoryIcon } from '../../components/categoryIcon'
 import { PRODUCT_CATEGORY_INFO, PRODUCT_CATEGORIES } from '../../lib/audioConfigs'
 import { computeInventorySummary, isLowStock, needsUpc } from '../../lib/inventory'
 import { formatCurrency } from '../../lib/format'
+import { formatItemShortName } from '../../lib/productNaming'
 import type { CatalogItem } from '../../types'
 
 type SortKey = 'name' | 'price' | 'quantity'
@@ -56,7 +57,7 @@ export default function InventoryPage() {
       .sort((a, b) => {
         if (sort === 'price') return (b.defaultPriceCents ?? 0) - (a.defaultPriceCents ?? 0)
         if (sort === 'quantity') return a.quantityOnHand - b.quantityOnHand
-        return a.name.localeCompare(b.name)
+        return formatItemShortName(a).localeCompare(formatItemShortName(b))
       })
   }, [items, query, category, lowStockOnly, needsUpcOnly, sort, defaultThreshold])
 
@@ -154,6 +155,12 @@ export default function InventoryPage() {
         <ul className="divide-y divide-zinc-200 overflow-hidden rounded-2xl border border-zinc-200 bg-white">
           {filtered.map((item) => {
             const low = isLowStock(item, defaultThreshold)
+            // Brand + model is the identity; `name` holds only the descriptor
+            // half and is legitimately empty for an item whose typed name was
+            // nothing but its brand and model (see productNaming.ts). Rendering
+            // it raw as the title would leave the row blank.
+            const title = formatItemShortName(item)
+            const descriptor = item.name.trim() && item.name.trim() !== title ? item.name.trim() : null
             return (
               <li key={item.id}>
                 <Link to={`/app/inventory/${item.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-zinc-50">
@@ -166,7 +173,7 @@ export default function InventoryPage() {
                   )}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
-                      <span className="truncate font-semibold text-ink">{item.name}</span>
+                      <span className="truncate font-semibold text-ink">{title}</span>
                       {needsUpc(item) ? (
                         <Badge className="shrink-0 bg-blue-50 text-brand" title="No barcode on file">
                           No UPC
@@ -174,7 +181,7 @@ export default function InventoryPage() {
                       ) : null}
                     </div>
                     <div className="truncate text-sm text-zinc-500">
-                      {[item.brand, item.category ? PRODUCT_CATEGORY_INFO[item.category].label : null].filter(Boolean).join(' · ') || '—'}
+                      {[descriptor, item.category ? PRODUCT_CATEGORY_INFO[item.category].label : null].filter(Boolean).join(' · ') || '—'}
                     </div>
                   </div>
                   <div className="shrink-0 text-right">

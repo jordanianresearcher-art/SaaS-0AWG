@@ -40,6 +40,7 @@ import { ProductSuggestField } from './ProductSuggestField'
 import { Button, Field, Input } from './ui'
 import type { CatalogItem, ProductCategory } from '../types'
 import { filterCatalog } from '../lib/catalogSearch'
+import { formatItemDisplayName, formatItemShortName } from '../lib/productNaming'
 
 export interface PackageBuilderValue {
   items: BuilderLineItem[]
@@ -249,9 +250,7 @@ function BuilderDropZone({
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-semibold text-ink">
-                  {[item.brand, item.model].filter(Boolean).join(' ')}
-                  {item.brand || item.model ? ' — ' : ''}
-                  {item.name}
+                  {formatItemDisplayName(item)}
                 </span>
               </span>
               <span className="flex shrink-0 items-center gap-1">
@@ -420,7 +419,7 @@ function CatalogTrayCard({ item, onTapAdd }: { item: CatalogItem; onTapAdd: () =
           <CategoryIcon category={item.category} className="h-7 w-7 text-brand" />
         )}
       </div>
-      <p className="line-clamp-2 text-xs font-semibold text-ink">{[item.brand, item.model].filter(Boolean).join(' ') || item.name}</p>
+      <p className="line-clamp-2 text-xs font-semibold text-ink">{formatItemShortName(item)}</p>
       {formatWiringKitSpec(item.specs) ? (
         <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium text-zinc-600">{formatWiringKitSpec(item.specs)}</span>
       ) : null}

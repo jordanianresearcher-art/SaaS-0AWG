@@ -1,5 +1,6 @@
 import type { Invoice, Shop } from '../types'
 import { formatCurrency, formatDate } from './format'
+import { formatItemDisplayName } from './productNaming'
 
 // Renders an emailed copy of an invoice from the scan-to-invoice workspace
 // (src/pages/app/ScanWorkspacePage.tsx's InvoiceDocument is the on-screen/
@@ -49,8 +50,10 @@ export function renderInvoiceEmail(ctx: InvoiceEmailContext): RenderedInvoiceEma
         }`
       : 'Payment due'
 
+  // One canonical name, same as the quote email and every screen in the app —
+  // `item.name` alone is only the descriptor half and is often empty.
   const itemLines = invoice.items.map(
-    (item) => `  ${item.quantity}x ${item.name}${item.brand || item.model ? ` (${[item.brand, item.model].filter(Boolean).join(' ')})` : ''} — ${formatCurrency(item.unitPriceCents * item.quantity)}`,
+    (item) => `  ${item.quantity}x ${formatItemDisplayName(item)} — ${formatCurrency(item.unitPriceCents * item.quantity)}`,
   )
 
   const text = [
@@ -85,8 +88,7 @@ export function renderInvoiceEmail(ctx: InvoiceEmailContext): RenderedInvoiceEma
       (item) => `
       <tr>
         <td style="padding:10px 0;border-bottom:1px solid #f4f4f5;">
-          <div style="font-weight:600;color:#18181b;">${escapeHtml(item.name)}</div>
-          ${item.brand || item.model ? `<div style="color:#71717a;font-size:13px;">${escapeHtml([item.brand, item.model].filter(Boolean).join(' · '))}</div>` : ''}
+          <div style="font-weight:600;color:#18181b;">${escapeHtml(formatItemDisplayName(item))}</div>
         </td>
         <td style="padding:10px 0;border-bottom:1px solid #f4f4f5;text-align:right;color:#71717a;">${item.quantity}</td>
         <td style="padding:10px 0;border-bottom:1px solid #f4f4f5;text-align:right;font-weight:600;color:#18181b;">${formatCurrency(item.unitPriceCents * item.quantity)}</td>

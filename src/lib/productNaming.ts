@@ -243,6 +243,27 @@ export function formatItemShortName(item: NameableItem): string {
 }
 
 /**
+ * The two-line form every list row and card uses: identity on the first line,
+ * descriptor on the second.
+ *
+ * `descriptor` comes back null whenever the second line would only repeat the
+ * first — which is the normal case for an item whose stored `name` is empty
+ * because the typed name was nothing but its brand and model. Rendering
+ * `item.name` raw in those layouts left the row's title blank; going through
+ * here means the title is always the identity and the subtitle is always
+ * something new.
+ */
+export function splitItemName(item: NameableItem): { title: string; descriptor: string | null } {
+  const title = formatItemShortName(item)
+  const full = formatItemDisplayName(item)
+  if (full === title) return { title, descriptor: null }
+  const descriptor = full.startsWith(title)
+    ? full.slice(title.length).replace(/^\s*[-\u2013\u2014]\s*/, '').trim()
+    : full
+  return { title, descriptor: descriptor || null }
+}
+
+/**
  * Build a descriptor from structured specs, so AI-resolved items get a
  * consistent spec line instead of whatever prose the model returned.
  * Order is deliberate: size, then type, then the electrical numbers a

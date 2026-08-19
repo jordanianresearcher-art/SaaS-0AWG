@@ -39,6 +39,7 @@ import { errorMessage } from '../../lib/errors'
 import { summarizeWindowTint } from '../../lib/windowTint'
 import { addonOptions, computeAddonBreakdown, fullTotalCents, mainOption } from '../../lib/quotePricing'
 import type { QuoteBundle, TemplateType } from '../../types'
+import { formatItemDisplayName } from '../../lib/productNaming'
 
 export default function QuoteDetailPage() {
   const { quoteId } = useParams<{ quoteId: string }>()
@@ -546,9 +547,7 @@ function ItemList({ items }: { items: QuoteBundle['options'][number]['items'] })
           </span>
           <span className="text-zinc-700">
             {item.quantity > 1 ? `${item.quantity}× ` : ''}
-            {[item.brand, item.model].filter(Boolean).join(' ')}
-            {item.brand || item.model ? ' — ' : ''}
-            {item.name.trim() || 'Item'}
+            {formatItemDisplayName(item)}
           </span>
         </li>
       ))}

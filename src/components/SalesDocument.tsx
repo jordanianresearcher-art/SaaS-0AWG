@@ -16,6 +16,7 @@ import type { ReactNode } from 'react'
 import { MapPin, Phone } from 'lucide-react'
 import type { Shop } from '../types'
 import { formatCurrency } from '../lib/format'
+import { splitItemName } from '../lib/productNaming'
 
 export interface SalesDocumentItem {
   id: string
@@ -157,8 +158,10 @@ export function SalesDocument({
           {items.map((item) => (
             <tr key={item.id}>
               <td className="px-6 py-3">
-                <p className="font-medium text-ink">{item.name.trim() || 'Item'}</p>
-                {item.brand || item.model ? <p className="text-xs text-zinc-500">{[item.brand, item.model].filter(Boolean).join(' · ')}</p> : null}
+                <p className="font-medium text-ink">{splitItemName(item).title}</p>
+                {splitItemName(item).descriptor ? (
+                  <p className="text-xs text-zinc-500">{splitItemName(item).descriptor}</p>
+                ) : null}
               </td>
               <td className="px-3 py-3 text-right text-zinc-500">{item.quantity}</td>
               <td className="px-3 py-3 text-right text-zinc-500">{item.unitPriceCents != null ? formatCurrency(item.unitPriceCents) : '—'}</td>

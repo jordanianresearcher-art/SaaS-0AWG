@@ -35,6 +35,36 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
+/**
+ * Mirror of formatItemDisplayName in src/lib/productNaming.ts (Deno cannot
+ * import from src/), and character-for-character the same as the copy in
+ * send-quote-email. An invoice line has to read exactly like the quote line
+ * the customer already saw.
+ *
+ * The brand-casing map is deliberately NOT duplicated here — brands are
+ * canonicalized on write, so a stored brand is already canonical by the time
+ * it reaches this function.
+ */
+function formatItemDisplayName(item: { brand?: string | null; model?: string | null; name?: string | null }): string {
+  const brand = item.brand?.trim() || ''
+  let model = item.model?.trim().replace(/\s+/g, ' ') || ''
+  if (brand && model.toLowerCase().startsWith(`${brand.toLowerCase()} `)) {
+    model = model.slice(brand.length).trim()
+  }
+  const identity = [brand, model].filter(Boolean).join(' ')
+  let descriptor = item.name?.trim().replace(/\s+/g, ' ') || ''
+  for (const prefix of [brand, model]) {
+    if (!prefix) continue
+    const lower = descriptor.toLowerCase()
+    if (lower.startsWith(`${prefix.toLowerCase()} `)) {
+      descriptor = descriptor.slice(prefix.length).replace(/^\s*[-–—]?\s*/, '').trim()
+    }
+  }
+  if (identity && descriptor) return `${identity} — ${descriptor}`
+  if (identity) return identity
+  return descriptor || 'Item'
+}
+
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
@@ -75,7 +105,7 @@ function renderInvoiceEmail(shop: any, invoice: any, items: any[], recipientName
 
   const itemLines = items.map(
     (item) =>
-      `  ${item.quantity}x ${item.name}${item.brand || item.model ? ` (${[item.brand, item.model].filter(Boolean).join(' ')})` : ''} — ${formatCurrency(item.unit_price_cents * item.quantity)}`,
+      `  ${item.quantity}x ${formatItemDisplayName(item)} — ${formatCurrency(item.unit_price_cents * item.quantity)}`,
   )
 
   const text = [
@@ -108,8 +138,7 @@ function renderInvoiceEmail(shop: any, invoice: any, items: any[], recipientName
       (item) => `
       <tr>
         <td style="padding:10px 0;border-bottom:1px solid #f4f4f5;">
-          <div style="font-weight:600;color:#18181b;">${escapeHtml(item.name)}</div>
-          ${item.brand || item.model ? `<div style="color:#71717a;font-size:13px;">${escapeHtml([item.brand, item.model].filter(Boolean).join(' · '))}</div>` : ''}
+          <div style="font-weight:600;color:#18181b;">${escapeHtml(formatItemDisplayName(item))}</div>
         </td>
         <td style="padding:10px 0;border-bottom:1px solid #f4f4f5;text-align:right;color:#71717a;">${item.quantity}</td>
         <td style="padding:10px 0;border-bottom:1px solid #f4f4f5;text-align:right;font-weight:600;color:#18181b;">${formatCurrency(item.unit_price_cents * item.quantity)}</td>

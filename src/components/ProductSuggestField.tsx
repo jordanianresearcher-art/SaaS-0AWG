@@ -4,6 +4,7 @@ import { useRepo } from '../data/AppDataContext'
 import type { ProductSuggestion } from '../data/repository'
 import { formatCurrency } from '../lib/format'
 import { Input } from './ui'
+import { splitItemName } from '../lib/productNaming'
 
 const DEBOUNCE_MS = 600
 const MIN_QUERY_LENGTH = 3
@@ -144,9 +145,9 @@ export function ProductSuggestField({
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-semibold text-ink">
-                        {[s.brand, s.model].filter(Boolean).join(' ') || s.name}
+                        {splitItemName(s).title}
                       </span>
-                      <span className="block truncate text-xs text-zinc-500">{s.name}</span>
+                      <span className="block truncate text-xs text-zinc-500">{splitItemName(s).descriptor ?? '—'}</span>
                     </span>
                     {s.unitPriceCents !== null ? (
                       <span className="shrink-0 text-xs font-medium text-zinc-600">{formatCurrency(s.unitPriceCents)}</span>
