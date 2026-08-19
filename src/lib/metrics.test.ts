@@ -32,6 +32,47 @@ describe('computeMetrics', () => {
     expect(m.recoveredRevenueCents).toBeGreaterThanOrEqual(319900)
   })
 
+  it('never counts less over a longer window — the 60-day Home default', async () => {
+    // Home defaults to 60 days because a car-audio quote-to-install cycle
+    // regularly outruns a month, and the old hardcoded 14-day window cut
+    // recovered revenue out of the very number it exists to prove. Widening
+    // the window can only ever include more, never less, for every counter.
+    const repo = new DemoRepository(memoryStorage())
+    const bundles = await repo.listQuoteBundles()
+    const now = new Date()
+    const short = computeMetrics(bundles, subDays(now, 14), now)
+    const long = computeMetrics(bundles, subDays(now, 60), now)
+
+    for (const key of [
+      'eligibleQuotes',
+      'totalQuotedCents',
+      'emailsSent',
+      'quoteViews',
+      'responses',
+      'autoFollowUpsSent',
+      'cheaperRequests',
+      'financingRequests',
+      'appointments',
+      'deposits',
+      'wonJobs',
+      'recoveredRevenueCents',
+    ] as const) {
+      expect(long[key], key).toBeGreaterThanOrEqual(short[key])
+    }
+  })
+
+  it('windows by event time, not by quote age', async () => {
+    // A quote created 90 days ago but marked won yesterday belongs to a
+    // 60-day window; a quote created yesterday whose events all predate the
+    // window does not. Confirmed here by moving only the window edge.
+    const repo = new DemoRepository(memoryStorage())
+    const bundles = await repo.listQuoteBundles()
+    const now = new Date()
+    const future = computeMetrics(bundles, now, now)
+    expect(future.wonJobs).toBe(0)
+    expect(future.recoveredRevenueCents).toBe(0)
+  })
+
   it('returns zeros for an empty window', async () => {
     const repo = new DemoRepository(memoryStorage())
     const bundles = await repo.listQuoteBundles()

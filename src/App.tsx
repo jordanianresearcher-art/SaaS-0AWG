@@ -24,7 +24,7 @@ import QuotesPage from './pages/app/QuotesPage'
 import NewQuotePage from './pages/app/NewQuotePage'
 import QuoteDetailPage from './pages/app/QuoteDetailPage'
 import FollowUpsPage from './pages/app/FollowUpsPage'
-import ReportsPage from './pages/app/ReportsPage'
+import PilotReportPage from './pages/app/PilotReportPage'
 import SettingsPage from './pages/app/SettingsPage'
 import AdminPage from './pages/AdminPage'
 
@@ -137,13 +137,18 @@ export default function App() {
           }
         />
         <Route
-          path="reports"
+          path="report"
           element={
             <RequireFullAccess>
-              <ReportsPage />
+              <PilotReportPage />
             </RequireFullAccess>
           }
         />
+        {/* The Reports page is gone — its analytics live on Home now, and the
+            printable pilot report moved to /app/report. Anyone with the old
+            page bookmarked lands on the printable report rather than a 404
+            that bounces them out to the marketing site. */}
+        <Route path="reports" element={<Navigate to="/app/report" replace />} />
         <Route
           path="settings"
           element={

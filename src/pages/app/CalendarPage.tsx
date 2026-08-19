@@ -11,6 +11,7 @@ import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
 import { Button, Card, EmptyState, Field, Input, LoadingBlock, Modal, Select } from '../../components/ui'
 import { errorMessage } from '../../lib/errors'
+import { formatTime } from '../../lib/format'
 import { availableSlotsForDay, minuteToTimeString, timeStringToMinute } from '../../lib/scheduling'
 import { BODY_STYLE_INFO, BODY_STYLE_ORDER } from '../../lib/windowTint'
 import { buildBookingConfirmationSmsBody, buildBookingReminderSmsBody, buildSmsLink } from '../../lib/sms'
@@ -140,9 +141,9 @@ export default function CalendarPage() {
                           className={`w-full rounded-lg border-l-4 px-3 py-2 text-left ${STATUS_STYLE[appt.status]}`}
                         >
                           <p className="text-sm font-bold text-ink">
-                            {new Date(appt.startsAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                            {formatTime(appt.startsAt)}
                             {' – '}
-                            {new Date(appt.endsAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                            {formatTime(appt.endsAt)}
                           </p>
                           <p className="text-sm text-zinc-700">{appt.services.map((s) => s.name).join(', ')}</p>
                           {appt.status === 'awaiting_deposit' ? (
@@ -174,7 +175,7 @@ export default function CalendarPage() {
       <Modal open={detail !== null} onClose={() => setDetail(null)} title="Appointment">
         {detail ? ((() => {
           const start = new Date(detail.startsAt)
-          const whenLabel = `${start.toLocaleDateString(undefined, { weekday: 'long' })} at ${start.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
+          const whenLabel = `${start.toLocaleDateString(undefined, { weekday: 'long' })} at ${formatTime(start.toISOString())}`
           const smsCtx = {
             firstName: detail.customerFirstName || null,
             shopName: shop?.name ?? 'the shop',
@@ -192,9 +193,9 @@ export default function CalendarPage() {
           <div className="space-y-4">
             <div>
               <p className="text-lg font-bold text-ink">
-                {new Date(detail.startsAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                {formatTime(detail.startsAt)}
                 {' – '}
-                {new Date(detail.endsAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                {formatTime(detail.endsAt)}
               </p>
               <p className="text-base font-semibold text-ink">
                 {[detail.customerFirstName, detail.customerLastName].filter(Boolean).join(' ') || 'Customer'}

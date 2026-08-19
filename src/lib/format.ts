@@ -74,6 +74,17 @@ export function formatDateTime(iso: string | null | undefined): string {
   }).format(new Date(iso))
 }
 
+/**
+ * Clock time only, for rows that already carry the date from context — a
+ * "today" list, a day column on the calendar. Uses the viewer's locale rather
+ * than the en-US the date helpers pin, because a time of day is read by the
+ * person standing in the shop, not printed on a customer-facing document.
+ */
+export function formatTime(iso: string | null | undefined): string {
+  if (!iso) return '\u2014'
+  return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+}
+
 /** Total value of a quote = the main package price alone (add-ons are incremental upsells, not part of the baseline value a shop reports on). See src/lib/quotePricing.ts for the full main+addon pricing math. */
 export function quoteValueCents(options: Array<{ priceCents: number; optionKind: 'main' | 'addon' }>): number {
   if (options.length === 0) return 0

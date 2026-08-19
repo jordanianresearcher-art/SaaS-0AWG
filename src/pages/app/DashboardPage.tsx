@@ -1,22 +1,98 @@
-import { useEffect, useState } from 'react'
+// Home. The owner's own phone screen, and the only page they open on a normal
+// day — so it answers two questions above the fold and nothing else: how much
+// money did this thing make me, and what has to happen today.
+//
+// Everything that claims to be windowed obeys one range control, defaulting to
+// 60 days. That default is deliberate: a car-audio shop's quote-to-install
+// cycle regularly runs past a month, and the old hardcoded 14-day window cut
+// most recovered revenue out of the number it was supposed to prove. Cards
+// that are genuinely all-time (money still on the table, the pipeline funnel)
+// say so rather than quietly borrowing the window.
+
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { subDays } from 'date-fns'
-import { Plus, ArrowRight } from 'lucide-react'
+import { isSameDay, subDays } from 'date-fns'
+import { Plus, ArrowRight, Award, CalendarDays, BellRing, MessageSquare, Printer } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
-import { Card, Badge, EmptyState, LinkButton, LoadingBlock } from '../../components/ui'
-import { activeQuoteValueCents, computeMetrics, statusFunnel } from '../../lib/metrics'
-import { formatCurrency, customerDisplayName, formatVehicle, formatDateTime } from '../../lib/format'
+import { Card, Badge, Button, EmptyState, LinkButton, LoadingBlock } from '../../components/ui'
+import { RecoveryScoreGauge } from '../../components/RecoveryScoreGauge'
+import { Confetti } from '../../components/Confetti'
+import {
+  activeQuoteValueCents,
+  computeMetrics,
+  computeMilestones,
+  computeRecoveryScore,
+  statusFunnel,
+  type RecoveryTier,
+} from '../../lib/metrics'
+import { formatCurrency, customerDisplayName, formatVehicle, formatDateTime, formatTime } from '../../lib/format'
 import { STATUS_CONFIG, RESPONSE_CONFIG } from '../../lib/status'
 import { followUpBucket } from '../../lib/followUp'
 import { computeInventorySummary } from '../../lib/inventory'
-import type { CatalogItem, QuoteBundle } from '../../types'
+import type { Appointment, CatalogItem, QuoteBundle } from '../../types'
 
-function Stat({ label, value, accent = false }: { label: string; value: string; accent?: boolean }) {
+/** Windows the owner actually asks for. 60 is the default — see the file note. */
+const RANGE_CHOICES = [
+  { days: 7, label: '7 days' },
+  { days: 30, label: '30 days' },
+  { days: 60, label: '60 days' },
+  { days: 90, label: '90 days' },
+] as const
+
+const TIER_RANK: Record<RecoveryTier, number> = { none: 0, bronze: 1, silver: 2, gold: 3, platinum: 4 }
+const BEST_TIER_KEY = '0gauge-best-tier'
+const SEEN_MILESTONES_KEY = '0gauge-seen-milestones'
+
+/** One number, big. `note` carries the window so no figure is silently ambiguous. */
+function Figure({
+  label,
+  value,
+  note,
+  accent = false,
+}: {
+  label: string
+  value: string
+  note?: string
+  accent?: boolean
+}) {
   return (
-    <Card className="flex flex-col gap-1">
-      <span className="text-sm font-semibold tracking-wide text-zinc-500 uppercase">{label}</span>
-      <span className={`text-2xl font-black ${accent ? 'text-green-700' : 'text-ink'}`}>{value}</span>
-    </Card>
+    <div>
+      <p className="text-sm font-semibold tracking-wide text-zinc-500 uppercase">{label}</p>
+      <p className={`text-3xl font-black ${accent ? 'text-green-700' : 'text-ink'}`}>{value}</p>
+      {note ? <p className="text-xs text-zinc-500">{note}</p> : null}
+    </div>
+  )
+}
+
+/** A "today" row: icon, count, what it is, and where to go about it. */
+function TodayRow({
+  icon: Icon,
+  count,
+  label,
+  to,
+  urgent = false,
+}: {
+  icon: typeof CalendarDays
+  count: number
+  label: string
+  to: string
+  urgent?: boolean
+}) {
+  return (
+    <li>
+      <Link to={to} className="flex min-h-14 items-center gap-3 rounded-xl px-2 py-2 hover:bg-zinc-50">
+        <span
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+            count === 0 ? 'bg-zinc-100 text-zinc-400' : urgent ? 'bg-amber-100 text-amber-800' : 'bg-blue-50 text-brand'
+          }`}
+        >
+          <Icon className="h-5 w-5" aria-hidden="true" />
+        </span>
+        <span className={`text-2xl font-black ${count === 0 ? 'text-zinc-400' : 'text-ink'}`}>{count}</span>
+        <span className="min-w-0 flex-1 text-base font-semibold text-charcoal">{label}</span>
+        <ArrowRight className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden="true" />
+      </Link>
+    </li>
   )
 }
 
@@ -69,47 +145,220 @@ function InventoryCard() {
 
 export default function DashboardPage() {
   const { bundles, loading, loadError } = useAppData()
+  const repo = useRepo()
+  const [days, setDays] = useState<number>(60)
+  const [appointments, setAppointments] = useState<Appointment[]>([])
+
+  // A single `now` for the whole render. Calling new Date() in several places
+  // would let the window edge move between calculations.
+  const now = useMemo(() => new Date(), [])
+  const from = useMemo(() => subDays(now, days), [now, days])
+
+  // Appointments aren't in the shared bundle load (the calendar fetches them
+  // per visible range), so Home pulls its own slice — from the start of the
+  // window through the end of today, which is what "booked today" needs.
+  useEffect(() => {
+    let cancelled = false
+    const endOfToday = new Date(now)
+    endOfToday.setHours(23, 59, 59, 999)
+    void (async () => {
+      try {
+        const list = await repo.listAppointments(from.toISOString(), endOfToday.toISOString())
+        if (!cancelled) setAppointments(list)
+      } catch (err) {
+        // Home showing quote numbers but no booking numbers beats Home
+        // failing to render.
+        console.error('listAppointments for home failed', err)
+        if (!cancelled) setAppointments([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [repo, from, now])
+
+  const metrics = useMemo(() => computeMetrics(bundles, from, now), [bundles, from, now])
+  const recoveryScore = useMemo(() => computeRecoveryScore(metrics), [metrics])
+  const milestones = useMemo(() => computeMilestones(bundles), [bundles])
+
+  const dueToday = useMemo(
+    () =>
+      bundles.filter((b) => {
+        const bucket = followUpBucket(b.quote, b.customer.emailOptOutAt !== null, now)
+        return bucket === 'overdue' || bucket === 'due_today'
+      }),
+    [bundles, now],
+  )
+
+  const todaysAppointments = useMemo(
+    () =>
+      appointments
+        .filter((a) => a.status !== 'cancelled' && isSameDay(new Date(a.startsAt), now))
+        .sort((a, b) => a.startsAt.localeCompare(b.startsAt)),
+    [appointments, now],
+  )
+
+  const recentResponses = useMemo(
+    () =>
+      bundles
+        .flatMap((b) => b.responses.map((r) => ({ bundle: b, response: r })))
+        .sort((a, b) => b.response.createdAt.localeCompare(a.response.createdAt))
+        .slice(0, 5),
+    [bundles],
+  )
+
+  const [confettiTrigger, setConfettiTrigger] = useState(0)
+  const celebratedRef = useRef(false)
+
+  // Fire a confetti burst the first time Home sees a new best tier or a newly
+  // achieved milestone — never on every render, just on real progress.
+  useEffect(() => {
+    if (celebratedRef.current) return
+    if (loading && bundles.length === 0) return
+    celebratedRef.current = true
+    let celebrate = false
+
+    const bestTierSoFar = (localStorage.getItem(BEST_TIER_KEY) as RecoveryTier | null) ?? 'none'
+    if (recoveryScore.tier !== 'none' && TIER_RANK[recoveryScore.tier] > TIER_RANK[bestTierSoFar]) {
+      localStorage.setItem(BEST_TIER_KEY, recoveryScore.tier)
+      celebrate = true
+    }
+
+    const seen: string[] = JSON.parse(localStorage.getItem(SEEN_MILESTONES_KEY) ?? '[]')
+    const newlyAchieved = milestones.filter((m) => m.achieved && !seen.includes(m.id))
+    if (newlyAchieved.length > 0) {
+      localStorage.setItem(SEEN_MILESTONES_KEY, JSON.stringify([...seen, ...newlyAchieved.map((m) => m.id)]))
+      celebrate = true
+    }
+
+    if (celebrate) setConfettiTrigger((n) => n + 1)
+  }, [recoveryScore.tier, milestones, loading, bundles.length])
 
   if (loading && bundles.length === 0) return <LoadingBlock label="Loading your shop…" />
   if (loadError) return <EmptyState title="Could not load" message={loadError} />
 
-  const now = new Date()
-  const last14 = computeMetrics(bundles, subDays(now, 14), now)
-  const dueToday = bundles.filter((b) => {
-    const bucket = followUpBucket(b.quote, b.customer.emailOptOutAt !== null, now)
-    return bucket === 'overdue' || bucket === 'due_today'
-  })
-  const recentResponses = bundles
-    .flatMap((b) => b.responses.map((r) => ({ bundle: b, response: r })))
-    .sort((a, b) => b.response.createdAt.localeCompare(a.response.createdAt))
-    .slice(0, 5)
   const recentActivity = bundles
     .flatMap((b) => b.events.map((e) => ({ bundle: b, event: e })))
     .sort((a, b) => b.event.createdAt.localeCompare(a.event.createdAt))
     .slice(0, 8)
   const funnel = statusFunnel(bundles).filter((f) => f.count > 0)
+  const windowNote = `Last ${days} days`
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-black text-ink">Today</h1>
-          <p className="text-base text-zinc-600">Last 14 days at a glance.</p>
+        <h1 className="text-3xl font-black text-ink">Home</h1>
+        <div className="flex flex-wrap gap-2">
+          <LinkButton to={`/app/report?days=${days}`} variant="secondary">
+            <Printer className="h-5 w-5" aria-hidden="true" /> Print report
+          </LinkButton>
+          <LinkButton to="/app/quotes/new">
+            <Plus className="h-5 w-5" aria-hidden="true" /> Create Quote
+          </LinkButton>
         </div>
-        <LinkButton to="/app/quotes/new">
-          <Plus className="h-5 w-5" aria-hidden="true" /> Create Quote
-        </LinkButton>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Money still on the table" value={formatCurrency(activeQuoteValueCents(bundles))} />
-        <Stat label="Recovered revenue" value={formatCurrency(last14.recoveredRevenueCents)} accent />
-        <Stat label="Won jobs" value={String(last14.wonJobs)} accent />
-        <Stat label="Emails sent" value={String(last14.emailsSent)} />
-        <Stat label="Quote views" value={String(last14.quoteViews)} />
-        <Stat label="Customer responses" value={String(last14.responses)} />
-        <Stat label="Appointments" value={String(last14.appointments)} />
+      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Time period">
+        {RANGE_CHOICES.map((choice) => (
+          <Button
+            key={choice.days}
+            variant={days === choice.days ? 'primary' : 'secondary'}
+            onClick={() => setDays(choice.days)}
+            aria-pressed={days === choice.days}
+          >
+            {choice.label}
+          </Button>
+        ))}
       </div>
+
+      {/* Money and today, side by side — the two questions the owner opens
+          this page to answer. */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <h2 className="text-xl font-bold text-ink">Money</h2>
+          <div className="mt-4 grid grid-cols-2 gap-4">
+            <Figure
+              label="Recovered"
+              value={formatCurrency(metrics.recoveredRevenueCents)}
+              note={windowNote}
+              accent
+            />
+            <Figure
+              label="Still on the table"
+              value={formatCurrency(activeQuoteValueCents(bundles))}
+              note="All open quotes"
+            />
+            <Figure label="Jobs won" value={String(metrics.wonJobs)} note={windowNote} accent />
+            <Figure label="Quoted" value={formatCurrency(metrics.totalQuotedCents)} note={windowNote} />
+          </div>
+        </Card>
+
+        <Card>
+          <h2 className="text-xl font-bold text-ink">Today</h2>
+          <ul className="mt-2 -mx-2">
+            <TodayRow
+              icon={CalendarDays}
+              count={todaysAppointments.length}
+              label={todaysAppointments.length === 1 ? 'appointment' : 'appointments'}
+              to="/app/calendar"
+            />
+            <TodayRow
+              icon={BellRing}
+              count={dueToday.length}
+              label="follow-ups due"
+              to="/app/follow-ups"
+              urgent
+            />
+            <TodayRow
+              icon={MessageSquare}
+              count={metrics.responses}
+              label={`customer responses · ${windowNote.toLowerCase()}`}
+              to="/app/quotes"
+            />
+          </ul>
+          {todaysAppointments.length > 0 ? (
+            <ul className="mt-2 space-y-1 border-t border-zinc-100 pt-3">
+              {todaysAppointments.slice(0, 4).map((a) => (
+                <li key={a.id} className="flex items-baseline justify-between gap-3 text-base">
+                  <span className="truncate text-zinc-700">
+                    {[a.customerFirstName, a.customerLastName].filter(Boolean).join(' ') || 'Appointment'}
+                  </span>
+                  <span className="shrink-0 text-sm font-semibold text-zinc-500">{formatTime(a.startsAt)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </Card>
+      </div>
+
+      <Card className="relative overflow-hidden p-6 text-center sm:p-8">
+        <Confetti trigger={confettiTrigger} />
+        <p className="text-sm font-bold tracking-widest text-brand uppercase">Recovery Score</p>
+        <div className="mt-4 flex justify-center">
+          <RecoveryScoreGauge score={recoveryScore.score} tier={recoveryScore.tier} />
+        </div>
+        <p className="mt-4 text-base text-zinc-500">
+          {recoveryScore.score === null
+            ? 'Email a few quotes and this score will come to life.'
+            : `Built from recovered revenue, win rate, responses, and views over the last ${days} days.`}
+        </p>
+        <div className="mt-6 flex flex-wrap justify-center gap-2 border-t border-zinc-100 pt-5">
+          {milestones.map((m) => (
+            <Badge
+              key={m.id}
+              title={m.description}
+              className={
+                m.achieved
+                  ? 'gap-1.5 border border-amber-300 bg-amber-50 text-amber-900'
+                  : 'gap-1.5 border border-zinc-200 bg-zinc-50 text-zinc-400'
+              }
+            >
+              <Award className="h-4 w-4" aria-hidden="true" />
+              {m.label}
+            </Badge>
+          ))}
+        </div>
+      </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
@@ -165,7 +414,10 @@ export default function DashboardPage() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
-          <h2 className="text-xl font-bold text-ink">Where your quotes stand</h2>
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 className="text-xl font-bold text-ink">Where your quotes stand</h2>
+            <span className="text-xs text-zinc-500">All open quotes</span>
+          </div>
           {funnel.length === 0 ? (
             <p className="mt-4 text-base text-zinc-600">Create your first quote to see the pipeline.</p>
           ) : (

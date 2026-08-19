@@ -10,7 +10,7 @@ special treatment instead of being one of six equal-weight buttons.
 
 `need_financing` was already a real `ResponseType`/`quote_response_type`
 value, already flowing into `quote_responses`/`quote_events`, already
-counted in `ReportsPage`'s recovery metrics (`financingRequests`), and
+counted in the pilot report's recovery metrics (`financingRequests`), and
 already visible in `QuoteDetailPage`'s "Customer responses" list. The gap
 wasn't the data model — it was that the action was buried in a 6-choice
 generic grid, wasn't idempotent server-side, and wasn't surfaced anywhere
