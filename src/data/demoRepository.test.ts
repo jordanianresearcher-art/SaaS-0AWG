@@ -343,6 +343,15 @@ describe('DemoRepository', () => {
     expect(missing).toEqual({ source: 'not_found' })
   })
 
+  it('reports a store-assigned barcode as unsearchable rather than not-found', async () => {
+    // 200001188725 is a real code a shop scanned: a valid UPC-A whose GS1
+    // prefix is 2, meaning the store assigned it. No database has it, so the
+    // app must say so instead of implying the search came up empty.
+    const result = await repo.resolveProduct({ kind: 'barcode', code: '200001188725' })
+    expect(result.candidates).toEqual([])
+    expect(result.unresolvableBarcode).toBe(true)
+  })
+
   it('lookupProductSuggestions never makes a real AI/web-search call in demo mode', async () => {
     expect(await repo.lookupProductSuggestions('NA-12F')).toEqual({
       suggestions: [],
@@ -357,7 +366,13 @@ describe('DemoRepository', () => {
     const result = await repo.resolveProduct({ kind: 'text', query: 'NA-12F' })
     // aiConfigured is true in demo mode: its results are canned, not absent —
     // an empty list here is a real 'found nothing', not 'nothing looked'.
-    expect(result).toEqual({ candidates: [], retainedInput: 'NA-12F', aiConfigured: true, aiError: null })
+    expect(result).toEqual({
+      candidates: [],
+      retainedInput: 'NA-12F',
+      aiConfigured: true,
+      aiError: null,
+      unresolvableBarcode: false,
+    })
   })
 
   it('resolveProduct simulates a resolved-but-unconfirmed barcode deterministically, for the fixed demo code', async () => {
@@ -369,7 +384,15 @@ describe('DemoRepository', () => {
 
   it('resolveProduct genuinely finds nothing for any other unrecognized barcode — never dead-ends silently, retains the code', async () => {
     const result = await repo.resolveProduct({ kind: 'barcode', code: '000000000000' })
-    expect(result).toEqual({ candidates: [], retainedInput: '000000000000', aiConfigured: true, aiError: null })
+    expect(result).toEqual({
+      candidates: [],
+      retainedInput: '000000000000',
+      aiConfigured: true,
+      aiError: null,
+      // A structurally valid UPC-A that simply does not exist — the honest
+      // answer is "searched, found nothing", not "unsearchable".
+      unresolvableBarcode: false,
+    })
   })
 
   it('resolveProduct never makes a real vision call for photo lookups, and deterministically returns candidates so the confirmation UI is exercisable', async () => {

@@ -104,6 +104,63 @@ function normalizeQuery(raw: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Barcode identity -- mirrors src/lib/barcodeIdentity.ts (Deno cannot import
+// from src/; same duplication rule as the email templates and productNaming).
+// The full classifier, its GS1 origin table, and its tests live on the client
+// side; only the two questions this function needs are mirrored here.
+//
+// Why it exists: a shop scanned 200001188725 (a valid UPC-A whose GS1 prefix
+// is 2 -- "restricted distribution", i.e. assigned by the store itself) and
+// 26040308 (eight digits that are not a valid EAN-8), and this function
+// dutifully queried a barcode database, missed, then ran a full AI web search
+// on a meaningless number before reporting "couldn't identify". Neither code
+// can exist in any public database. Recognising that up front is both instant
+// and honest.
+// ---------------------------------------------------------------------------
+
+function gs1CheckDigit(payload: string): number {
+  let sum = 0
+  let weight = 3
+  for (let i = payload.length - 1; i >= 0; i--) {
+    sum += Number(payload[i]) * weight
+    weight = weight === 3 ? 1 : 3
+  }
+  return (10 - (sum % 10)) % 10
+}
+
+/** GS1 prefix 2 (the 02x and 04x bands of the EAN-13 form) is store-assigned. */
+function isStoreAssignedBarcode(code: string): boolean {
+  if (!/^\d+$/.test(code)) return false
+  const ean13 = code.length === 12 ? `0${code}` : code
+  if (ean13.length !== 13) return false
+  const prefix = Number(ean13.slice(0, 3))
+  return (prefix >= 20 && prefix <= 29) || (prefix >= 40 && prefix <= 49) || (prefix >= 200 && prefix <= 299)
+}
+
+/**
+ * Every spelling of this code worth querying, or an empty list when no
+ * database could ever hold it.
+ *
+ * A 12-digit UPC-A and the 13-digit EAN carrying a leading zero are the same
+ * product, and a database may hold either -- querying only the scanned form is
+ * how a real, findable product (a Brazilian EAN-13, in the report that
+ * prompted this) comes back empty.
+ */
+function barcodeLookupForms(raw: string): string[] {
+  const code = raw.trim().replace(/[\s-]/g, '')
+  if (!/^\d+$/.test(code)) return []
+  const retailLength = code.length === 8 || code.length === 12 || code.length === 13
+  if (!retailLength) return []
+  if (gs1CheckDigit(code.slice(0, -1)) !== Number(code[code.length - 1])) return []
+  if (isStoreAssignedBarcode(code)) return []
+
+  const forms = [code]
+  if (code.length === 12) forms.push(`0${code}`)
+  else if (code.length === 13 && code.startsWith('0')) forms.push(code.slice(1))
+  return forms
+}
+
+// ---------------------------------------------------------------------------
 // Candidate shape -- mirrors ProductResolutionCandidate in src/data/repository.ts.
 // ---------------------------------------------------------------------------
 
@@ -139,6 +196,20 @@ function newCandidateId(): string {
 // ---------------------------------------------------------------------------
 // UPCitemdb -- ported from the deleted lookup-product-upc function.
 // ---------------------------------------------------------------------------
+
+/**
+ * Query UPCitemdb for every equivalent spelling of the code, stopping at the
+ * first hit. Sequential rather than parallel on purpose: the trial endpoint is
+ * rate-limited per IP, and the second form is only ever needed when the first
+ * missed.
+ */
+async function resolveViaUpcItemDbAllForms(raw: string): Promise<Candidate | null> {
+  for (const form of barcodeLookupForms(raw)) {
+    const hit = await resolveViaUpcItemDb(form)
+    if (hit) return hit
+  }
+  return null
+}
 
 async function resolveViaUpcItemDb(code: string): Promise<Candidate | null> {
   try {
@@ -882,7 +953,24 @@ Deno.serve(async (req: Request) => {
   if (kind === 'barcode') {
     // The bare code, without any brand prefix the cache key may carry.
     const rawCode = normalizeBarcode(code ?? '')
-    const upcHit = await resolveViaUpcItemDb(rawCode)
+
+    // A code no database can hold gets no requests made on its behalf. This
+    // is not a shortcut for speed -- it is the difference between "we looked
+    // everywhere and found nothing", which is what the shop used to be told,
+    // and "nothing to look in", which is the truth and points at the one
+    // action that works: type the model, and the code gets bound to it.
+    if (barcodeLookupForms(rawCode).length === 0) {
+      return json(200, {
+        ok: true,
+        candidates: [],
+        cached: false,
+        aiConfigured,
+        aiError: null,
+        unresolvableBarcode: true,
+      })
+    }
+
+    const upcHit = await resolveViaUpcItemDbAllForms(rawCode)
     if (upcHit) {
       candidates = [upcHit]
     } else if (fast) {

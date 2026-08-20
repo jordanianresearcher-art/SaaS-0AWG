@@ -56,6 +56,7 @@ import { dedupeCandidates, rankCandidates } from '../lib/productResolver'
 import { computeInvoiceTotals } from '../lib/invoicePricing'
 import { buildSkuBase, nextAvailableSku } from '../lib/sku'
 import { newId } from '../lib/ids'
+import { barcodeLookupForms } from '../lib/barcodeIdentity'
 
 // Production repository. Row-level security scopes every query to shops the
 // signed-in user belongs to; the anonymous public page goes through
@@ -797,6 +798,14 @@ export class SupabaseRepository implements DataRepository {
 
   async resolveProduct(request: ProductResolveRequest): Promise<ProductResolveResult> {
     const retainedInput = request.kind === 'barcode' ? request.code : request.kind === 'text' ? request.query : 'photo'
+
+    // A code no database can hold never leaves the device. This runs AFTER
+    // lookupProductByUpc's local-catalog check, which is the one place such a
+    // code legitimately resolves — a store barcode bound during rapid intake
+    // is found there and never reaches this line.
+    if (request.kind === 'barcode' && barcodeLookupForms(request.code).length === 0) {
+      return { candidates: [], retainedInput, aiConfigured: true, aiError: null, unresolvableBarcode: true }
+    }
     // Same never-throw rule as everything else in this lookup chain: this
     // powers an autocomplete dropdown or a post-scan confirmation step, not
     // a blocking one, so any failure (function not deployed yet, no funded
@@ -818,6 +827,7 @@ export class SupabaseRepository implements DataRepository {
           // lookup can be "broken", since it produces no logs anywhere and
           // looks identical to a search that found nothing. Say so.
           aiError: notDeployed ? 'the resolve-product function is not deployed to this project' : null,
+          unresolvableBarcode: false,
         }
       }
       const raw = Array.isArray(data?.candidates) ? (data.candidates as Row[]) : []
@@ -854,10 +864,11 @@ export class SupabaseRepository implements DataRepository {
         // up" — that would send them chasing a config problem they don't have.
         aiConfigured: (data as Row)?.aiConfigured !== false,
         aiError: typeof (data as Row)?.aiError === 'string' ? ((data as Row).aiError as string) : null,
+        unresolvableBarcode: (data as Row)?.unresolvableBarcode === true,
       }
     } catch (err) {
       console.error('resolve-product failed', err)
-      return { candidates: [], retainedInput, aiConfigured: true, aiError: null }
+      return { candidates: [], retainedInput, aiConfigured: true, aiError: null, unresolvableBarcode: false }
     }
   }
 

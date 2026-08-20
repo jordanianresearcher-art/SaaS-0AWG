@@ -32,6 +32,7 @@ import {
 import type { CatalogItem, Invoice, InvoicePaymentMethod, QuoteBundle } from '../../types'
 import type { ProductResolutionCandidate, ProductSuggestion } from '../../data/repository'
 import { splitItemName } from '../../lib/productNaming'
+import { barcodeAdvice, classifyBarcode } from '../../lib/barcodeIdentity'
 
 const CONFIDENCE_BADGE: Record<ProductResolutionCandidate['confidenceLevel'], string> = {
   high: 'bg-green-100 text-green-800',
@@ -246,11 +247,23 @@ export default function ScanWorkspacePage() {
         setResolveCandidates(result.candidates)
         openedCandidateModal = true
       } else {
-        // Fast lookup missed. Retain the code so staff can act on it right
-        // now, and keep looking in the background — if the slower AI/web
-        // search does turn something up, offer it, but only while this is
-        // still the code on screen (see latestScanRef).
         setUnresolvedCode(code)
+
+        // Some codes are not "not found yet" — they are unfindable by
+        // construction, and saying "still searching" about them is a promise
+        // the app cannot keep. A store-assigned prefix, an item number, or a
+        // bare part number gets the truth and the action that works instead,
+        // and no background search is started.
+        const advice = barcodeAdvice(classifyBarcode(code))
+        if (advice) {
+          toast('info', advice)
+          return
+        }
+
+        // A real retail code that simply missed the fast path. Retain it so
+        // staff can act now, and keep looking in the background — if the
+        // slower AI/web search turns something up, offer it, but only while
+        // this is still the code on screen (see latestScanRef).
         toast('info', `No instant match for ${code} — type what it is below. Still searching in the background.`)
         void repo
           .lookupProductByUpc(code)

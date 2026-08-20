@@ -34,6 +34,7 @@ import { knownBrands, mergeSearchHits, searchLocalCatalog, type ProductSearchHit
 import { guessCategoryFromName } from '../../lib/categorize'
 import { formatCurrency, parseDollarsToCents } from '../../lib/format'
 import { formatItemShortName, splitItemName } from '../../lib/productNaming'
+import { barcodeAdvice, classifyBarcode } from '../../lib/barcodeIdentity'
 import { useHardwareScanner } from '../../lib/useHardwareScanner'
 import { errorMessage } from '../../lib/errors'
 import type { CatalogItem } from '../../types'
@@ -415,6 +416,13 @@ export default function NewInventoryItemPage() {
 
   const totalUnits = lines.reduce((sum, l) => sum + l.quantity, 0)
 
+  // Why this particular code didn't fill anything in. The generic line below
+  // ("isn't in any barcode database") is true of an unlisted retail product,
+  // but it's misleading for a store-assigned code or an item number — those
+  // were never in a database to begin with, and telling staff the difference
+  // is what stops it reading as a broken lookup.
+  const pendingCodeNote = pendingCode ? barcodeAdvice(classifyBarcode(pendingCode)) : null
+
   if (!catalog) return <LoadingBlock label="Loading catalog…" />
 
   return (
@@ -539,7 +547,9 @@ export default function NewInventoryItemPage() {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h2 className="text-xl font-bold text-ink">What is it?</h2>
-                  {pendingCode ? (
+                  {pendingCode && pendingCodeNote ? (
+                    <p className="text-sm text-zinc-500">{pendingCodeNote}</p>
+                  ) : pendingCode ? (
                     <p className="text-sm text-zinc-500">
                       Code <span className="font-mono">{pendingCode}</span> isn&apos;t in any barcode database — name it
                       once and it&apos;ll scan instantly forever.

@@ -50,6 +50,7 @@ import { computeInvoiceTotals } from '../lib/invoicePricing'
 import { buildSkuBase, nextAvailableSku } from '../lib/sku'
 import { newId } from '../lib/ids'
 import { canonicalizeProductFields } from '../lib/productNaming'
+import { barcodeLookupForms } from '../lib/barcodeIdentity'
 
 const STORAGE_KEY = '0gauge-demo-db'
 
@@ -439,20 +440,20 @@ export class DemoRepository implements DataRepository {
     // one fixed "known unknown" code returns a couple of plausible-looking
     // candidates, and everything else genuinely resolves to nothing.
     if (request.kind === 'text') {
-      return { candidates: [], retainedInput: request.query.trim(), aiConfigured: true, aiError: null }
+      return { candidates: [], retainedInput: request.query.trim(), aiConfigured: true, aiError: null, unresolvableBarcode: false }
     }
     if (request.kind === 'photo') {
       // Same rule: no real vision call in demo mode. Deterministically
       // "succeeds" with the same canned candidates as the fixed unresolved
       // barcode, purely so the photo-lookup confirmation UI is exercisable
       // in demo/Playwright without a camera or network access.
-      return { candidates: DEMO_RESOLVED_CANDIDATES, retainedInput: 'photo', aiConfigured: true, aiError: null }
+      return { candidates: DEMO_RESOLVED_CANDIDATES, retainedInput: 'photo', aiConfigured: true, aiError: null, unresolvableBarcode: false }
     }
     const code = request.code.trim()
     if (code === DEMO_UNRESOLVED_BARCODE) {
-      return { candidates: DEMO_RESOLVED_CANDIDATES, retainedInput: code, aiConfigured: true, aiError: null }
+      return { candidates: DEMO_RESOLVED_CANDIDATES, retainedInput: code, aiConfigured: true, aiError: null, unresolvableBarcode: false }
     }
-    return { candidates: [], retainedInput: code, aiConfigured: true, aiError: null }
+    return { candidates: [], retainedInput: code, aiConfigured: true, aiError: null, unresolvableBarcode: barcodeLookupForms(code).length === 0 }
   }
 
   async listInvoices(): Promise<Invoice[]> {

@@ -413,6 +413,18 @@ export interface ProductResolveResult {
    * no provider was asked anything.
    */
   aiError: string | null
+  /**
+   * True when the scanned code is one no public database can ever hold — a
+   * store-assigned GS1 prefix, an internal item number, a bare part number —
+   * so nothing was queried and nothing could have been found.
+   *
+   * Distinct from an ordinary empty result, and the distinction is the whole
+   * point: "we searched everywhere and found nothing" sends staff hunting for
+   * a better scan, while "there is nothing to search" sends them to the one
+   * action that works — type the model, which binds the code to it for good.
+   * See src/lib/barcodeIdentity.ts.
+   */
+  unresolvableBarcode: boolean
 }
 
 /**
