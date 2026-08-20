@@ -448,6 +448,8 @@ export class DemoRepository implements DataRepository {
       sample: null,
       elapsedMs: 0,
       aiError: 'Demo mode never calls a real AI provider — sign in to your shop to test the live lookup.',
+      cached: false,
+      functionVersion: null,
     }
   }
 

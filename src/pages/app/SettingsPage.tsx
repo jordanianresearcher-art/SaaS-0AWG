@@ -266,6 +266,19 @@ function ProductLookupHealthSection() {
           <p className={`text-base font-bold ${result.ok ? 'text-green-900' : 'text-amber-900'}`}>
             {result.ok ? 'Product lookup is working.' : 'Product lookup is not returning results.'}
           </p>
+          {/* Version 2 is the first that reports one. Its absence means the
+              deployed function predates the diagnostics below, which is worth
+              knowing before trusting anything else here. */}
+          {result.functionVersion === null ? (
+            <p className="mt-1 text-sm text-amber-900">
+              The deployed function is older than this app, so it can&apos;t report which provider or model it
+              used. Run{' '}
+              <code className="rounded bg-amber-100 px-1 font-mono">
+                supabase functions deploy resolve-product
+              </code>{' '}
+              for the full picture.
+            </p>
+          ) : null}
 
           {result.ok ? (
             <dl className="mt-2 space-y-1 text-sm text-green-900">
@@ -286,6 +299,14 @@ function ProductLookupHealthSection() {
                   <dt className="font-semibold">Took</dt>
                   <dd>{(result.elapsedMs / 1000).toFixed(1)}s</dd>
                 </div>
+              ) : null}
+              {/* A cached answer proves the pipeline worked once; it does not
+                  prove the key works right now. Say which one this was. */}
+              {result.cached ? (
+                <p className="pt-1 text-amber-900">
+                  This answer came from the cache, so the AI provider wasn&apos;t called. Deploy the latest
+                  function to make this check always run live.
+                </p>
               ) : null}
               {/* Only worth surfacing when it is NOT the best path — it means
                   the rich call failed and something is still worth fixing,

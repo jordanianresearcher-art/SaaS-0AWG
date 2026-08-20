@@ -473,6 +473,15 @@ export interface ProductLookupSelfTest {
   sample: string | null
   elapsedMs: number | null
   aiError: string | null
+  /**
+   * True when the answer came from the resolution cache rather than a live
+   * provider call. A cache hit still proves the pipeline worked at some point,
+   * but it says nothing about whether the key works *now* — so it is reported
+   * rather than counted as a clean pass.
+   */
+  cached: boolean
+  /** The deployed function's contract version, when it is new enough to report one. */
+  functionVersion: number | null
 }
 
 export interface ShopifyImportOptions {

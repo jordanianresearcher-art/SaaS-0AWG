@@ -353,3 +353,50 @@ key, a key without access to the configured model, an unavailable tool, a
 function that was never deployed, and a genuine miss all end in an empty list.
 That ambiguity is what turned a configuration problem into a week of "lookup
 is broken" with nothing to act on.
+
+## Why the health check uses `kind: 'text'`
+
+The first version of the self-test sent a bespoke `kind: 'selftest'`. That was
+backwards, and it failed on exactly the deployment it existed to diagnose.
+
+The app and the Edge Function ship through **two separate manual pipelines** —
+the app to Cloudflare, the function via `supabase functions deploy` — and
+nothing keeps them in step. A browser running new code called a function
+running old code, whose `kind` check only knew `barcode`/`text`/`photo`, so it
+answered `400 Missing shopId or kind`. supabase-js collapsed that to "Edge
+Function returned a non-2xx status code", and the UI reported **"No AI provider
+key is set"** to an owner who had just set one, recharged the account, and
+redeployed.
+
+Two rules came out of that, and both are load-bearing:
+
+1. **A health check runs on the oldest contract available, never the newest.**
+   `kind: 'text'` has been supported since the resolver shipped, and it
+   exercises the same path a shop uses when they type a model name — which is
+   the thing being asked about anyway. It works against every deployed version.
+2. **A diagnostic never guesses.** `aiConfigured` is `boolean | null`, and null
+   means "the call never got far enough to ask". Reporting `false` there is
+   what produced the wrong instruction.
+
+Supporting details: `noCache: true` asks for a live call, and older
+deployments ignore the unknown field rather than failing — a cache hit is
+reported rather than counted as a pass, since it proves the pipeline worked
+once but says nothing about whether the key works now. `FUNCTION_VERSION` is
+reported so a skew is visible instead of inferred; its absence means the
+deployed function predates these diagnostics.
+
+## Deploying without skew
+
+Three things deploy separately and drifting between them is the most common
+cause of "it's broken":
+
+```bash
+npm run deploy          # build + wrangler (app) + supabase functions (all)
+npm run deploy:web      # app only
+npm run deploy:functions # Edge Functions only
+```
+
+Setting a secret does **not** deploy code:
+`supabase secrets set OPENAI_API_KEY=…` changes what the function reads at its
+next invocation, but a function whose *code* is stale stays stale until it is
+deployed. Migrations are a third, separate step run in the SQL editor.

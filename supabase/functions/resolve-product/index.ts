@@ -1235,7 +1235,13 @@ Deno.serve(async (req: Request) => {
   }
   const cached = cacheResult.data
 
-  if (cached && (!cached.expires_at || new Date(cached.expires_at) > new Date())) {
+  // A health check that reads its own cached answer proves nothing about
+  // whether the provider still works, so callers can ask for a live call.
+  // Older deployments simply ignore this field, which is the point: an
+  // unknown flag degrades to the old behaviour instead of failing.
+  const noCache = body?.noCache === true
+
+  if (!noCache && cached && (!cached.expires_at || new Date(cached.expires_at) > new Date())) {
     const candidates = (Array.isArray(cached.candidates) ? cached.candidates : []).map((c: Candidate) => ({
       ...c,
       source: 'resolution_cache' as const,

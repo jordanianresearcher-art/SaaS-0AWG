@@ -80,6 +80,9 @@ type Row = Record<string, any>
  * function running old code, which rejects a request it has never heard of.
  * That looks like a broken key and isn't one.
  */
+/** A product every car-audio resolver should know, used only by the health check. */
+const SELF_TEST_QUERY = 'Kicker CompR 12 inch subwoofer'
+
 export async function describeFunctionError(error: unknown): Promise<string> {
   if (!(error instanceof FunctionsHttpError)) {
     return error instanceof Error ? error.message : 'The lookup function could not be reached.'
@@ -866,26 +869,50 @@ export class SupabaseRepository implements DataRepository {
       sample: null,
       elapsedMs: null,
       aiError: message,
+      cached: false,
+      functionVersion: null,
     })
+
+    const started = Date.now()
     try {
+      // Deliberately `kind: 'text'` and not a bespoke 'selftest' kind.
+      //
+      // A health check has to run on the OLDEST contract the deployment might
+      // be running, not the newest — otherwise it fails on exactly the
+      // deployments it exists to diagnose. The first version of this asked for
+      // `kind: 'selftest'`, which every previously-deployed function rejects
+      // outright, so it reported a broken key on a project whose only problem
+      // was an un-deployed function. `kind: 'text'` has been supported since
+      // the resolver shipped, and it exercises the same path a shop uses when
+      // they type a model name — which is the thing being asked about.
+      //
+      // `noCache` is ignored by older deployments, which is fine: a cache hit
+      // is reported rather than silently counted as a pass.
       const { data, error } = await this.supabase.functions.invoke('resolve-product', {
-        body: { kind: 'selftest' },
+        body: { shopId: this.shopId, kind: 'text', query: SELF_TEST_QUERY, noCache: true },
       })
       if (error) {
         return failed(await describeFunctionError(error))
       }
+
       const row = (data ?? {}) as Row
+      const candidates = Array.isArray(row.candidates) ? (row.candidates as Row[]) : []
+      const top = candidates[0]
+      const aiConfigured = row.aiConfigured === undefined ? null : row.aiConfigured !== false
+
       return {
-        ok: row.candidateCount as number > 0,
-        aiConfigured: row.aiConfigured !== false,
+        ok: candidates.length > 0,
+        aiConfigured,
         provider: (row.provider as ProductLookupSelfTest['provider']) ?? null,
         model: typeof row.model === 'string' ? row.model : null,
         rung: typeof row.rung === 'number' ? row.rung : null,
         rungLabel: typeof row.rungLabel === 'string' ? row.rungLabel : null,
-        candidateCount: typeof row.candidateCount === 'number' ? row.candidateCount : 0,
-        sample: typeof row.sample === 'string' ? row.sample : null,
-        elapsedMs: typeof row.elapsedMs === 'number' ? row.elapsedMs : null,
+        candidateCount: candidates.length,
+        sample: typeof top?.name === 'string' ? top.name : null,
+        elapsedMs: Date.now() - started,
         aiError: typeof row.aiError === 'string' ? row.aiError : null,
+        cached: row.cached === true,
+        functionVersion: typeof row.functionVersion === 'number' ? row.functionVersion : null,
       }
     } catch (err) {
       return failed(err instanceof Error ? err.message : 'The lookup function could not be reached.')

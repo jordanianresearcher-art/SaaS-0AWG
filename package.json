@@ -9,7 +9,10 @@
     "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc -b --noEmit",
     "test": "vitest",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy:web": "npm run build && npx wrangler deploy",
+    "deploy:functions": "supabase functions deploy",
+    "deploy": "npm run deploy:web && npm run deploy:functions"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
