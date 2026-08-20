@@ -151,7 +151,7 @@ export function ProductSuggestField({
                     onClick={() => handleSelect(s)}
                     className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-zinc-50"
                   >
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-50">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-tint">
                       {s.imageUrl ? (
                         <img src={s.imageUrl} alt="" className="h-full w-full rounded-lg object-contain" />
                       ) : (

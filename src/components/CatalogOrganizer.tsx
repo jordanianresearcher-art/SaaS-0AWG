@@ -225,7 +225,7 @@ function CategoryBin({
       ref={setNodeRef}
       onClick={onTapAssign}
       className={`flex items-center justify-between gap-2 rounded-xl border-2 p-2.5 text-left text-sm transition-colors ${
-        isOver ? 'border-brand bg-blue-50' : 'border-zinc-200 bg-white'
+        isOver ? 'border-brand bg-brand-tint' : 'border-zinc-200 bg-white'
       } ${selectable ? 'hover:border-brand' : ''}`}
     >
       <span className="font-semibold text-ink">{PRODUCT_CATEGORY_INFO[category].label}</span>

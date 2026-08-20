@@ -83,7 +83,7 @@ function TodayRow({
       <Link to={to} className="flex min-h-14 items-center gap-3 rounded-xl px-2 py-2 hover:bg-zinc-50">
         <span
           className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
-            count === 0 ? 'bg-zinc-100 text-zinc-400' : urgent ? 'bg-amber-100 text-amber-800' : 'bg-blue-50 text-brand'
+            count === 0 ? 'bg-zinc-100 text-zinc-400' : urgent ? 'bg-amber-100 text-amber-800' : 'bg-brand-tint text-brand'
           }`}
         >
           <Icon className="h-5 w-5" aria-hidden="true" />

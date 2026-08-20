@@ -54,7 +54,7 @@ export function LogoTile({ name, kind, selected = false, onClick, className = ''
       aria-pressed={onClick ? selected : undefined}
       title={name}
       className={`flex min-h-20 flex-col items-center justify-center gap-1.5 rounded-xl border-2 px-2 py-2 transition-colors ${
-        selected ? 'border-brand bg-blue-50' : 'border-zinc-200 bg-white hover:border-zinc-300'
+        selected ? 'border-brand bg-brand-tint' : 'border-zinc-200 bg-white hover:border-zinc-300'
       } ${className}`}
     >
       {hasImage ? (

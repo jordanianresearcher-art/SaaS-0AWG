@@ -92,7 +92,7 @@ export default function LandingPage() {
           {STEPS.map((step, i) => (
             <div key={step.label} className="flex items-center gap-2 sm:gap-4">
               <div className="flex flex-col items-center gap-2">
-                <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-brand sm:h-20 sm:w-20">
+                <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-brand-tint text-brand sm:h-20 sm:w-20">
                   <step.icon className="h-8 w-8 sm:h-9 sm:w-9" aria-hidden="true" />
                 </span>
                 <span className="text-center text-base font-bold text-ink sm:text-lg">{step.label}</span>
@@ -113,7 +113,7 @@ export default function LandingPage() {
               key={f.label}
               className="flex flex-col items-center gap-3 rounded-2xl border border-zinc-200 px-4 py-7 text-center transition-shadow hover:shadow-md"
             >
-              <span className="flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 text-brand">
+              <span className="flex h-14 w-14 items-center justify-center rounded-full bg-brand-tint text-brand">
                 <f.icon className="h-7 w-7" aria-hidden="true" />
               </span>
               <span className="text-lg font-bold text-ink">{f.label}</span>

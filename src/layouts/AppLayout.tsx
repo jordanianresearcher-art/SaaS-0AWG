@@ -34,8 +34,10 @@ function NavItem({ to, label, icon: Icon, end, bottom }: NavEntry & { bottom?: b
       end={end}
       className={({ isActive }) =>
         bottom
-          ? `flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-xs font-semibold ${isActive ? 'text-brand' : 'text-zinc-500'}`
-          : `flex items-center gap-2 rounded-xl px-3 py-2.5 text-[15px] font-semibold whitespace-nowrap transition-colors ${isActive ? 'bg-brand-tint text-brand' : 'text-charcoal hover:bg-zinc-100'}`
+          ? `flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-xs font-semibold ${isActive ? 'text-brand-bright' : 'text-zinc-400'}`
+          : `flex items-center gap-2 rounded-xl px-3 py-2.5 text-[15px] font-semibold whitespace-nowrap transition-colors ${
+              isActive ? 'bg-white/10 text-brand-bright' : 'text-zinc-300 hover:bg-white/5 hover:text-white'
+            }`
       }
     >
       <Icon className={bottom ? 'h-6 w-6' : 'h-[18px] w-[18px]'} aria-hidden="true" />
@@ -49,7 +51,7 @@ function DemoBanner(): ReactNode {
   const navigate = useNavigate()
   if (mode !== 'demo') return null
   return (
-    <div className="no-print flex items-center justify-center gap-3 bg-amber-400 px-4 py-1.5 text-sm font-bold text-amber-950">
+    <div className="no-print flex items-center justify-center gap-2 bg-zinc-800 px-4 py-1.5 text-sm font-bold text-amber-300">
       <span>Demo Data — nothing here is real</span>
       <button
         type="button"
@@ -92,10 +94,12 @@ export function AppLayout() {
   return (
     <div className="flex min-h-screen flex-col">
       <DemoBanner />
-      <header className="no-print sticky top-0 z-40 border-b border-zinc-200 bg-white">
+      {/* Dark chrome, light work surfaces. The nav is the instrument panel;
+          the page below it is the workbench. */}
+      <header className="no-print sticky top-0 z-40 border-b border-black/40 bg-chrome">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4">
           <NavLink to={isInventoryOnly ? '/app/inventory' : '/app'} className="shrink-0">
-            <Logo className="text-2xl" />
+            <Logo className="text-2xl" light />
           </NavLink>
           <div className="hidden min-w-0 flex-1 items-center justify-center gap-0.5 md:flex">
             {nav.map((item) => (
@@ -112,19 +116,19 @@ export function AppLayout() {
               <NavLink
                 to="/app/settings"
                 aria-label="Settings"
-                className="flex h-11 w-11 items-center justify-center rounded-xl text-zinc-500 hover:bg-zinc-100 md:hidden"
+                className="flex h-11 w-11 items-center justify-center rounded-xl text-zinc-300 hover:bg-white/10 md:hidden"
               >
                 <Settings className="h-5 w-5" aria-hidden="true" />
               </NavLink>
             ) : null}
-            <div className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 py-1 pr-1 pl-2">
+            <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-chrome-soft py-1 pr-1 pl-2">
               <span
                 aria-hidden="true"
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand text-xs font-black text-white"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-bright text-xs font-black text-ink"
               >
                 {shopInitials}
               </span>
-              <span className="hidden max-w-32 truncate text-sm font-semibold text-charcoal lg:block">
+              <span className="hidden max-w-32 truncate text-sm font-semibold text-zinc-200 lg:block">
                 {shop?.name}
               </span>
               {mode === 'production' ? (
@@ -134,7 +138,7 @@ export function AppLayout() {
                     await signOut()
                     navigate('/')
                   }}
-                  className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-500 hover:bg-white hover:text-ink"
+                  className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-400 hover:bg-white/10 hover:text-white"
                   aria-label="Sign out"
                 >
                   <LogOut className="h-4 w-4" aria-hidden="true" />
@@ -150,7 +154,7 @@ export function AppLayout() {
       {/* Bottom navigation for phones — the primary device for shop staff. */}
       <nav
         aria-label="Main"
-        className="no-print fixed inset-x-0 bottom-0 z-40 flex border-t border-zinc-200 bg-white pb-[env(safe-area-inset-bottom)] md:hidden"
+        className="no-print fixed inset-x-0 bottom-0 z-40 flex border-t border-black/40 bg-chrome pb-[env(safe-area-inset-bottom)] md:hidden"
       >
         {bottomFlankItems.slice(0, 2).map((item) => (
           <NavItem key={item.to} {...item} bottom />
@@ -160,7 +164,7 @@ export function AppLayout() {
           aria-label="Scan"
           className="flex min-h-14 flex-1 flex-col items-center justify-center"
         >
-          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-brand text-white shadow-md">
+          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-bright text-ink shadow-md">
             <Barcode className="h-7 w-7" aria-hidden="true" />
           </span>
         </NavLink>

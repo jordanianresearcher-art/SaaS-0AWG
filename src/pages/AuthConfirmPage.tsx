@@ -108,7 +108,7 @@ export default function AuthConfirmPage() {
           </>
         ) : (
           <>
-            <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 text-brand">
+            <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-brand-tint text-brand">
               <KeyRound className="h-7 w-7" aria-hidden="true" />
             </span>
             <p className="mt-4 text-lg font-bold text-ink">You&apos;re almost in</p>

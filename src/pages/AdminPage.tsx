@@ -116,7 +116,7 @@ export default function AdminPage() {
                 <li key={shop.id}>
                   <Card className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
-                      <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-brand">
+                      <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-tint text-brand">
                         <Store className="h-5 w-5" aria-hidden="true" />
                       </span>
                       <div>

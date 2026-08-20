@@ -913,7 +913,7 @@ function CatalogSection({ reloadSignal }: { reloadSignal: number }) {
           {items.map((item) => (
             <li key={item.id} className="flex items-center justify-between gap-3 py-3">
               <div className="flex items-center gap-3">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-brand">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-tint text-brand">
                   <Package className="h-5 w-5" aria-hidden="true" />
                 </span>
                 <div>

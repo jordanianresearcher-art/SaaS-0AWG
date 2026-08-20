@@ -36,7 +36,7 @@ import { barcodeAdvice, classifyBarcode } from '../../lib/barcodeIdentity'
 
 const CONFIDENCE_BADGE: Record<ProductResolutionCandidate['confidenceLevel'], string> = {
   high: 'bg-green-100 text-green-800',
-  probable: 'bg-blue-50 text-brand',
+  probable: 'bg-brand-tint text-brand',
   low: 'bg-zinc-100 text-zinc-600',
 }
 
@@ -726,7 +726,7 @@ export default function ScanWorkspacePage() {
                   {(resolveCandidates ?? []).map((candidate) => (
                     <div key={candidate.id} className="rounded-xl border border-zinc-200 p-3">
                       <div className="flex items-start gap-3">
-                        <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-blue-50">
+                        <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-brand-tint">
                           {candidate.imageUrl ? (
                             <img src={candidate.imageUrl} alt="" className="h-full w-full rounded-lg object-contain" />
                           ) : (
@@ -828,7 +828,7 @@ export default function ScanWorkspacePage() {
                     onClick={() => setDocType('invoice')}
                     className={
                       docType === 'invoice'
-                        ? 'rounded-xl border-2 border-brand bg-blue-50 px-3 py-2.5 text-center text-sm font-semibold text-brand'
+                        ? 'rounded-xl border-2 border-brand bg-brand-tint px-3 py-2.5 text-center text-sm font-semibold text-brand'
                         : 'rounded-xl border-2 border-zinc-200 px-3 py-2.5 text-center text-sm font-semibold text-charcoal transition-colors hover:border-brand hover:text-brand'
                     }
                   >
@@ -839,7 +839,7 @@ export default function ScanWorkspacePage() {
                     onClick={() => setDocType('quote')}
                     className={
                       docType === 'quote'
-                        ? 'rounded-xl border-2 border-brand bg-blue-50 px-3 py-2.5 text-center text-sm font-semibold text-brand'
+                        ? 'rounded-xl border-2 border-brand bg-brand-tint px-3 py-2.5 text-center text-sm font-semibold text-brand'
                         : 'rounded-xl border-2 border-zinc-200 px-3 py-2.5 text-center text-sm font-semibold text-charcoal transition-colors hover:border-brand hover:text-brand'
                     }
                   >
@@ -1084,7 +1084,7 @@ function CartRowCard({
 
   return (
     <Card className="flex items-start gap-3">
-      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-blue-50">
+      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-brand-tint">
         {row.imageUrl ? (
           <img src={row.imageUrl} alt="" className="h-full w-full rounded-lg object-contain" />
         ) : (

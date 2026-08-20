@@ -44,7 +44,7 @@ function PercentPills({
           onClick={() => onChange(p)}
           aria-pressed={value === p}
           className={`min-h-9 rounded-lg border-2 px-2.5 text-sm font-semibold transition-colors ${
-            value === p ? 'border-brand bg-blue-50 text-ink' : 'border-zinc-200 text-zinc-600 hover:border-zinc-300'
+            value === p ? 'border-brand bg-brand-tint text-ink' : 'border-zinc-200 text-zinc-600 hover:border-zinc-300'
           }`}
         >
           {p}%
@@ -146,7 +146,7 @@ export default function WindowTintEditor({ index, value, onChange }: WindowTintE
               aria-pressed={bodyStyle === style}
               className={`flex min-h-20 flex-col items-center justify-center gap-1 rounded-xl border-2 px-2 py-2 transition-colors ${
                 bodyStyle === style
-                  ? 'border-brand bg-blue-50 text-brand'
+                  ? 'border-brand bg-brand-tint text-brand'
                   : 'border-zinc-200 text-zinc-400 hover:border-zinc-300'
               }`}
             >
@@ -169,7 +169,7 @@ export default function WindowTintEditor({ index, value, onChange }: WindowTintE
               onClick={() => onChange({ ...value, tintType: type })}
               aria-pressed={value.tintType === type}
               className={`rounded-xl border-2 p-4 text-left transition-colors ${
-                value.tintType === type ? 'border-brand bg-blue-50' : 'border-zinc-200 hover:border-zinc-300'
+                value.tintType === type ? 'border-brand bg-brand-tint' : 'border-zinc-200 hover:border-zinc-300'
               }`}
             >
               <p className="text-base font-bold text-ink">{TINT_TYPE_INFO[type].label}</p>
@@ -304,7 +304,7 @@ export default function WindowTintEditor({ index, value, onChange }: WindowTintE
                   aria-pressed={value.sunroofType === t}
                   onClick={() => onChange({ ...value, sunroofType: t })}
                   className={`min-h-9 rounded-lg border-2 px-2.5 text-sm font-semibold transition-colors ${
-                    value.sunroofType === t ? 'border-brand bg-blue-50 text-ink' : 'border-zinc-200 text-zinc-600 hover:border-zinc-300'
+                    value.sunroofType === t ? 'border-brand bg-brand-tint text-ink' : 'border-zinc-200 text-zinc-600 hover:border-zinc-300'
                   }`}
                 >
                   {SUNROOF_TYPE_INFO[t].label}

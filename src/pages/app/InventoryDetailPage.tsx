@@ -200,7 +200,7 @@ export default function InventoryDetailPage() {
                     {item.upcIsGenerated ? ' (internal)' : ''}
                   </Badge>
                 ) : (
-                  <Badge className="bg-blue-50 text-brand">No UPC yet</Badge>
+                  <Badge className="bg-brand-tint text-brand">No UPC yet</Badge>
                 )}
               </div>
               <div className="text-2xl font-black text-ink">

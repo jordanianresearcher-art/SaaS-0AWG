@@ -610,7 +610,7 @@ export default function NewInventoryItemPage() {
                           {hit.source === 'catalog' ? (
                             <Badge className="bg-green-100 text-green-800">In stock: {hit.quantityOnHand ?? 0}</Badge>
                           ) : (
-                            <Badge className="bg-blue-50 text-brand">Web</Badge>
+                            <Badge className="bg-brand-tint text-brand">Web</Badge>
                           )}
                         </span>
                       </button>
@@ -671,7 +671,7 @@ export default function NewInventoryItemPage() {
                       {title}
                     </Link>
                     <span className="flex items-center gap-1.5 text-xs text-zinc-500">
-                      {line.isNewProduct ? <Badge className="bg-blue-50 px-1.5 py-0 text-[11px] text-brand">New</Badge> : null}
+                      {line.isNewProduct ? <Badge className="bg-brand-tint px-1.5 py-0 text-[11px] text-brand">New</Badge> : null}
                       {line.enriching ? (
                         <span className="flex items-center gap-1">
                           <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" /> finding photo…

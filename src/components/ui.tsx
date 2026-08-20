@@ -33,7 +33,9 @@ import { AlertCircle, X } from 'lucide-react'
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'success'
 
 const buttonStyles: Record<ButtonVariant, string> = {
-  primary: 'bg-brand text-white hover:bg-brand-dark active:bg-brand-dark border-transparent shadow-[var(--shadow-card)]',
+  // Near-black on bright copper, not white on it: ~9:1 contrast versus ~5:1,
+  // and it reads like a physical amber control rather than a web button.
+  primary: 'bg-brand-bright text-ink hover:bg-brand active:bg-brand hover:text-white border-transparent shadow-[var(--shadow-card)]',
   secondary: 'bg-white text-ink border-zinc-300 hover:border-zinc-400 hover:bg-zinc-50 active:bg-zinc-100 shadow-[var(--shadow-card)]',
   ghost: 'bg-transparent text-charcoal border-transparent hover:bg-zinc-200/60 active:bg-zinc-200',
   danger: 'bg-white text-red-700 border-red-300 hover:bg-red-50 active:bg-red-100 shadow-[var(--shadow-card)]',
@@ -393,7 +395,9 @@ export function Modal({
 export function Logo({ className = '', light = false }: { className?: string; light?: boolean }) {
   return (
     <span className={`inline-flex items-baseline gap-0.5 font-black tracking-tight ${className}`}>
-      <span className="text-brand">0</span>
+      {/* The copper "0" needs the brighter step on dark chrome — the deeper
+          one is tuned for contrast against white and disappears here. */}
+      <span className={light ? 'text-brand-bright' : 'text-brand'}>0</span>
       <span className={light ? 'text-white' : 'text-ink'}>GAUGE</span>
       <span className={`ml-1.5 text-[0.6em] font-bold tracking-widest uppercase ${light ? 'text-zinc-300' : 'text-zinc-500'}`}>
         Recovery

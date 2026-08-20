@@ -125,7 +125,7 @@ export default function InventoryPage() {
             type="button"
             onClick={() => setNeedsUpcOnly((v) => !v)}
             className={`min-h-11 rounded-xl border px-3 text-sm font-semibold whitespace-nowrap ${
-              needsUpcOnly ? 'border-brand bg-blue-50 text-brand' : 'border-zinc-300 text-zinc-700'
+              needsUpcOnly ? 'border-brand bg-brand-tint text-brand' : 'border-zinc-300 text-zinc-700'
             }`}
           >
             Needs UPC ({summary.needsUpcCount})
@@ -173,7 +173,7 @@ export default function InventoryPage() {
                     <div className="flex items-center gap-1.5">
                       <span className="truncate font-semibold text-ink">{title}</span>
                       {needsUpc(item) ? (
-                        <Badge className="shrink-0 bg-blue-50 text-brand" title="No barcode on file">
+                        <Badge className="shrink-0 bg-brand-tint text-brand" title="No barcode on file">
                           No UPC
                         </Badge>
                       ) : null}

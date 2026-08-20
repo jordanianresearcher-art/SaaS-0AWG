@@ -505,13 +505,13 @@ export default function NewQuotePage() {
       </div>
 
       {duplicateFrom ? (
-        <div className="rounded-xl bg-blue-50 p-4 text-base font-medium text-ink">
+        <div className="rounded-xl bg-brand-tint p-4 text-base font-medium text-ink">
           Duplicated from {duplicateFrom.customer.firstName}&apos;s quote — update the customer info below.
         </div>
       ) : null}
 
       {fromScan ? (
-        <div className="rounded-xl bg-blue-50 p-4 text-base font-medium text-ink">
+        <div className="rounded-xl bg-brand-tint p-4 text-base font-medium text-ink">
           Brought over {fromScan.items.length} scanned item{fromScan.items.length === 1 ? '' : 's'} into the main package
           below — add the customer's info to finish.
         </div>
@@ -550,7 +550,7 @@ export default function NewQuotePage() {
               <option>Other</option>
             </Select>
           </Field>
-          <div className="rounded-xl bg-blue-50 p-4">
+          <div className="rounded-xl bg-brand-tint p-4">
             <label className="flex items-start gap-3 text-base font-medium text-ink">
               <input
                 type="checkbox"
@@ -937,7 +937,7 @@ function ItemRows({
                 }}
                 className="flex min-h-14 w-full items-center gap-3 py-2.5 text-left hover:bg-zinc-50"
               >
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-blue-50 text-brand">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-brand-tint text-brand">
                   {catalogItem.imageUrl ? (
                     <img src={catalogItem.imageUrl} alt="" className="h-full w-full object-contain" />
                   ) : (

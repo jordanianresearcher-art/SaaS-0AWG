@@ -229,7 +229,7 @@ function BuilderDropZone({
     <div
       ref={setNodeRef}
       className={`min-h-32 rounded-xl border-2 border-dashed p-3 transition-colors ${
-        isOver ? 'border-brand bg-blue-50' : 'border-zinc-200'
+        isOver ? 'border-brand bg-brand-tint' : 'border-zinc-200'
       }`}
     >
       {items.length === 0 ? (
@@ -241,7 +241,7 @@ function BuilderDropZone({
         <ul className="space-y-2">
           {items.map((item) => (
             <li key={item.id} className="flex items-center gap-3 rounded-lg bg-white p-2 shadow-sm">
-              <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-blue-50">
+              <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-brand-tint">
                 {item.imageUrl ? (
                   <img src={item.imageUrl} alt="" className="h-full w-full object-contain" />
                 ) : (
@@ -341,7 +341,7 @@ function CatalogTray({
             aria-pressed={category === null}
             onClick={() => setCategory(null)}
             className={`min-h-8 rounded-lg border-2 px-2.5 text-xs font-semibold transition-colors ${
-              category === null ? 'border-brand bg-blue-50 text-ink' : 'border-zinc-200 text-zinc-600 hover:border-zinc-300'
+              category === null ? 'border-brand bg-brand-tint text-ink' : 'border-zinc-200 text-zinc-600 hover:border-zinc-300'
             }`}
           >
             All
@@ -353,7 +353,7 @@ function CatalogTray({
               aria-pressed={category === c}
               onClick={() => setCategory(category === c ? null : c)}
               className={`flex min-h-8 items-center gap-1 rounded-lg border-2 px-2.5 text-xs font-semibold transition-colors ${
-                category === c ? 'border-brand bg-blue-50 text-ink' : 'border-zinc-200 text-zinc-600 hover:border-zinc-300'
+                category === c ? 'border-brand bg-brand-tint text-ink' : 'border-zinc-200 text-zinc-600 hover:border-zinc-300'
               }`}
             >
               <CategoryIcon category={c} className="h-3.5 w-3.5" /> {PRODUCT_CATEGORY_INFO[c].label}
@@ -412,7 +412,7 @@ function CatalogTrayCard({ item, onTapAdd }: { item: CatalogItem; onTapAdd: () =
       <span className="absolute top-1.5 right-1.5 text-zinc-300" aria-hidden="true">
         <GripVertical className="h-3.5 w-3.5" />
       </span>
-      <div className="flex h-20 w-full items-center justify-center rounded-lg bg-blue-50">
+      <div className="flex h-20 w-full items-center justify-center rounded-lg bg-brand-tint">
         {item.imageUrl ? (
           <img src={item.imageUrl} alt="" className="h-full w-full rounded-lg object-contain" />
         ) : (

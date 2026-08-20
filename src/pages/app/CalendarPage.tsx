@@ -76,6 +76,10 @@ export default function CalendarPage() {
   const [date, setDate] = useState(() => new Date())
   const [bays, setBays] = useState<Bay[] | null>(null)
   const [appointments, setAppointments] = useState<Appointment[] | null>(null)
+  // The timeline needs the day's opening hours to know how tall to be — a
+  // fixed 12-hour axis would waste half the screen on a shop open 9-to-6.
+  const [hours, setHours] = useState<BusinessHoursDay[] | null>(null)
+  const [exceptions, setExceptions] = useState<ScheduleException[] | null>(null)
   const [adding, setAdding] = useState(false)
   const [detail, setDetail] = useState<Appointment | null>(null)
   /** The appointment being moved. Cancel-and-rebook used to be the only way. */
@@ -85,9 +89,16 @@ export default function CalendarPage() {
 
   const load = async () => {
     const { start, end } = dayRange(dateKey)
-    const [b, a] = await Promise.all([repo.listBays(), repo.listAppointments(start, end)])
+    const [b, a, h, e] = await Promise.all([
+      repo.listBays(),
+      repo.listAppointments(start, end),
+      repo.listBusinessHours(),
+      repo.listScheduleExceptions(),
+    ])
     setBays(b)
     setAppointments(a)
+    setHours(h)
+    setExceptions(e)
   }
 
   useEffect(() => {
@@ -153,43 +164,15 @@ export default function CalendarPage() {
       ) : bays.length === 0 ? (
         <EmptyState title="No bays set up yet" message="Add a bay in Settings → Booking before you can schedule jobs." />
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {bays.map((bay) => {
-            const bayAppointments = appointments
-              .filter((a) => a.bayId === bay.id)
-              .sort((a, b) => a.startsAt.localeCompare(b.startsAt))
-            return (
-              <Card key={bay.id} className="space-y-2">
-                <h2 className="text-base font-bold text-ink">{bay.name}</h2>
-                {bayAppointments.length === 0 ? (
-                  <p className="text-sm text-zinc-400">Open all day</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {bayAppointments.map((appt) => (
-                      <li key={appt.id}>
-                        <button
-                          type="button"
-                          onClick={() => setDetail(appt)}
-                          className={`w-full rounded-lg border-l-4 px-3 py-2 text-left ${STATUS_STYLE[appt.status]}`}
-                        >
-                          <p className="text-sm font-bold text-ink">
-                            {formatTime(appt.startsAt)}
-                            {' – '}
-                            {formatTime(appt.endsAt)}
-                          </p>
-                          <p className="text-sm text-zinc-700">{appt.services.map((s) => s.name).join(', ')}</p>
-                          {appt.status === 'awaiting_deposit' ? (
-                            <p className="text-xs font-semibold text-amber-700">Awaiting deposit</p>
-                          ) : null}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </Card>
-            )
-          })}
-        </div>
+        <DayTimeline
+          bays={bays}
+          appointments={appointments}
+          hours={hours}
+          exceptions={exceptions}
+          dateKey={dateKey}
+          onSelect={setDetail}
+          onBookGap={() => setAdding(true)}
+        />
       )}
 
       <Modal open={adding} onClose={() => setAdding(false)} title="Add appointment" size="wide">
@@ -456,6 +439,179 @@ function RescheduleModal({ appointment, onMoved }: { appointment: Appointment; o
  * actual opening offered as one tap, because "when can you take me?" is the
  * first thing anyone asks and the app previously could not answer it.
  */
+
+/** Pixels per minute. 0.9 puts a 9-to-6 day just under 600px — one screen. */
+const PX_PER_MINUTE = 0.9
+/** Anything shorter still needs room for its time label. */
+const MIN_BLOCK_PX = 44
+
+/**
+ * The day as an actual timeline: hours down the side, one column per bay,
+ * jobs as blocks sized by how long they take.
+ *
+ * What was here before was a list of appointments per bay, which could tell
+ * you what was booked but never where you were free — a bay with a 9:00 and a
+ * 4:00 looked identical to a full one, and the four-and-a-half hour hole
+ * between them was invisible. "When can I fit this in?" is the question a
+ * shop calendar exists to answer, and it could not answer it.
+ *
+ * Free time is now literally the empty space, and each gap is a button that
+ * opens the booking form.
+ */
+function DayTimeline({
+  bays,
+  appointments,
+  hours,
+  exceptions,
+  dateKey,
+  onSelect,
+  onBookGap,
+}: {
+  bays: Bay[]
+  appointments: Appointment[]
+  hours: BusinessHoursDay[] | null
+  exceptions: ScheduleException[] | null
+  dateKey: string
+  onSelect: (a: Appointment) => void
+  onBookGap: () => void
+}) {
+  const active = bays.filter((b) => b.active)
+  const live = appointments.filter((a) => a.status !== 'cancelled')
+
+  // The axis spans business hours, widened if anything is booked outside them
+  // — an after-hours job must not be drawn off the top or bottom of the chart.
+  const { startMinute, endMinute } = useMemo(() => {
+    const window = hours && exceptions ? dayOpenWindow(dateKey, hours, exceptions) : { openMinute: null, closeMinute: null }
+    let open = window.openMinute ?? 9 * 60
+    let close = window.closeMinute ?? 18 * 60
+    for (const a of live) {
+      open = Math.min(open, minutesSinceMidnight(a.startsAt))
+      close = Math.max(close, minutesSinceMidnight(a.endsAt))
+    }
+    // Round out to whole hours so the gridlines land on the labels.
+    return { startMinute: Math.floor(open / 60) * 60, endMinute: Math.ceil(close / 60) * 60 }
+  }, [hours, exceptions, dateKey, live])
+
+  const totalMinutes = Math.max(60, endMinute - startMinute)
+  const height = totalMinutes * PX_PER_MINUTE
+  const hourMarks = Array.from({ length: Math.floor(totalMinutes / 60) + 1 }, (_, i) => startMinute + i * 60)
+
+  const closedToday = hours && exceptions ? dayOpenWindow(dateKey, hours, exceptions).openMinute === null : false
+
+  return (
+    <Card className="overflow-x-auto">
+      {closedToday ? (
+        <p className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">
+          The shop is closed this day. Anything shown was booked as an exception.
+        </p>
+      ) : null}
+
+      <div className="flex min-w-[36rem] gap-2">
+        {/* Hour gutter. The invisible heading is load-bearing: each bay
+            column is pushed down by its own <h2>, so without a spacer of the
+            exact same height every hour label sits one heading too high and
+            the gridlines stop meaning anything. */}
+        <div className="w-[4.5rem] shrink-0" aria-hidden="true">
+          <p className="invisible mb-1 text-sm font-bold">Bay</p>
+          <div className="relative" style={{ height }}>
+            {hourMarks.map((m) => (
+              <span
+                key={m}
+                className="absolute right-2 -translate-y-1/2 text-xs font-semibold whitespace-nowrap text-zinc-400"
+                style={{ top: (m - startMinute) * PX_PER_MINUTE }}
+              >
+                {formatMinuteOfDay(m)}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {active.map((bay) => {
+          const booked = live
+            .filter((a) => a.bayId === bay.id)
+            .sort((a, b) => a.startsAt.localeCompare(b.startsAt))
+
+          // Free stretches are what the old view could not show. Walk the
+          // booked blocks in order and keep whatever falls between them.
+          const gaps: Array<{ from: number; to: number }> = []
+          let cursor = startMinute
+          for (const a of booked) {
+            const s = minutesSinceMidnight(a.startsAt)
+            if (s - cursor >= 30) gaps.push({ from: cursor, to: s })
+            cursor = Math.max(cursor, minutesSinceMidnight(a.endsAt))
+          }
+          if (endMinute - cursor >= 30) gaps.push({ from: cursor, to: endMinute })
+
+          return (
+            <div key={bay.id} className="min-w-40 flex-1">
+              <h2 className="mb-1 text-sm font-bold text-ink">{bay.name}</h2>
+              <div className="relative rounded-xl border border-zinc-200 bg-zinc-50" style={{ height }}>
+                {/* Hour rules, so a block's position reads as a time. */}
+                {hourMarks.map((m) => (
+                  <div
+                    key={m}
+                    aria-hidden="true"
+                    className="absolute inset-x-0 border-t border-zinc-200/70"
+                    style={{ top: (m - startMinute) * PX_PER_MINUTE }}
+                  />
+                ))}
+
+                {gaps.map((gap) => (
+                  <button
+                    key={gap.from}
+                    type="button"
+                    onClick={onBookGap}
+                    className="group absolute inset-x-1 rounded-lg border border-dashed border-zinc-300 text-left transition-colors hover:border-brand hover:bg-brand-tint"
+                    style={{
+                      top: (gap.from - startMinute) * PX_PER_MINUTE + 2,
+                      height: Math.max(24, (gap.to - gap.from) * PX_PER_MINUTE - 4),
+                    }}
+                  >
+                    <span className="flex h-full items-center justify-center gap-1 px-2 text-xs font-semibold text-zinc-400 group-hover:text-brand">
+                      <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                      {formatDuration(gap.to - gap.from)} free
+                    </span>
+                  </button>
+                ))}
+
+                {booked.map((appt) => {
+                  const s = minutesSinceMidnight(appt.startsAt)
+                  const e = minutesSinceMidnight(appt.endsAt)
+                  return (
+                    <button
+                      key={appt.id}
+                      type="button"
+                      onClick={() => onSelect(appt)}
+                      className={`absolute inset-x-1 overflow-hidden rounded-lg border-l-4 px-2 py-1 text-left shadow-[var(--shadow-card)] ${STATUS_STYLE[appt.status]}`}
+                      style={{
+                        top: (s - startMinute) * PX_PER_MINUTE,
+                        height: Math.max(MIN_BLOCK_PX, (e - s) * PX_PER_MINUTE - 2),
+                      }}
+                    >
+                      <span className="block truncate text-xs font-bold text-ink">
+                        {formatTime(appt.startsAt)} – {formatTime(appt.endsAt)}
+                      </span>
+                      <span className="block truncate text-xs text-zinc-700">
+                        {[appt.customerFirstName, appt.customerLastName].filter(Boolean).join(' ') || 'Customer'}
+                      </span>
+                      <span className="block truncate text-xs text-zinc-500">
+                        {appt.services.map((sv) => sv.name).join(', ')}
+                      </span>
+                      {appt.status === 'awaiting_deposit' ? (
+                        <span className="block truncate text-[11px] font-semibold text-amber-700">Awaiting deposit</span>
+                      ) : null}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </Card>
+  )
+}
+
 function AddAppointmentModal({
   dateKey: initialDateKey,
   onBooked,

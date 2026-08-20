@@ -310,7 +310,7 @@ export default function QuoteDetailPage() {
                 </Card>
               ))}
               {quote.showFullAddonTotal ? (
-                <Card className="border-brand bg-blue-50">
+                <Card className="border-brand bg-brand-tint">
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-bold tracking-wide text-brand uppercase">Everything included</p>
                     <p className="text-xl font-black text-ink">{formatCurrency(fullTotalCents(options))}</p>
