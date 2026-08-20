@@ -396,7 +396,16 @@ npm run deploy:web      # app only (installs first)
 npm run deploy:functions # Edge Functions only
 ```
 
-`deploy:web` runs `npm install` through npm's `predeploy:web` hook. That is not
+`deploy:web` runs `npm install` and an env check through npm's `predeploy:web`
+hook. The env check is the more important one: Vite bakes `VITE_*` variables
+into the bundle at **build time**, so a build run on a laptop without them
+uploads a site that tells every visitor "Login isn't set up on this install
+yet" — while the build and the upload both report success. Cloudflare Pages
+builds with those variables set in the Pages project, which is why pushing to
+git has always worked; building locally needs a `.env.local` with the same
+values. The check refuses rather than shipping the broken bundle.
+
+The install half matters too. That is not
 housekeeping: a pull that adds a dependency leaves `node_modules` stale, and
 the build then fails with `Cannot find module '@zxing/browser'` — which reads
 like broken code rather than an un-run install. Hanging the install off

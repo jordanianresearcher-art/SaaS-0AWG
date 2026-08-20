@@ -13,7 +13,7 @@
     "deploy:web": "npm run build && npx wrangler deploy",
     "deploy:functions": "supabase functions deploy",
     "deploy": "npm run deploy:web && npm run deploy:functions",
-    "predeploy:web": "npm install"
+    "predeploy:web": "npm install && node scripts/check-deploy-env.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
