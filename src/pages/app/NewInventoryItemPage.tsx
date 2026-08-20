@@ -26,7 +26,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Camera, Check, Loader2, Package, Sparkles, X } from 'lucide-react'
+import { Barcode, Camera, Check, Loader2, Package, Sparkles, X } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
 import { Badge, Button, Card, Field, Input, LoadingBlock, PageHeader } from '../../components/ui'
@@ -35,6 +35,7 @@ import { guessCategoryFromName } from '../../lib/categorize'
 import { formatCurrency, parseDollarsToCents } from '../../lib/format'
 import { formatItemShortName, splitItemName } from '../../lib/productNaming'
 import { barcodeAdvice, classifyBarcode } from '../../lib/barcodeIdentity'
+import { LogoTile } from '../../components/LogoTile'
 import { useHardwareScanner } from '../../lib/useHardwareScanner'
 import { errorMessage } from '../../lib/errors'
 import type { CatalogItem } from '../../types'
@@ -475,19 +476,23 @@ export default function NewInventoryItemPage() {
               </Button>
             </div>
             {brands.length > 0 ? (
-              <div className="flex flex-wrap gap-2 pt-1">
+              /* Logos, not a row of words. Staff receiving a shipment
+                 recognise the box on the pallet by its mark long before they
+                 read a name, and a brand with no logo file renders as a
+                 wordmark tile that looks deliberate beside the ones that do —
+                 so the library can grow one file at a time (see LogoTile). */
+              <div className="grid grid-cols-3 gap-2 pt-1 sm:grid-cols-6">
                 {brands.slice(0, 6).map((b) => (
-                  <button
+                  <LogoTile
                     key={b}
-                    type="button"
+                    name={b}
+                    kind="brand"
+                    selected={brand === b}
                     onClick={() => {
                       setBrand(b)
                       setBrandLocked(true)
                     }}
-                    className="min-h-9 rounded-full border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 hover:border-brand hover:text-brand"
-                  >
-                    {b}
-                  </button>
+                  />
                 ))}
               </div>
             ) : null}
@@ -510,9 +515,13 @@ export default function NewInventoryItemPage() {
             </Suspense>
           ) : pendingCode === null ? (
             <Card className="space-y-3">
-              <div className="rounded-xl border-2 border-dashed border-zinc-300 bg-zinc-50 p-6 text-center">
-                <p className="mb-3 text-base font-semibold text-zinc-700">
-                  {scanning ? 'Checking…' : 'Scan the next box'}
+              <div className="flex min-h-64 flex-col items-center justify-center rounded-xl border-2 border-dashed border-zinc-300 bg-zinc-50 p-6 text-center">
+                <span className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-tint text-brand">
+                  <Barcode className="h-7 w-7" aria-hidden="true" />
+                </span>
+                <p className="mb-1 text-xl font-bold text-ink">{scanning ? 'Checking…' : 'Scan the next box'}</p>
+                <p className="mb-4 text-sm text-zinc-500">
+                  Pull the trigger, or use the camera below. Every scan adds one to the tape.
                 </p>
                 <input
                   ref={scanRef}
@@ -527,7 +536,7 @@ export default function NewInventoryItemPage() {
                   }}
                   onBlur={focusScan}
                   placeholder="Scan a barcode…"
-                  className="h-12 w-full rounded-lg border border-zinc-300 bg-white px-3 text-center text-base"
+                  className="h-12 w-full max-w-sm rounded-lg border border-zinc-300 bg-white px-3 text-center text-base"
                 />
                 {scanning ? (
                   <Loader2 className="mx-auto mt-3 h-5 w-5 animate-spin text-brand" aria-hidden="true" />
@@ -652,7 +661,7 @@ export default function NewInventoryItemPage() {
         </div>
 
         {/* Session tape */}
-        <Card className="lg:sticky lg:top-24 lg:self-start">
+        <Card className="lg:sticky lg:top-24 lg:self-start lg:min-h-[22rem]">
           <h2 className="text-lg font-bold text-ink">This session</h2>
           {lines.length === 0 ? (
             <p className="mt-2 text-sm text-zinc-600">Nothing taken in yet. Scan a box to start.</p>
