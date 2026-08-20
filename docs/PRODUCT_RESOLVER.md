@@ -280,3 +280,76 @@ The durable fix is neither of these, though: identifying a product once
 a one-time cost per product rather than a permanent one. Rapid intake is
 built around making that one time as cheap as possible — see
 `src/lib/productSearch.ts` for the offline-first matching that backs it.
+
+## What a barcode actually is (added after a live failure)
+
+A shop scanned three codes and got nothing, and reported lookup as broken.
+The codes turned out to diagnose two separate faults:
+
+| Code | What it is | Why it failed |
+|---|---|---|
+| `200001188725` | A **valid** UPC-A whose GS1 prefix is `2` — "restricted distribution", meaning the store assigned it | No public database can ever hold it |
+| `26040308` | Eight digits that are not a valid EAN-8 | An internal item number, not a retail barcode |
+| `7908706600230` | A valid EAN-13, prefix `790` = Brazil (Taramps) | Real and findable, but only the scanned form was ever queried |
+
+`normalizeBarcode` only stripped whitespace and dashes; there was no
+classification, no check-digit validation, and no UPC-A ↔ EAN-13 conversion
+anywhere. All three now live in **`src/lib/barcodeIdentity.ts`** (mirrored
+into the Edge Function, tested on the client side against these exact codes):
+
+- **Store-assigned and item-number codes short-circuit** with zero network
+  calls. The reply is the only thing that can work — type the model, and the
+  code is bound to it forever. That binding already existed; it was buried
+  behind a ten-second wait and an error.
+- **A failed check digit on a 12- or 13-digit code is a misread scan**, not
+  an unknown product, and says so. Eight digits failing EAN-8 deliberately do
+  *not* get that verdict: those labels scan fine and are simply internal
+  numbering, so "try scanning again" would send staff in circles.
+- **Both equivalent forms are queried.** A 12-digit UPC-A and the 13-digit
+  EAN with a leading zero are one product and a database may hold either.
+
+Ordering is load-bearing and unchanged: `lookupProductByUpc` checks the local
+catalog *first*, so a store barcode already bound during rapid intake resolves
+instantly and never reaches the short-circuit.
+
+## The provider ladder
+
+The rich AI call depends on three exact things being right at once — the model
+id, the web-search tool identifier, and the structured-output request shape.
+Any one of them being wrong for a given account fails the whole call, and the
+caller used to see an empty list indistinguishable from "no such product".
+
+Each provider is now tried down three rungs, first to return candidates wins:
+
+1. **web search + strict structured output** — best quality
+2. **structured output, no tools** — removes the tool-identifier risk
+3. **plain chat, "reply with only JSON"** — removes the response-format risk
+
+Rung 3 works on essentially every chat model and API version, so a deployment
+where the rich path is unavailable gets slightly worse results rather than
+none. Its replies arrive fenced, prefaced, or trailed with prose, which
+`src/lib/aiJson.ts` recovers by scanning for a balanced value while tracking
+string literals — a brace inside a product name cannot end the object early.
+It returns null rather than repairing anything: a guessed parse would invent a
+product, which is worse for a shop than no result.
+
+**Model id.** No longer hardcoded. `OPENAI_MODEL` / `ANTHROPIC_MODEL` secrets
+override the default without a redeploy, and on a model-not-found the resolver
+asks the provider what it actually has (`GET /v1/models`) and retries. That
+retry sits *outside* the rung loop on purpose — a wrong model id fails all
+three rungs identically, so discovering it first saves three round trips. The
+discovered list is cached module-scope, which is safe because it is a property
+of the API key, unlike the per-request `ProviderDiag`.
+
+## Diagnosing it from the app
+
+Settings → **Test product lookup** runs a fixed query and reports which
+provider answered, which model it used, which rung it had to drop to, and the
+product it found as proof — or the exact provider error and the command that
+fixes it.
+
+This exists because every failure mode looks identical from the shop floor: no
+key, a key without access to the configured model, an unavailable tool, a
+function that was never deployed, and a genuine miss all end in an empty list.
+That ambiguity is what turned a configuration problem into a week of "lookup
+is broken" with nothing to act on.
