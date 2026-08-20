@@ -391,10 +391,17 @@ Three things deploy separately and drifting between them is the most common
 cause of "it's broken":
 
 ```bash
-npm run deploy          # build + wrangler (app) + supabase functions (all)
-npm run deploy:web      # app only
+npm run deploy          # install + build + wrangler (app) + supabase functions (all)
+npm run deploy:web      # app only (installs first)
 npm run deploy:functions # Edge Functions only
 ```
+
+`deploy:web` runs `npm install` through npm's `predeploy:web` hook. That is not
+housekeeping: a pull that adds a dependency leaves `node_modules` stale, and
+the build then fails with `Cannot find module '@zxing/browser'` — which reads
+like broken code rather than an un-run install. Hanging the install off
+`deploy:web` means it happens once in the full chain and also when that script
+is run on its own.
 
 Setting a secret does **not** deploy code:
 `supabase secrets set OPENAI_API_KEY=…` changes what the function reads at its

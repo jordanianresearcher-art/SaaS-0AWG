@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "deploy:web": "npm run build && npx wrangler deploy",
     "deploy:functions": "supabase functions deploy",
-    "deploy": "npm run deploy:web && npm run deploy:functions"
+    "deploy": "npm run deploy:web && npm run deploy:functions",
+    "predeploy:web": "npm install"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
