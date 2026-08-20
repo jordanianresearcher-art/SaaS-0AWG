@@ -231,6 +231,7 @@ export default function SettingsPage() {
  */
 function ProductLookupHealthSection() {
   const repo = useRepo()
+  const { mode } = useAppData()
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState<ProductLookupSelfTest | null>(null)
 
@@ -299,7 +300,10 @@ function ProductLookupHealthSection() {
           ) : (
             <div className="mt-2 space-y-2 text-sm text-amber-900">
               <p>{result.aiError ?? 'The provider returned no results and no error.'}</p>
-              {!result.aiConfigured ? (
+              {/* Three states, not two. `null` means the check never got far
+                  enough to ask about the key — saying "no key is set" there
+                  sends an owner who just set one off to set it again. */}
+              {result.aiConfigured === false ? (
                 <p>
                   No AI provider key is set. In a terminal:{' '}
                   <code className="rounded bg-amber-100 px-1 font-mono">supabase secrets set OPENAI_API_KEY=sk-…</code>{' '}
@@ -309,12 +313,21 @@ function ProductLookupHealthSection() {
                   </code>
                   .
                 </p>
-              ) : (
+              ) : result.aiConfigured === true ? (
                 <p>
                   A key is set, so this is the provider refusing the call. If it mentions the model, pin a
                   different one with{' '}
                   <code className="rounded bg-amber-100 px-1 font-mono">supabase secrets set OPENAI_MODEL=…</code>{' '}
                   and redeploy.
+                </p>
+              ) : mode === 'demo' ? null : (
+                <p>
+                  This says nothing about your key — the check never reached the part that looks at it. Setting
+                  a secret does not deploy anything, so if you have not run{' '}
+                  <code className="rounded bg-amber-100 px-1 font-mono">
+                    supabase functions deploy resolve-product
+                  </code>{' '}
+                  since the last app update, start there.
                 </p>
               )}
             </div>

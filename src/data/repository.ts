@@ -451,8 +451,17 @@ export interface ProductSuggestionResult {
  */
 export interface ProductLookupSelfTest {
   ok: boolean
-  /** False when no AI provider key is set at all. */
-  aiConfigured: boolean
+  /**
+   * True/false when the backend actually told us, **null when we could not
+   * find out** — the call never got far enough to ask.
+   *
+   * Null is the important state and it used to be missing. Every transport
+   * failure reported `false`, so a request that never reached the function at
+   * all rendered as "no AI provider key is set" — sending an owner who had
+   * just set a key off to set it again. A diagnostic that guesses is worse
+   * than no diagnostic.
+   */
+  aiConfigured: boolean | null
   provider: 'openai' | 'anthropic' | null
   /** The model actually used, after any override or auto-discovery. */
   model: string | null

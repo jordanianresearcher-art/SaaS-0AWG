@@ -78,6 +78,17 @@ function fail(status: number, message: string): Response {
   return json(status, { ok: false, message, candidates: [] })
 }
 
+/**
+ * Bumped whenever this function's request/response contract changes.
+ *
+ * The app deploys to the CDN and this function deploys separately with
+ * `supabase functions deploy`, and nothing keeps the two in step. A browser on
+ * new code calling a function on old code produced a 400 that read, through
+ * the UI, as "no AI provider key is set" — to an owner who had just set one.
+ * Reporting the version makes that mismatch visible instead of a guess.
+ */
+const FUNCTION_VERSION = 2
+
 const ANTHROPIC_VERSION = '2023-06-01'
 
 // A hardcoded model name is a single point of failure: an account without
@@ -1138,6 +1149,7 @@ Deno.serve(async (req: Request) => {
       sample: candidates[0]?.name ?? null,
       elapsedMs: Date.now() - started,
       aiError: diag.error,
+      functionVersion: FUNCTION_VERSION,
     })
   }
 

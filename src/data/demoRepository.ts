@@ -437,7 +437,9 @@ export class DemoRepository implements DataRepository {
     // than a green light the owner would then trust in production.
     return {
       ok: false,
-      aiConfigured: false,
+      // Not false: false means "a real backend told us no key is set", which
+      // would print instructions for a deployment demo mode does not have.
+      aiConfigured: null,
       provider: null,
       model: null,
       rung: null,

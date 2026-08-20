@@ -66,6 +66,60 @@ import { barcodeLookupForms } from '../lib/barcodeIdentity'
 /* eslint-disable @typescript-eslint/no-explicit-any -- Supabase rows are untyped without codegen; mapped at this boundary only. */
 type Row = Record<string, any>
 
+/**
+ * Turn a functions.invoke() failure into something a shop owner can act on.
+ *
+ * supabase-js surfaces every non-2xx as the same opaque string — "Edge
+ * Function returned a non-2xx status code" — and throws away the body, which
+ * is where the function actually said what was wrong. FunctionsHttpError keeps
+ * that body on `context` (a Response), so this reads it.
+ *
+ * The case worth naming explicitly is a version skew: this app deploys to the
+ * CDN, the Edge Function deploys separately with `supabase functions deploy`,
+ * and nothing keeps them in step. A browser running new code can call a
+ * function running old code, which rejects a request it has never heard of.
+ * That looks like a broken key and isn't one.
+ */
+export async function describeFunctionError(error: unknown): Promise<string> {
+  if (!(error instanceof FunctionsHttpError)) {
+    return error instanceof Error ? error.message : 'The lookup function could not be reached.'
+  }
+
+  const status = error.context?.status
+  if (status === 404) {
+    return 'The resolve-product function is not deployed to this project. Run: supabase functions deploy resolve-product'
+  }
+
+  let serverMessage = ''
+  try {
+    // `context` is a Response and can only be read once — but this is the
+    // only reader, and only on the failure path.
+    const body = await error.context?.clone?.().json?.()
+    if (typeof body?.message === 'string') serverMessage = body.message
+  } catch {
+    // A non-JSON body (a proxy error page, an empty 500) tells us nothing
+    // beyond the status, which is still worth reporting.
+  }
+
+  // The old function validated `kind` against barcode/text/photo only, so it
+  // rejects the self-test outright. Seeing this means the deployed function
+  // predates the self-test, not that anything is misconfigured.
+  if (status === 400 && /missing (shopid|kind)/i.test(serverMessage)) {
+    return (
+      'The deployed resolve-product function is older than this app and does not support the self-test yet. ' +
+      'Run: supabase functions deploy resolve-product'
+    )
+  }
+
+  if (status === 401) {
+    return 'The lookup function rejected the sign-in for this session. Sign out and back in, then try again.'
+  }
+
+  return serverMessage
+    ? `The lookup function returned ${status}: ${serverMessage}`
+    : `The lookup function returned ${status ?? 'an error'}.`
+}
+
 function mapShop(r: Row): Shop {
   return {
     id: r.id,
@@ -798,9 +852,12 @@ export class SupabaseRepository implements DataRepository {
   }
 
   async testProductLookup(): Promise<ProductLookupSelfTest> {
+    // aiConfigured stays null here on purpose: a call that failed in transport
+    // never asked the function whether a key exists, so claiming either answer
+    // would be a guess.
     const failed = (message: string): ProductLookupSelfTest => ({
       ok: false,
-      aiConfigured: false,
+      aiConfigured: null,
       provider: null,
       model: null,
       rung: null,
@@ -815,12 +872,7 @@ export class SupabaseRepository implements DataRepository {
         body: { kind: 'selftest' },
       })
       if (error) {
-        const notDeployed = error instanceof FunctionsHttpError && error.context?.status === 404
-        return failed(
-          notDeployed
-            ? 'The resolve-product function is not deployed to this project. Run: supabase functions deploy resolve-product'
-            : error.message || 'The lookup function could not be reached.',
-        )
+        return failed(await describeFunctionError(error))
       }
       const row = (data ?? {}) as Row
       return {
