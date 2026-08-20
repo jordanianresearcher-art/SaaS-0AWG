@@ -2,7 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { CreditCard, Download, KeyRound, LayoutGrid, Package, Pencil, Plus, QrCode, RotateCcw, Smartphone, Trash2 } from 'lucide-react'
+import { CreditCard, Download, KeyRound, LayoutGrid, Package, Pencil, Plus, QrCode, RotateCcw, Smartphone, Stethoscope, Trash2 } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
 import { Button, Card, EmptyState, Field, Input, LoadingBlock, Modal, PageHeader, Select, Textarea } from '../../components/ui'
@@ -21,7 +21,7 @@ import {
 } from '../../lib/financing'
 import { PRODUCT_CATEGORIES, PRODUCT_CATEGORY_INFO } from '../../lib/audioConfigs'
 import type { CatalogItem, FinancingOffer, InventoryDevice, ProductCategory } from '../../types'
-import type { NewCatalogItemInput, ShopifyImportResult } from '../../data/repository'
+import type { NewCatalogItemInput, ProductLookupSelfTest, ShopifyImportResult } from '../../data/repository'
 import { formatItemDisplayName } from '../../lib/productNaming'
 
 const schema = z.object({
@@ -195,6 +195,8 @@ export default function SettingsPage() {
 
       <SharedDeviceAccessSection />
 
+      <ProductLookupHealthSection />
+
       {mode === 'demo' ? (
         <Card className="space-y-3">
           <h2 className="text-xl font-bold text-ink">Demo data</h2>
@@ -213,6 +215,113 @@ export default function SettingsPage() {
         </Card>
       ) : null}
     </div>
+  )
+}
+
+/**
+ * "Is product lookup actually working?" — answered in one tap.
+ *
+ * Every way lookup can be broken looks identical from the shop floor: an
+ * empty result. No AI key, a key with no access to the configured model, an
+ * unavailable web-search tool, a function that was never deployed, and a
+ * genuine miss all end the same way. That ambiguity is what turned a
+ * configuration problem into a week of "lookup is broken" with nothing to act
+ * on, so this reports which provider answered, which model it used, and which
+ * fallback level it had to drop to.
+ */
+function ProductLookupHealthSection() {
+  const repo = useRepo()
+  const [running, setRunning] = useState(false)
+  const [result, setResult] = useState<ProductLookupSelfTest | null>(null)
+
+  const run = async () => {
+    setRunning(true)
+    setResult(null)
+    try {
+      setResult(await repo.testProductLookup())
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  return (
+    <Card className="space-y-3">
+      <h2 className="text-xl font-bold text-ink">Product lookup</h2>
+      <p className="text-base text-zinc-600">
+        Scanning and typing a model both rely on an AI provider key set in Supabase. Run a live check to see
+        whether it&apos;s working, and what to fix if it isn&apos;t.
+      </p>
+      <Button variant="secondary" onClick={() => void run()} disabled={running}>
+        <Stethoscope className="h-5 w-5" aria-hidden="true" />
+        {running ? 'Checking…' : 'Test product lookup'}
+      </Button>
+
+      {result ? (
+        <div
+          className={`rounded-xl border p-4 ${
+            result.ok ? 'border-green-200 bg-green-50' : 'border-amber-300 bg-amber-50'
+          }`}
+        >
+          <p className={`text-base font-bold ${result.ok ? 'text-green-900' : 'text-amber-900'}`}>
+            {result.ok ? 'Product lookup is working.' : 'Product lookup is not returning results.'}
+          </p>
+
+          {result.ok ? (
+            <dl className="mt-2 space-y-1 text-sm text-green-900">
+              <div className="flex gap-2">
+                <dt className="font-semibold">Provider</dt>
+                <dd>{result.provider ?? 'unknown'}</dd>
+              </div>
+              <div className="flex gap-2">
+                <dt className="font-semibold">Model</dt>
+                <dd className="font-mono">{result.model ?? 'unknown'}</dd>
+              </div>
+              <div className="flex gap-2">
+                <dt className="font-semibold">Found</dt>
+                <dd>{result.sample ?? `${result.candidateCount} result(s)`}</dd>
+              </div>
+              {result.elapsedMs != null ? (
+                <div className="flex gap-2">
+                  <dt className="font-semibold">Took</dt>
+                  <dd>{(result.elapsedMs / 1000).toFixed(1)}s</dd>
+                </div>
+              ) : null}
+              {/* Only worth surfacing when it is NOT the best path — it means
+                  the rich call failed and something is still worth fixing,
+                  even though results are coming back. */}
+              {result.rung != null && result.rung > 1 ? (
+                <p className="pt-1 text-amber-900">
+                  Working, but only on a fallback ({result.rungLabel}). Results will be less accurate than
+                  normal — usually the model name or web search is unavailable on this key.
+                </p>
+              ) : null}
+            </dl>
+          ) : (
+            <div className="mt-2 space-y-2 text-sm text-amber-900">
+              <p>{result.aiError ?? 'The provider returned no results and no error.'}</p>
+              {!result.aiConfigured ? (
+                <p>
+                  No AI provider key is set. In a terminal:{' '}
+                  <code className="rounded bg-amber-100 px-1 font-mono">supabase secrets set OPENAI_API_KEY=sk-…</code>{' '}
+                  then{' '}
+                  <code className="rounded bg-amber-100 px-1 font-mono">
+                    supabase functions deploy resolve-product
+                  </code>
+                  .
+                </p>
+              ) : (
+                <p>
+                  A key is set, so this is the provider refusing the call. If it mentions the model, pin a
+                  different one with{' '}
+                  <code className="rounded bg-amber-100 px-1 font-mono">supabase secrets set OPENAI_MODEL=…</code>{' '}
+                  and redeploy.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      ) : null}
+    </Card>
   )
 }
 

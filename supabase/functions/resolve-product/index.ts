@@ -79,8 +79,69 @@ function fail(status: number, message: string): Response {
 }
 
 const ANTHROPIC_VERSION = '2023-06-01'
-const ANTHROPIC_MODEL = 'claude-sonnet-5'
-const OPENAI_MODEL = 'gpt-5.6'
+
+// A hardcoded model name is a single point of failure: an account without
+// access to that exact id gets a 404 and the shop sees "no results". These are
+// only the FIRST preference. `OPENAI_MODEL` / `ANTHROPIC_MODEL` secrets
+// override them without a redeploy, and on a model-not-found the resolver asks
+// the provider what it actually has (see discoverModel) and retries.
+const OPENAI_MODEL_PREFERENCES = ['gpt-5.6', 'gpt-5', 'gpt-4.1', 'gpt-4o']
+const ANTHROPIC_MODEL_PREFERENCES = ['claude-sonnet-5', 'claude-opus-4-5', 'claude-sonnet-4-5']
+
+function configuredModel(provider: 'openai' | 'anthropic'): string {
+  const override = Deno.env.get(provider === 'openai' ? 'OPENAI_MODEL' : 'ANTHROPIC_MODEL')?.trim()
+  if (override) return override
+  return provider === 'openai' ? OPENAI_MODEL_PREFERENCES[0] : ANTHROPIC_MODEL_PREFERENCES[0]
+}
+
+/**
+ * Models this key can actually reach, asked once per isolate.
+ *
+ * Module-scoped cache, unlike ProviderDiag which is deliberately per-request:
+ * the model list is a property of the API key, not of the shop making the
+ * request, so sharing it across concurrent requests is correct rather than a
+ * leak. Null means "asked and got nothing usable" — cached too, so a broken
+ * key doesn't trigger a discovery call on every lookup.
+ */
+const discoveredModels = new Map<'openai' | 'anthropic', string | null>()
+
+async function discoverModel(provider: 'openai' | 'anthropic', apiKey: string): Promise<string | null> {
+  if (discoveredModels.has(provider)) return discoveredModels.get(provider) ?? null
+
+  let picked: string | null = null
+  try {
+    const res = await fetch(
+      provider === 'openai' ? 'https://api.openai.com/v1/models' : 'https://api.anthropic.com/v1/models',
+      {
+        headers:
+          provider === 'openai'
+            ? { authorization: `Bearer ${apiKey}` }
+            : { 'x-api-key': apiKey, 'anthropic-version': ANTHROPIC_VERSION },
+      },
+    )
+    if (res.ok) {
+      const body = await res.json()
+      const ids: string[] = (Array.isArray(body?.data) ? body.data : [])
+        .map((m: { id?: unknown }) => (typeof m?.id === 'string' ? m.id : ''))
+        .filter(Boolean)
+      const preferences = provider === 'openai' ? OPENAI_MODEL_PREFERENCES : ANTHROPIC_MODEL_PREFERENCES
+
+      // Exact preference first, then a prefix match so a dated release
+      // ("claude-sonnet-5-20260514") satisfies a preference for its family.
+      picked =
+        preferences.find((p) => ids.includes(p)) ??
+        preferences.map((p) => ids.find((id) => id.startsWith(p))).find(Boolean) ??
+        null
+    } else {
+      console.error('resolve-product: model discovery failed', provider, res.status)
+    }
+  } catch (err) {
+    console.error('resolve-product: model discovery threw', provider, err)
+  }
+
+  discoveredModels.set(provider, picked)
+  return picked
+}
 const BARCODE_CACHE_DAYS = 30
 const TEXT_CACHE_DAYS = 7
 
@@ -334,6 +395,84 @@ async function scrapeProductImages(pageUrl: string, max = 8): Promise<string[]> 
 }
 
 // ---------------------------------------------------------------------------
+// Lenient JSON extraction -- mirrors src/lib/aiJson.ts, where it is tested
+// (Deno cannot import from src/; same duplication rule as the email templates,
+// productNaming, and barcodeIdentity).
+// ---------------------------------------------------------------------------
+
+function extractJsonBlock(raw: string): string | null {
+  if (!raw) return null
+  const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  const haystack = fence ? fence[1] : raw
+
+  for (let start = 0; start < haystack.length; start++) {
+    const opener = haystack[start]
+    if (opener !== '{' && opener !== '[') continue
+    const closer = opener === '{' ? '}' : ']'
+    let depth = 0
+    let inString = false
+    let escaped = false
+    for (let i = start; i < haystack.length; i++) {
+      const ch = haystack[i]
+      if (escaped) { escaped = false; continue }
+      if (ch === '\\') { escaped = true; continue }
+      if (ch === '"') { inString = !inString; continue }
+      if (inString) continue
+      if (ch === opener) depth++
+      else if (ch === closer) {
+        depth--
+        if (depth === 0) return haystack.slice(start, i + 1)
+      }
+    }
+    break
+  }
+  return null
+}
+
+function parseLooseJson<T = unknown>(raw: string | null | undefined): T | null {
+  if (typeof raw !== 'string') return null
+  const trimmed = raw.trim()
+  if (trimmed) {
+    try { return JSON.parse(trimmed) as T } catch { /* fall through to extraction */ }
+  }
+  const block = extractJsonBlock(raw)
+  if (!block) return null
+  try { return JSON.parse(block) as T } catch { return null }
+}
+
+// ---------------------------------------------------------------------------
+// The ladder.
+//
+// The rich call depends on three exact things being right at once: the model
+// id, the web-search tool identifier, and the structured-output request shape.
+// Any one of them being wrong for a given account 400s the whole call, and the
+// shop sees an empty result indistinguishable from "no such product" -- which
+// is exactly what was reported for products with live manufacturer pages.
+//
+// So each provider is tried at three decreasing levels of ambition, and the
+// first rung that returns candidates wins. Rung 3 uses no tools and no
+// response-format field at all, which works on essentially every chat model
+// and API version in existence -- it is the rung that makes lookup degrade
+// instead of disappear.
+// ---------------------------------------------------------------------------
+
+type Rung = 1 | 2 | 3
+const RUNGS: Rung[] = [1, 2, 3]
+
+const RUNG_LABEL: Record<Rung, string> = {
+  1: 'web search + structured output',
+  2: 'structured output, no tools',
+  3: 'plain JSON reply',
+}
+
+/** Appended on rung 3, where nothing but the prompt constrains the shape. */
+const JSON_ONLY_INSTRUCTION =
+  '\n\nReply with ONLY a JSON object of the form {"candidates":[...]} and no other text. ' +
+  'Each candidate has the keys: name (string), brand, model, category_hint, barcode_confirmed, ' +
+  'unit_price (number in USD), price_kind, image_url, source_url, source_name, ' +
+  'confidence (number 0-1), evidence (array of short strings). Use null for anything you do not know.'
+
+// ---------------------------------------------------------------------------
 // Claude + web_search structured output.
 // ---------------------------------------------------------------------------
 
@@ -402,6 +541,12 @@ interface RawAiCandidate {
 // and a shared mutable would let one shop's failure surface in another's UI.
 interface ProviderDiag {
   error: string | null
+  /** Which provider was reached for this request. */
+  provider: 'openai' | 'anthropic' | null
+  /** The model id actually used, after any override or discovery. */
+  model: string | null
+  /** Which rung of the ladder produced the result. Null when none did. */
+  rung: Rung | null
 }
 
 /**
@@ -442,15 +587,21 @@ function parseAiCandidates(rawText: string | null | undefined, upc: string | nul
     return []
   }
 
-  let parsed: { candidates?: RawAiCandidate[] }
-  try {
-    parsed = JSON.parse(rawText)
-  } catch {
-    console.error(`resolve-product: unparseable ${providerLabel} structured output`, rawText.slice(0, 500))
+  // Lenient on purpose: the last rung of the ladder asks an unconstrained
+  // chat model for JSON, and those replies arrive fenced, prefaced, or
+  // trailed by prose. parseLooseJson recovers all three and returns null
+  // rather than repairing anything — a guessed parse would invent a product.
+  // Mirrors src/lib/aiJson.ts, where it is tested.
+  const parsed = parseLooseJson<{ candidates?: RawAiCandidate[] } | RawAiCandidate[]>(rawText)
+  if (!parsed) {
+    console.error(`resolve-product: unparseable ${providerLabel} output`, rawText.slice(0, 500))
     return []
   }
 
-  const rawCandidates = Array.isArray(parsed.candidates) ? parsed.candidates.slice(0, 5) : []
+  // A model told "reply with JSON" sometimes returns the bare array rather
+  // than the wrapper object. Both mean the same thing.
+  const list = Array.isArray(parsed) ? parsed : parsed.candidates
+  const rawCandidates = Array.isArray(list) ? list.slice(0, 5) : []
   return rawCandidates
     .map((c): Candidate | null => {
       const name = typeof c.name === 'string' ? c.name.trim() : ''
@@ -487,7 +638,30 @@ function parseAiCandidates(rawText: string | null | undefined, upc: string | nul
     .filter((c): c is Candidate => c !== null)
 }
 
-async function resolveViaClaude(apiKey: string, prompt: string, upc: string | null, diag: ProviderDiag): Promise<Candidate[]> {
+/** The Anthropic Messages request for one rung. `content` is text or blocks. */
+function anthropicRequestBody(model: string, content: unknown, rung: Rung): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    model,
+    max_tokens: 1536,
+    messages: [{ role: 'user', content }],
+  }
+  if (rung !== 3) {
+    body.output_config = { format: { type: 'json_schema', schema: AI_CANDIDATE_SCHEMA } }
+  }
+  if (rung === 1) {
+    body.tools = [{ type: 'web_search_20260318', name: 'web_search', max_uses: 3 }]
+  }
+  return body
+}
+
+async function resolveViaClaude(
+  apiKey: string,
+  prompt: string,
+  upc: string | null,
+  diag: ProviderDiag,
+  rung: Rung,
+  model: string,
+): Promise<Candidate[]> {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -495,17 +669,11 @@ async function resolveViaClaude(apiKey: string, prompt: string, upc: string | nu
       'anthropic-version': ANTHROPIC_VERSION,
       'content-type': 'application/json',
     },
-    body: JSON.stringify({
-      model: ANTHROPIC_MODEL,
-      max_tokens: 1536,
-      tools: [{ type: 'web_search_20260318', name: 'web_search', max_uses: 3 }],
-      output_config: { format: { type: 'json_schema', schema: AI_CANDIDATE_SCHEMA } },
-      messages: [{ role: 'user', content: prompt }],
-    }),
+    body: JSON.stringify(anthropicRequestBody(model, rung === 3 ? prompt + JSON_ONLY_INSTRUCTION : prompt, rung)),
   })
 
   if (!res.ok) {
-    noteProviderError(diag, 'Anthropic', res.status, await res.text().catch(() => ''))
+    noteProviderError(diag, `Anthropic (${RUNG_LABEL[rung]})`, res.status, await res.text().catch(() => ''))
     return []
   }
 
@@ -561,7 +729,7 @@ const VISION_IDENTIFY_PROMPT =
 // page, then fetch and scrape that page ourselves. Narrow, cheap
 // follow-up call; only made for the top vision candidate when it didn't
 // already come back with a photo (see resolveViaVisionClaude/OpenAi).
-async function findOfficialPhotoUrlClaude(apiKey: string, name: string, brand: string | null): Promise<string | null> {
+async function findOfficialPhotoUrlClaude(apiKey: string, name: string, brand: string | null, model: string): Promise<string | null> {
   const query = [brand, name].filter(Boolean).join(' ')
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -572,7 +740,7 @@ async function findOfficialPhotoUrlClaude(apiKey: string, name: string, brand: s
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        model: ANTHROPIC_MODEL,
+        model,
         max_tokens: 512,
         tools: [{ type: 'web_search_20260318', name: 'web_search', max_uses: 2 }],
         output_config: { format: { type: 'json_schema', schema: PAGE_URL_SCHEMA } },
@@ -597,7 +765,7 @@ async function findOfficialPhotoUrlClaude(apiKey: string, name: string, brand: s
   }
 }
 
-async function findOfficialPhotoUrlOpenAi(apiKey: string, name: string, brand: string | null): Promise<string | null> {
+async function findOfficialPhotoUrlOpenAi(apiKey: string, name: string, brand: string | null, model: string): Promise<string | null> {
   const query = [brand, name].filter(Boolean).join(' ')
   try {
     const res = await fetch('https://api.openai.com/v1/responses', {
@@ -607,7 +775,7 @@ async function findOfficialPhotoUrlOpenAi(apiKey: string, name: string, brand: s
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        model: OPENAI_MODEL,
+        model,
         tools: [{ type: 'web_search' }],
         input: OFFICIAL_PAGE_PROMPT(query),
         text: { format: { type: 'json_schema', name: 'official_page', schema: PAGE_URL_SCHEMA, strict: true } },
@@ -640,6 +808,8 @@ async function resolveViaVisionClaude(
   imageBase64: string,
   mediaType: 'image/jpeg' | 'image/png' | 'image/webp',
   diag: ProviderDiag,
+  rung: Rung,
+  model: string,
 ): Promise<Candidate[]> {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -648,25 +818,20 @@ async function resolveViaVisionClaude(
       'anthropic-version': ANTHROPIC_VERSION,
       'content-type': 'application/json',
     },
-    body: JSON.stringify({
-      model: ANTHROPIC_MODEL,
-      max_tokens: 1536,
-      tools: [{ type: 'web_search_20260318', name: 'web_search', max_uses: 3 }],
-      output_config: { format: { type: 'json_schema', schema: AI_CANDIDATE_SCHEMA } },
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageBase64 } },
-            { type: 'text', text: VISION_IDENTIFY_PROMPT },
-          ],
-        },
-      ],
-    }),
+    body: JSON.stringify(
+      anthropicRequestBody(
+        model,
+        [
+          { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageBase64 } },
+          { type: 'text', text: rung === 3 ? VISION_IDENTIFY_PROMPT + JSON_ONLY_INSTRUCTION : VISION_IDENTIFY_PROMPT },
+        ],
+        rung,
+      ),
+    ),
   })
 
   if (!res.ok) {
-    noteProviderError(diag, 'Anthropic vision', res.status, await res.text().catch(() => ''))
+    noteProviderError(diag, `Anthropic vision (${RUNG_LABEL[rung]})`, res.status, await res.text().catch(() => ''))
     return []
   }
 
@@ -680,7 +845,7 @@ async function resolveViaVisionClaude(
   // this to at most one extra round trip.
   const top = candidates[0]
   if (top && !top.imageUrl) {
-    top.imageUrl = await findOfficialPhotoUrlClaude(apiKey, top.name, top.brand)
+    top.imageUrl = await findOfficialPhotoUrlClaude(apiKey, top.name, top.brand, model)
   }
 
   return candidates
@@ -697,6 +862,8 @@ async function resolveViaVisionOpenAi(
   imageBase64: string,
   mediaType: 'image/jpeg' | 'image/png' | 'image/webp',
   diag: ProviderDiag,
+  rung: Rung,
+  model: string,
 ): Promise<Candidate[]> {
   const res = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
@@ -705,23 +872,26 @@ async function resolveViaVisionOpenAi(
       'content-type': 'application/json',
     },
     body: JSON.stringify({
-      model: OPENAI_MODEL,
-      tools: [{ type: 'web_search' }],
+      ...openAiRequestBody(model, '', rung),
+      // The Responses API takes structured content blocks for an image, so the
+      // builder's plain-string `input` is replaced rather than appended to.
       input: [
         {
           role: 'user',
           content: [
             { type: 'input_image', image_url: `data:${mediaType};base64,${imageBase64}` },
-            { type: 'input_text', text: VISION_IDENTIFY_PROMPT },
+            {
+              type: 'input_text',
+              text: rung === 3 ? VISION_IDENTIFY_PROMPT + JSON_ONLY_INSTRUCTION : VISION_IDENTIFY_PROMPT,
+            },
           ],
         },
       ],
-      text: { format: { type: 'json_schema', name: 'product_candidates', schema: AI_CANDIDATE_SCHEMA, strict: true } },
     }),
   })
 
   if (!res.ok) {
-    noteProviderError(diag, 'OpenAI vision', res.status, await res.text().catch(() => ''))
+    noteProviderError(diag, `OpenAI vision (${RUNG_LABEL[rung]})`, res.status, await res.text().catch(() => ''))
     return []
   }
 
@@ -735,7 +905,7 @@ async function resolveViaVisionOpenAi(
 
   const top = candidates[0]
   if (top && !top.imageUrl) {
-    top.imageUrl = await findOfficialPhotoUrlOpenAi(apiKey, top.name, top.brand)
+    top.imageUrl = await findOfficialPhotoUrlOpenAi(apiKey, top.name, top.brand, model)
   }
 
   return candidates
@@ -752,8 +922,16 @@ async function resolveViaVision(
   const openAiKey = Deno.env.get('OPENAI_API_KEY')
   const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY')
   try {
-    if (openAiKey) return await resolveViaVisionOpenAi(openAiKey, imageBase64, mediaType, diag)
-    if (anthropicKey) return await resolveViaVisionClaude(anthropicKey, imageBase64, mediaType, diag)
+    if (openAiKey) {
+      return await climbLadder('openai', openAiKey, diag, (rung, model) =>
+        resolveViaVisionOpenAi(openAiKey, imageBase64, mediaType, diag, rung, model),
+      )
+    }
+    if (anthropicKey) {
+      return await climbLadder('anthropic', anthropicKey, diag, (rung, model) =>
+        resolveViaVisionClaude(anthropicKey, imageBase64, mediaType, diag, rung, model),
+      )
+    }
   } catch (err) {
     // A throw here is the network layer, not the provider: DNS, TLS, or the
     // Edge Function's own wall-clock limit. Worth reporting for the same
@@ -770,23 +948,37 @@ async function resolveViaVision(
 // candidate shape is provider-agnostic. The tool call itself shows up as a
 // separate `web_search_call` item in `output`; the actual structured JSON
 // is the `message` item's `output_text` content part.
-async function resolveViaOpenAi(apiKey: string, prompt: string, upc: string | null, diag: ProviderDiag): Promise<Candidate[]> {
+/** The OpenAI Responses request for one rung. */
+function openAiRequestBody(model: string, input: string, rung: Rung): Record<string, unknown> {
+  if (rung === 3) return { model, input: input + JSON_ONLY_INSTRUCTION }
+  const body: Record<string, unknown> = {
+    model,
+    input,
+    text: { format: { type: 'json_schema', name: 'product_candidates', schema: AI_CANDIDATE_SCHEMA, strict: true } },
+  }
+  if (rung === 1) body.tools = [{ type: 'web_search' }]
+  return body
+}
+
+async function resolveViaOpenAi(
+  apiKey: string,
+  prompt: string,
+  upc: string | null,
+  diag: ProviderDiag,
+  rung: Rung,
+  model: string,
+): Promise<Candidate[]> {
   const res = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
     headers: {
       authorization: `Bearer ${apiKey}`,
       'content-type': 'application/json',
     },
-    body: JSON.stringify({
-      model: OPENAI_MODEL,
-      tools: [{ type: 'web_search' }],
-      input: prompt,
-      text: { format: { type: 'json_schema', name: 'product_candidates', schema: AI_CANDIDATE_SCHEMA, strict: true } },
-    }),
+    body: JSON.stringify(openAiRequestBody(model, prompt, rung)),
   })
 
   if (!res.ok) {
-    noteProviderError(diag, 'OpenAI', res.status, await res.text().catch(() => ''))
+    noteProviderError(diag, `OpenAI (${RUNG_LABEL[rung]})`, res.status, await res.text().catch(() => ''))
     return []
   }
 
@@ -806,12 +998,61 @@ async function resolveViaOpenAi(apiKey: string, prompt: string, upc: string | nu
 // the current ask; either key alone is enough to light up AI resolution,
 // and neither being set degrades gracefully to no AI candidates, same as
 // always).
+/**
+ * Run one provider down the ladder, and re-run once against a discovered model
+ * if the configured one doesn't exist for this key.
+ *
+ * The rung loop stops at the first result. The model retry sits OUTSIDE it,
+ * because a wrong model id fails every rung identically — climbing all three
+ * before discovering that would be three wasted round trips.
+ */
+async function climbLadder(
+  provider: 'openai' | 'anthropic',
+  apiKey: string,
+  diag: ProviderDiag,
+  attempt: (rung: Rung, model: string) => Promise<Candidate[]>,
+): Promise<Candidate[]> {
+  for (const model of [configuredModel(provider), null]) {
+    let resolvedModel = model
+    if (resolvedModel === null) {
+      // Second pass: only worth making if the first failed on the model id
+      // itself. Any other failure has already been reported by the rungs.
+      if (!/model|404/i.test(diag.error ?? '')) break
+      resolvedModel = await discoverModel(provider, apiKey)
+      if (!resolvedModel) break
+      diag.error = null
+    }
+
+    for (const rung of RUNGS) {
+      const candidates = await attempt(rung, resolvedModel)
+      if (candidates.length > 0) {
+        // A lower rung succeeding is worth knowing about but is not a failure
+        // — clear the errors the rungs above it recorded on the way down.
+        diag.error = null
+        diag.provider = provider
+        diag.model = resolvedModel
+        diag.rung = rung
+        return candidates
+      }
+    }
+  }
+  return []
+}
+
 async function resolveViaAi(prompt: string, upc: string | null, diag: ProviderDiag): Promise<Candidate[]> {
   const openAiKey = Deno.env.get('OPENAI_API_KEY')
   const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY')
   try {
-    if (openAiKey) return await resolveViaOpenAi(openAiKey, prompt, upc, diag)
-    if (anthropicKey) return await resolveViaClaude(anthropicKey, prompt, upc, diag)
+    if (openAiKey) {
+      return await climbLadder('openai', openAiKey, diag, (rung, model) =>
+        resolveViaOpenAi(openAiKey, prompt, upc, diag, rung, model),
+      )
+    }
+    if (anthropicKey) {
+      return await climbLadder('anthropic', anthropicKey, diag, (rung, model) =>
+        resolveViaClaude(anthropicKey, prompt, upc, diag, rung, model),
+      )
+    }
   } catch (err) {
     diag.error = 'Could not reach the AI provider'
     console.error('resolve-product: AI request threw', err)
@@ -848,13 +1089,56 @@ Deno.serve(async (req: Request) => {
   const aiConfigured = Boolean(Deno.env.get('OPENAI_API_KEY') || Deno.env.get('ANTHROPIC_API_KEY'))
   // Collects the first provider failure of this request, so a key that is set
   // but not working says so instead of looking like an empty result.
-  const diag: ProviderDiag = { error: null }
+  const diag: ProviderDiag = { error: null, provider: null, model: null, rung: null }
 
   const body = await req.json().catch(() => null)
   const shopId = typeof body?.shopId === 'string' ? body.shopId : ''
-  const kind = body?.kind === 'barcode' || body?.kind === 'text' || body?.kind === 'photo' ? body.kind : null
-  if (!shopId || !kind) {
-    return fail(400, 'Missing shopId or kind')
+  const kind =
+    body?.kind === 'barcode' || body?.kind === 'text' || body?.kind === 'photo' || body?.kind === 'selftest'
+      ? body.kind
+      : null
+  if (!kind) {
+    return fail(400, 'Missing kind')
+  }
+  // Every kind but the self-test resolves a product for a particular shop and
+  // is membership-checked below; the self-test reads no shop data at all, so
+  // it is the one kind that carries no shopId.
+  if (kind !== 'selftest' && !shopId) {
+    return fail(400, 'Missing shopId')
+  }
+
+  // A one-tap answer to "is lookup working, and if not, why".
+  //
+  // This exists because the failure modes are otherwise invisible from the
+  // outside: a funded key, a wrong model id, an unavailable tool identifier
+  // and a genuine miss all produce the same empty list. Rather than the shop
+  // reporting "lookup is broken" and waiting on someone to read Edge Function
+  // logs, they run this and read the answer themselves.
+  //
+  // No shop membership check: it takes no shopId, reads no shop data, and
+  // returns nothing but the health of this deployment's own AI configuration.
+  // Any signed-in user reaching this far is already authenticated above.
+  if (kind === 'selftest') {
+    const started = Date.now()
+    const candidates = await resolveViaAi(
+      'Identify this car-audio product and return one candidate: "Kicker CompR 12 inch subwoofer". ' +
+        'This is a connectivity self-test, so a single well-known product is enough.',
+      null,
+      diag,
+    )
+    return json(200, {
+      ok: true,
+      selftest: true,
+      aiConfigured,
+      provider: diag.provider,
+      model: diag.model,
+      rung: diag.rung,
+      rungLabel: diag.rung ? RUNG_LABEL[diag.rung] : null,
+      candidateCount: candidates.length,
+      sample: candidates[0]?.name ?? null,
+      elapsedMs: Date.now() - started,
+      aiError: diag.error,
+    })
   }
 
   const admin = createClient(

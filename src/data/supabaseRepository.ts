@@ -45,6 +45,7 @@ import type {
   ProductResolutionCandidate,
   ProductResolveRequest,
   ProductResolveResult,
+  ProductLookupSelfTest,
   ProductSuggestionResult,
   SendEmailResult,
   ShopifyImportOptions,
@@ -793,6 +794,49 @@ export class SupabaseRepository implements DataRepository {
       })),
       aiConfigured: result.aiConfigured,
       aiError: result.aiError,
+    }
+  }
+
+  async testProductLookup(): Promise<ProductLookupSelfTest> {
+    const failed = (message: string): ProductLookupSelfTest => ({
+      ok: false,
+      aiConfigured: false,
+      provider: null,
+      model: null,
+      rung: null,
+      rungLabel: null,
+      candidateCount: 0,
+      sample: null,
+      elapsedMs: null,
+      aiError: message,
+    })
+    try {
+      const { data, error } = await this.supabase.functions.invoke('resolve-product', {
+        body: { kind: 'selftest' },
+      })
+      if (error) {
+        const notDeployed = error instanceof FunctionsHttpError && error.context?.status === 404
+        return failed(
+          notDeployed
+            ? 'The resolve-product function is not deployed to this project. Run: supabase functions deploy resolve-product'
+            : error.message || 'The lookup function could not be reached.',
+        )
+      }
+      const row = (data ?? {}) as Row
+      return {
+        ok: row.candidateCount as number > 0,
+        aiConfigured: row.aiConfigured !== false,
+        provider: (row.provider as ProductLookupSelfTest['provider']) ?? null,
+        model: typeof row.model === 'string' ? row.model : null,
+        rung: typeof row.rung === 'number' ? row.rung : null,
+        rungLabel: typeof row.rungLabel === 'string' ? row.rungLabel : null,
+        candidateCount: typeof row.candidateCount === 'number' ? row.candidateCount : 0,
+        sample: typeof row.sample === 'string' ? row.sample : null,
+        elapsedMs: typeof row.elapsedMs === 'number' ? row.elapsedMs : null,
+        aiError: typeof row.aiError === 'string' ? row.aiError : null,
+      }
+    } catch (err) {
+      return failed(err instanceof Error ? err.message : 'The lookup function could not be reached.')
     }
   }
 

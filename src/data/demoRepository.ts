@@ -36,6 +36,7 @@ import type {
   ProductResolutionCandidate,
   ProductResolveRequest,
   ProductResolveResult,
+  ProductLookupSelfTest,
   ProductSuggestionResult,
   SendEmailResult,
   ShopifyImportResult,
@@ -428,6 +429,23 @@ export class DemoRepository implements DataRepository {
         imageUrl: c.imageUrl,
         sourceUrl: c.priceSourceUrl,
       })),
+    }
+  }
+
+  async testProductLookup(): Promise<ProductLookupSelfTest> {
+    // Demo mode never makes a real AI call, so it reports exactly that rather
+    // than a green light the owner would then trust in production.
+    return {
+      ok: false,
+      aiConfigured: false,
+      provider: null,
+      model: null,
+      rung: null,
+      rungLabel: null,
+      candidateCount: 0,
+      sample: null,
+      elapsedMs: 0,
+      aiError: 'Demo mode never calls a real AI provider — sign in to your shop to test the live lookup.',
     }
   }
 

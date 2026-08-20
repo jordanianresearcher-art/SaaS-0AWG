@@ -440,6 +440,32 @@ export interface ProductSuggestionResult {
   aiError: string | null
 }
 
+/**
+ * What a product-lookup self-test found out about this deployment.
+ *
+ * Every way lookup can be broken — no key, a key with no access to the
+ * configured model, an unavailable tool identifier, a function that was never
+ * deployed — produces the same empty candidate list from the outside. This
+ * turns that into an answer someone can read and act on without opening Edge
+ * Function logs.
+ */
+export interface ProductLookupSelfTest {
+  ok: boolean
+  /** False when no AI provider key is set at all. */
+  aiConfigured: boolean
+  provider: 'openai' | 'anthropic' | null
+  /** The model actually used, after any override or auto-discovery. */
+  model: string | null
+  /** Which fallback level produced the answer — 1 is the richest. */
+  rung: number | null
+  rungLabel: string | null
+  candidateCount: number
+  /** The name of the first product found, as proof it really worked. */
+  sample: string | null
+  elapsedMs: number | null
+  aiError: string | null
+}
+
 export interface ShopifyImportOptions {
   /** Resume a prior run — pass back the nextCursor from its result. */
   afterCursor?: string | null
@@ -514,6 +540,8 @@ export interface DataRepository {
   lookupProductByUpc(code: string, options?: { fast?: boolean; brandHint?: string | null }): Promise<UpcLookupResult>
   /** AI+web-search autocomplete for a partially-typed SKU/model/name when adding a new catalog product. `brandHint` scopes the search to the brand being received. Demo mode never makes a real call — always resolves []. Production degrades to [] on any failure rather than throwing, same pattern as lookupProductByUpc. Delegates to resolveProduct() underneath. */
   lookupProductSuggestions(query: string, brandHint?: string | null): Promise<ProductSuggestionResult>
+  /** Ask the backend whether product lookup actually works right now, and why not if it doesn't. */
+  testProductLookup(): Promise<ProductLookupSelfTest>
   /**
    * The universal resolver: called when a barcode or typed query doesn't
    * match anything already in this shop's catalog. Never throws and never
