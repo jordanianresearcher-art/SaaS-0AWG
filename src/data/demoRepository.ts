@@ -1189,6 +1189,35 @@ export class DemoRepository implements DataRepository {
     this.persist()
   }
 
+  async rescheduleAppointment(appointmentId: string, input: { startsAt: string; bayId: string }): Promise<void> {
+    const appt = this.db.appointments.find((a) => a.id === appointmentId)
+    if (!appt) throw new Error('That appointment no longer exists.')
+
+    const totalMinutes = appt.services.reduce((sum, s) => sum + s.durationMinutes, 0)
+    if (totalMinutes <= 0) throw new Error('That appointment has no services on it, so it has no length to move.')
+
+    const startsAt = new Date(input.startsAt)
+    const endsAt = new Date(startsAt.getTime() + totalMinutes * 60_000)
+
+    // Stands in for the gist exclusion constraint production relies on, so
+    // demo mode refuses a double-book the same way and with the same wording.
+    const clash = this.db.appointments.some(
+      (a) =>
+        a.id !== appointmentId &&
+        a.bayId === input.bayId &&
+        a.status !== 'cancelled' &&
+        new Date(a.startsAt) < endsAt &&
+        startsAt < new Date(a.endsAt),
+    )
+    if (clash) throw new Error('That bay is already booked at the new time. Pick another slot.')
+
+    appt.startsAt = startsAt.toISOString()
+    appt.endsAt = endsAt.toISOString()
+    appt.bayId = input.bayId
+    appt.updatedAt = new Date().toISOString()
+    this.persist()
+  }
+
   async markLabelPrinted(catalogItemId: string): Promise<void> {
     const item = this.db.catalogItems.find((i) => i.id === catalogItemId)
     if (item) {

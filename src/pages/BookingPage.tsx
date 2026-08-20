@@ -13,9 +13,18 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Check, MapPin, Phone } from 'lucide-react'
 import { resolvePublicBookingApi, type PublicBookingApi } from '../data/publicBooking'
 import { resolvePublicQuoteApi } from '../data/publicQuote'
-import { Button, Field, Input, LoadingBlock, Logo, Select } from '../components/ui'
+import { Button, Input, LoadingBlock, Logo } from '../components/ui'
+import { DayStrip, TimeSlotGrid } from '../components/BookingPickers'
+import { BodyStyleSilhouette } from '../components/BodyStyleSilhouette'
 import { formatCurrency } from '../lib/format'
-import { availableSlotsForDay, isDateBookable, minuteToTimeString, timeStringToMinute } from '../lib/scheduling'
+import {
+  availableSlotsForDay,
+  dayOpenWindow,
+  findNextAvailableDay,
+  formatMinuteOfDay,
+  isDateBookable,
+  minuteToTimeString,
+} from '../lib/scheduling'
 import { BODY_STYLE_INFO, BODY_STYLE_ORDER } from '../lib/windowTint'
 import type { PublicBookingPage as PublicBookingPageData, TintBodyStyle } from '../types'
 
@@ -101,11 +110,7 @@ export default function BookingPage() {
     if (!page || totalMinutes === 0) return []
     const todayKey = toDateKey(new Date())
     if (!isDateBookable(dateKey, todayKey, MAX_ADVANCE_DAYS)) return []
-    const dow = new Date(`${dateKey}T00:00:00`).getDay()
-    const exception = page.scheduleExceptions.find((e) => e.date === dateKey)
-    const dayHours = page.businessHours.find((h) => h.dayOfWeek === dow)
-    const openMinute = exception ? (exception.isClosed ? null : timeStringToMinute(exception.openTime!)) : dayHours?.isOpen ? timeStringToMinute(dayHours.openTime!) : null
-    const closeMinute = exception ? (exception.isClosed ? null : timeStringToMinute(exception.closeTime!)) : dayHours?.isOpen ? timeStringToMinute(dayHours.closeTime!) : null
+    const { openMinute, closeMinute } = dayOpenWindow(dateKey, page.businessHours, page.scheduleExceptions)
     return availableSlotsForDay({
       bayIds: page.bayIds,
       openMinute,
@@ -121,6 +126,34 @@ export default function BookingPage() {
   }, [page, totalMinutes, dateKey])
 
   const startTimeOptions = Array.from(new Set(slots.map((s) => s.startMinute))).sort((a, b) => a - b)
+
+  /**
+   * The shop's next real opening. "Nothing open this day — try another" left a
+   * customer clicking through three weeks of chips one at a time; this points
+   * straight at the answer.
+   */
+  const nextOpening = useMemo(() => {
+    if (!page || totalMinutes === 0) return null
+    const todayKey = toDateKey(new Date())
+    return findNextAvailableDay({
+      fromDateKey: todayKey,
+      maxDays: MAX_ADVANCE_DAYS,
+      bayIds: page.bayIds,
+      durationMinutes: totalMinutes,
+      businessHours: page.businessHours,
+      exceptions: page.scheduleExceptions,
+      busy: page.busyBlocks.map((b) => ({
+        bayId: b.bayId,
+        startMinute: minutesSinceMidnight(b.startsAt),
+        endMinute: minutesSinceMidnight(b.endsAt),
+        dateKey: toDateKey(new Date(b.startsAt)),
+      })),
+      todayDateKey: todayKey,
+      nowMinute: minutesSinceMidnight(new Date().toISOString()),
+      slotIntervalMinutes: 30,
+      leadTimeMinutes: 60,
+    })
+  }, [page, totalMinutes])
 
   const skipContactStep = Boolean(quoteToken)
 
@@ -228,61 +261,85 @@ export default function BookingPage() {
         </div>
 
         {usesTint ? (
-          <Field label="Your vehicle" htmlFor="bk-body-style">
-            <Select id="bk-body-style" value={bodyStyle} onChange={(e) => setBodyStyle(e.target.value as TintBodyStyle)}>
-              <option value="">Standard</option>
-              {BODY_STYLE_ORDER.map((b) => (
-                <option key={b} value={b}>
-                  {BODY_STYLE_INFO[b].label}
-                </option>
-              ))}
-            </Select>
-          </Field>
+          <div>
+            <p className="mb-2 text-base font-bold text-ink">What are you driving?</p>
+            <div className="flex flex-wrap gap-2">
+              {BODY_STYLE_ORDER.map((b) => {
+                const active = bodyStyle === b
+                return (
+                  <button
+                    key={b}
+                    type="button"
+                    aria-pressed={active}
+                    aria-label={BODY_STYLE_INFO[b].label}
+                    onClick={() => {
+                      setBodyStyle(active ? '' : b)
+                      setStartTime('')
+                    }}
+                    className="flex w-[5.5rem] flex-col items-center gap-1 rounded-xl border-2 px-2 py-2"
+                    style={
+                      active
+                        ? { borderColor: color, backgroundColor: `${color}14` }
+                        : { borderColor: '#e4e4e7', color: '#3f3f46' }
+                    }
+                  >
+                    <BodyStyleSilhouette bodyStyle={b} className="h-7 w-full" />
+                    <span className="text-[11px] leading-tight font-semibold">{BODY_STYLE_INFO[b].label}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
         ) : null}
 
         {totalMinutes > 0 ? (
           <div>
             <p className="mb-2 text-base font-bold text-ink">Pick a day</p>
-            <div className="flex gap-2 overflow-x-auto pb-2">
-              {dateOptions.map((d) => {
-                const active = d === dateKey
-                const label = new Date(`${d}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
-                return (
-                  <button
-                    key={d}
-                    type="button"
-                    onClick={() => {
-                      setDateKey(d)
-                      setStartTime('')
-                    }}
-                    className="shrink-0 rounded-xl border-2 px-3 py-2 text-sm font-semibold"
-                    style={active ? { borderColor: color, backgroundColor: `${color}14` } : { borderColor: '#e4e4e7', color: '#3f3f46' }}
-                  >
-                    {label}
-                  </button>
-                )
-              })}
-            </div>
+
+            {nextOpening && !(nextOpening.dateKey === dateKey && minuteToTimeString(nextOpening.startMinute) === startTime) ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setDateKey(nextOpening.dateKey)
+                  setStartTime(minuteToTimeString(nextOpening.startMinute))
+                }}
+                className="mb-3 flex w-full items-center justify-between gap-2 rounded-xl border-2 px-3 py-2.5 text-left"
+                style={{ borderColor: color, backgroundColor: `${color}14` }}
+              >
+                <span className="text-sm font-semibold text-ink">
+                  Soonest ·{' '}
+                  {new Date(`${nextOpening.dateKey}T00:00:00`).toLocaleDateString(undefined, {
+                    weekday: 'short',
+                    month: 'short',
+                    day: 'numeric',
+                  })}{' '}
+                  at {formatMinuteOfDay(nextOpening.startMinute)}
+                </span>
+                <span className="shrink-0 text-xs font-bold uppercase" style={{ color }}>
+                  Pick
+                </span>
+              </button>
+            ) : null}
+
+            <DayStrip
+              fromDateKey={dateOptions[0]}
+              dayCount={dateOptions.length}
+              value={dateKey}
+              todayDateKey={dateOptions[0]}
+              accentColor={color}
+              onChange={(next) => {
+                setDateKey(next)
+                setStartTime('')
+              }}
+            />
 
             {startTimeOptions.length === 0 ? (
-              <p className="mt-2 text-sm text-zinc-500">Nothing open this day — try another.</p>
+              <p className="mt-2 text-sm text-zinc-500">
+                {nextOpening ? 'Nothing open this day — try the soonest opening above.' : 'Nothing open this day — try another.'}
+              </p>
             ) : (
-              <div className="mt-2 grid grid-cols-3 gap-2">
-                {startTimeOptions.map((m) => {
-                  const t = minuteToTimeString(m)
-                  const active = t === startTime
-                  return (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => setStartTime(t)}
-                      className="rounded-xl border-2 py-2.5 text-sm font-semibold"
-                      style={active ? { borderColor: color, backgroundColor: color, color: '#fff' } : { borderColor: '#e4e4e7', color: '#3f3f46' }}
-                    >
-                      {t}
-                    </button>
-                  )
-                })}
+              <div className="mt-2">
+                <TimeSlotGrid startMinutes={startTimeOptions} value={startTime} onChange={setStartTime} accentColor={color} />
               </div>
             )}
           </div>

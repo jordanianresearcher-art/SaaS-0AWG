@@ -653,6 +653,18 @@ export interface DataRepository {
   /** Staff-side booking — direct create, no availability RPC (the exclusion constraint on `appointments` is what actually prevents a double-book; this call fails loudly if the chosen bay/time is already taken). */
   createAppointment(input: NewAppointmentInput): Promise<Appointment>
   setAppointmentStatus(appointmentId: string, status: Appointment['status']): Promise<void>
+  /**
+   * Move an appointment to a new time and/or bay, keeping the record.
+   *
+   * Cancel-and-rebook was the only way to do this, and it loses the history
+   * AND mints a new `public_token` — which silently breaks the manage link
+   * already sitting in the customer's inbox. Rescheduling in place keeps both.
+   *
+   * Needs no new migration: migration 0021's `appointments_all` policy is
+   * `for all to authenticated`, and its gist exclusion constraint applies to
+   * UPDATE as well as INSERT, so Postgres still guarantees no double-book.
+   */
+  rescheduleAppointment(appointmentId: string, input: { startsAt: string; bayId: string }): Promise<void>
   markAppointmentReminderSent(appointmentId: string): Promise<void>
 }
 

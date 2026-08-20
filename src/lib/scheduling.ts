@@ -144,3 +144,147 @@ export function isDateBookable(date: string, todayDate: string, maxAdvanceDays: 
   )
   return diffDays <= maxAdvanceDays
 }
+
+/**
+ * Clock time for a human to read: "2:30 PM", not "14:30".
+ *
+ * `minuteToTimeString` produces the 24-hour form, which is what a value needs
+ * to be (it feeds `new Date(\`${dateKey}T${time}:00\`)`), but both booking
+ * screens were rendering that value straight to the user. A shop and its
+ * customers pick "2:30 PM" out of a list; scanning thirty-six rows of "14:30"
+ * to find it is work the app was making them do.
+ *
+ * Keep the two apart: this is for display only, never for a form value.
+ */
+export function formatMinuteOfDay(minute: number): string {
+  const wrapped = ((minute % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY
+  const h24 = Math.floor(wrapped / 60)
+  const m = wrapped % 60
+  const suffix = h24 < 12 ? 'AM' : 'PM'
+  // 0 and 12 both display as 12 — midnight is 12 AM, noon is 12 PM.
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12
+  return `${h12}:${String(m).padStart(2, '0')} ${suffix}`
+}
+
+/** Which part of the day a start time falls in, for grouping a list of them. */
+export function timeOfDayBucket(minute: number): 'morning' | 'afternoon' | 'evening' {
+  if (minute < 12 * 60) return 'morning'
+  if (minute < 17 * 60) return 'afternoon'
+  return 'evening'
+}
+
+export interface DayHoursSource {
+  dayOfWeek: number
+  isOpen: boolean
+  openTime: string | null
+  closeTime: string | null
+}
+
+export interface DayExceptionSource {
+  date: string
+  isClosed: boolean
+  openTime: string | null
+  closeTime: string | null
+}
+
+/**
+ * The open/close window for one calendar day, with a date-specific exception
+ * taking precedence over the weekly pattern.
+ *
+ * Extracted because both booking screens had inlined the same nested-ternary
+ * version of this, and a next-available search needs it for many days at once.
+ * Returns nulls when the shop is closed, which is what `availableSlotsForDay`
+ * already expects.
+ */
+export function dayOpenWindow(
+  dateKey: string,
+  businessHours: DayHoursSource[],
+  exceptions: DayExceptionSource[],
+): { openMinute: number | null; closeMinute: number | null } {
+  const exception = exceptions.find((e) => e.date === dateKey)
+  if (exception) {
+    if (exception.isClosed || !exception.openTime || !exception.closeTime) {
+      return { openMinute: null, closeMinute: null }
+    }
+    return {
+      openMinute: timeStringToMinute(exception.openTime),
+      closeMinute: timeStringToMinute(exception.closeTime),
+    }
+  }
+
+  // Sunday is 0 in both getDay() and the business_hours table.
+  const dow = new Date(`${dateKey}T00:00:00`).getDay()
+  const day = businessHours.find((h) => h.dayOfWeek === dow)
+  if (!day?.isOpen || !day.openTime || !day.closeTime) {
+    return { openMinute: null, closeMinute: null }
+  }
+  return { openMinute: timeStringToMinute(day.openTime), closeMinute: timeStringToMinute(day.closeTime) }
+}
+
+/** Advance a "YYYY-MM-DD" key by whole calendar days. UTC noon sidesteps DST edges in the arithmetic. */
+export function addDaysToDateKey(dateKey: string, days: number): string {
+  const [y, m, d] = dateKey.split('-').map(Number)
+  const shifted = new Date(Date.UTC(y, m - 1, d, 12))
+  shifted.setUTCDate(shifted.getUTCDate() + days)
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, '0')}-${String(shifted.getUTCDate()).padStart(2, '0')}`
+}
+
+export interface NextAvailableInput {
+  /** Where to start looking, inclusive. */
+  fromDateKey: string
+  /** How many calendar days to try in total, including the first. */
+  maxDays: number
+  bayIds: string[]
+  durationMinutes: number
+  businessHours: DayHoursSource[]
+  exceptions: DayExceptionSource[]
+  /** Every busy block across the search window. Filtered to each day internally. */
+  busy: Array<{ bayId: string; startMinute: number; endMinute: number; dateKey: string }>
+  /** Today's key, so today's already-past slots are excluded. */
+  todayDateKey: string
+  /** Minutes-since-midnight right now, used only when a candidate day is today. */
+  nowMinute: number
+  slotIntervalMinutes?: number
+  leadTimeMinutes?: number
+}
+
+/**
+ * The first day and time that can actually fit this job.
+ *
+ * "When can you take me?" is the first question on every phone call, and the
+ * app could not answer it: both booking screens computed availability for ONE
+ * day and, when that day was full, said "try another" without saying which.
+ * Staff were left clicking through days one at a time while a customer waited.
+ *
+ * Scans forward day by day and returns the earliest fitting start, or null if
+ * nothing fits inside the window.
+ */
+export function findNextAvailableDay(input: NextAvailableInput): { dateKey: string; startMinute: number } | null {
+  if (input.durationMinutes <= 0 || input.bayIds.length === 0) return null
+
+  for (let offset = 0; offset < input.maxDays; offset++) {
+    const dateKey = addDaysToDateKey(input.fromDateKey, offset)
+    // A day already gone by can never be the *next* opening.
+    if (dateKey < input.todayDateKey) continue
+
+    const { openMinute, closeMinute } = dayOpenWindow(dateKey, input.businessHours, input.exceptions)
+    if (openMinute === null || closeMinute === null) continue
+
+    const slots = availableSlotsForDay({
+      bayIds: input.bayIds,
+      openMinute,
+      closeMinute,
+      durationMinutes: input.durationMinutes,
+      busy: input.busy.filter((b) => b.dateKey === dateKey),
+      nowMinuteIfToday: dateKey === input.todayDateKey ? input.nowMinute : null,
+      slotIntervalMinutes: input.slotIntervalMinutes ?? 15,
+      leadTimeMinutes: input.leadTimeMinutes ?? 0,
+    })
+    if (slots.length === 0) continue
+
+    const earliest = slots.reduce((min, s) => (s.startMinute < min ? s.startMinute : min), slots[0].startMinute)
+    return { dateKey, startMinute: earliest }
+  }
+
+  return null
+}

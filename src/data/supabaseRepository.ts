@@ -1659,6 +1659,38 @@ export class SupabaseRepository implements DataRepository {
     if (error) throw error
   }
 
+  async rescheduleAppointment(appointmentId: string, input: { startsAt: string; bayId: string }): Promise<void> {
+    // Duration comes from the snapshotted service lines, not the live catalog
+    // — a service whose length was edited since booking must not silently
+    // stretch or shrink an appointment that is only being moved.
+    const { data: services, error: servicesError } = await this.supabase
+      .from('appointment_services')
+      .select('duration_minutes')
+      .eq('appointment_id', appointmentId)
+    if (servicesError) throw servicesError
+
+    const totalMinutes = (services ?? []).reduce((sum: number, s: Row) => sum + ((s.duration_minutes as number) ?? 0), 0)
+    if (totalMinutes <= 0) throw new Error('That appointment has no services on it, so it has no length to move.')
+
+    const endsAt = new Date(new Date(input.startsAt).getTime() + totalMinutes * 60_000).toISOString()
+    const { error } = await this.supabase
+      .from('appointments')
+      .update({ starts_at: input.startsAt, bay_id: input.bayId, ends_at: endsAt })
+      .eq('id', appointmentId)
+      .eq('shop_id', this.shopId)
+
+    if (error) {
+      // 23P01 is Postgres's exclusion_violation: the gist constraint from
+      // migration 0021 refused because that bay is busy. Someone else booked
+      // it between this screen loading and Save being pressed — a race the
+      // database closes and the UI only has to explain.
+      if ((error as { code?: string }).code === '23P01') {
+        throw new Error('That bay is already booked at the new time. Pick another slot.')
+      }
+      throw error
+    }
+  }
+
   async markLabelPrinted(catalogItemId: string): Promise<void> {
     const { error } = await this.supabase
       .from('catalog_items')

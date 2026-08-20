@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  addDaysToDateKey,
   availableSlotsForDay,
+  dayOpenWindow,
+  findNextAvailableDay,
+  formatMinuteOfDay,
   isDateBookable,
   minuteToTimeString,
   timeStringToMinute,
@@ -158,5 +162,166 @@ describe('isDateBookable', () => {
     expect(isDateBookable('2026-09-01', '2026-08-29', 7)).toBe(true)
     expect(isDateBookable('2026-09-05', '2026-08-29', 7)).toBe(true)
     expect(isDateBookable('2026-09-06', '2026-08-29', 7)).toBe(false)
+  })
+})
+
+describe('formatMinuteOfDay', () => {
+  it('renders the clock time a shop actually reads out loud', () => {
+    // Both booking screens were rendering minuteToTimeString's 24-hour value
+    // straight to the user, so a customer picked their appointment out of a
+    // list of "14:30"s.
+    expect(formatMinuteOfDay(14 * 60 + 30)).toBe('2:30 PM')
+    expect(formatMinuteOfDay(9 * 60)).toBe('9:00 AM')
+  })
+
+  it('gets the two hours that trip every 12-hour conversion right', () => {
+    expect(formatMinuteOfDay(0)).toBe('12:00 AM')
+    expect(formatMinuteOfDay(12 * 60)).toBe('12:00 PM')
+    expect(formatMinuteOfDay(5)).toBe('12:05 AM')
+    expect(formatMinuteOfDay(12 * 60 + 5)).toBe('12:05 PM')
+  })
+
+  it('stays paired with minuteToTimeString, which remains the form value', () => {
+    // Display and value must not be confused: the value feeds
+    // new Date(`${dateKey}T${value}:00`) and has to stay 24-hour.
+    expect(minuteToTimeString(14 * 60 + 30)).toBe('14:30')
+    expect(formatMinuteOfDay(14 * 60 + 30)).toBe('2:30 PM')
+  })
+})
+
+describe('dayOpenWindow', () => {
+  const hours = [
+    { dayOfWeek: 1, isOpen: true, openTime: '09:00', closeTime: '18:00' },
+    { dayOfWeek: 0, isOpen: false, openTime: null, closeTime: null },
+  ]
+
+  it('uses the weekly pattern when no exception applies', () => {
+    // 2026-08-24 is a Monday.
+    expect(dayOpenWindow('2026-08-24', hours, [])).toEqual({ openMinute: 540, closeMinute: 1080 })
+  })
+
+  it('returns a closed window on a day the shop does not open', () => {
+    // 2026-08-23 is a Sunday.
+    expect(dayOpenWindow('2026-08-23', hours, [])).toEqual({ openMinute: null, closeMinute: null })
+  })
+
+  it('lets a date-specific exception override the weekly pattern', () => {
+    const exceptions = [{ date: '2026-08-24', isClosed: false, openTime: '11:00', closeTime: '15:00' }]
+    expect(dayOpenWindow('2026-08-24', hours, exceptions)).toEqual({ openMinute: 660, closeMinute: 900 })
+  })
+
+  it('treats a closed exception as closed even on a normally-open day', () => {
+    const exceptions = [{ date: '2026-08-24', isClosed: true, openTime: null, closeTime: null }]
+    expect(dayOpenWindow('2026-08-24', hours, exceptions)).toEqual({ openMinute: null, closeMinute: null })
+  })
+})
+
+describe('addDaysToDateKey', () => {
+  it('rolls over month and year boundaries', () => {
+    expect(addDaysToDateKey('2026-08-31', 1)).toBe('2026-09-01')
+    expect(addDaysToDateKey('2026-12-31', 1)).toBe('2027-01-01')
+    expect(addDaysToDateKey('2026-03-01', -1)).toBe('2026-02-28')
+  })
+})
+
+describe('findNextAvailableDay', () => {
+  // Mon-Sat 9-6, closed Sunday — what migration 0025 seeds for a new shop.
+  const businessHours = [0, 1, 2, 3, 4, 5, 6].map((dayOfWeek) => ({
+    dayOfWeek,
+    isOpen: dayOfWeek !== 0,
+    openTime: dayOfWeek !== 0 ? '09:00' : null,
+    closeTime: dayOfWeek !== 0 ? '18:00' : null,
+  }))
+  const base = {
+    maxDays: 14,
+    bayIds: ['bay-1'],
+    durationMinutes: 120,
+    businessHours,
+    exceptions: [],
+    busy: [],
+    nowMinute: 0,
+    slotIntervalMinutes: 30,
+  }
+
+  it('answers the question the app could not: when can you take me', () => {
+    // 2026-08-24 is a Monday, wide open.
+    const found = findNextAvailableDay({ ...base, fromDateKey: '2026-08-24', todayDateKey: '2026-08-24' })
+    expect(found).toEqual({ dateKey: '2026-08-24', startMinute: 540 })
+  })
+
+  it('skips a closed day rather than reporting no availability', () => {
+    // Starting on a Sunday must roll to Monday, not give up.
+    const found = findNextAvailableDay({ ...base, fromDateKey: '2026-08-23', todayDateKey: '2026-08-23' })
+    expect(found?.dateKey).toBe('2026-08-24')
+  })
+
+  it('skips a day closed by exception', () => {
+    const found = findNextAvailableDay({
+      ...base,
+      fromDateKey: '2026-08-24',
+      todayDateKey: '2026-08-24',
+      exceptions: [{ date: '2026-08-24', isClosed: true, openTime: null, closeTime: null }],
+    })
+    expect(found?.dateKey).toBe('2026-08-25')
+  })
+
+  it('rolls past a fully booked day to the next real opening', () => {
+    const fullDay = [{ bayId: 'bay-1', startMinute: 540, endMinute: 1080, dateKey: '2026-08-24' }]
+    const found = findNextAvailableDay({
+      ...base,
+      fromDateKey: '2026-08-24',
+      todayDateKey: '2026-08-24',
+      busy: fullDay,
+    })
+    expect(found).toEqual({ dateKey: '2026-08-25', startMinute: 540 })
+  })
+
+  it('returns the earliest fitting gap, not merely the first slot checked', () => {
+    // Morning is taken; the answer is the first time the job actually fits.
+    const found = findNextAvailableDay({
+      ...base,
+      fromDateKey: '2026-08-24',
+      todayDateKey: '2026-08-24',
+      busy: [{ bayId: 'bay-1', startMinute: 540, endMinute: 780, dateKey: '2026-08-24' }],
+    })
+    expect(found).toEqual({ dateKey: '2026-08-24', startMinute: 780 })
+  })
+
+  it('does not offer a time that has already passed today', () => {
+    const found = findNextAvailableDay({
+      ...base,
+      fromDateKey: '2026-08-24',
+      todayDateKey: '2026-08-24',
+      nowMinute: 15 * 60,
+    })
+    expect(found?.startMinute).toBeGreaterThanOrEqual(15 * 60)
+  })
+
+  it('respects lead time on today only', () => {
+    const found = findNextAvailableDay({
+      ...base,
+      fromDateKey: '2026-08-24',
+      todayDateKey: '2026-08-24',
+      nowMinute: 10 * 60,
+      leadTimeMinutes: 120,
+    })
+    expect(found?.startMinute).toBeGreaterThanOrEqual(12 * 60)
+  })
+
+  it('gives up honestly when nothing fits in the window', () => {
+    const found = findNextAvailableDay({
+      ...base,
+      fromDateKey: '2026-08-24',
+      todayDateKey: '2026-08-24',
+      durationMinutes: 10 * 60, // longer than the shop is open
+    })
+    expect(found).toBeNull()
+  })
+
+  it('returns null for an unanswerable question rather than a wrong answer', () => {
+    expect(findNextAvailableDay({ ...base, fromDateKey: '2026-08-24', todayDateKey: '2026-08-24', bayIds: [] })).toBeNull()
+    expect(
+      findNextAvailableDay({ ...base, fromDateKey: '2026-08-24', todayDateKey: '2026-08-24', durationMinutes: 0 }),
+    ).toBeNull()
   })
 })
