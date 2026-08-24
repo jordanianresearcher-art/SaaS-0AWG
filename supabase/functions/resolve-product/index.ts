@@ -87,7 +87,7 @@ function fail(status: number, message: string): Response {
  * the UI, as "no AI provider key is set" — to an owner who had just set one.
  * Reporting the version makes that mismatch visible instead of a guess.
  */
-const FUNCTION_VERSION = 2
+const FUNCTION_VERSION = 3
 
 const ANTHROPIC_VERSION = '2023-06-01'
 
@@ -553,7 +553,7 @@ interface RawAiCandidate {
 interface ProviderDiag {
   error: string | null
   /** Which provider was reached for this request. */
-  provider: 'openai' | 'anthropic' | null
+  provider: 'openai' | 'anthropic' | 'compatible' | null
   /** The model id actually used, after any override or discovery. */
   model: string | null
   /** Which rung of the ladder produced the result. Null when none did. */
@@ -1050,10 +1050,101 @@ async function climbLadder(
   return []
 }
 
+
+// ---------------------------------------------------------------------------
+// Any OpenAI-compatible endpoint.
+//
+// Gemini, Groq, OpenRouter, Together and most others all expose the same
+// /chat/completions shape, so one provider covers all of them and the choice
+// becomes three secrets rather than a code change:
+//
+//   AI_BASE_URL   https://generativelanguage.googleapis.com/v1beta/openai
+//   AI_API_KEY    <key for that provider>
+//   AI_MODEL      gemini-2.5-flash          (or whatever that provider calls it)
+//
+// This is a separate path from resolveViaOpenAi rather than a parameter on it,
+// because that one speaks OpenAI's *Responses* API (/responses, `input`,
+// `text.format`) which the compatibility layers do not implement. They
+// implement Chat Completions. Trying to serve both from one function would
+// mean branching on every field.
+//
+// It deliberately sends no web-search tool. Tool support is where compatible
+// endpoints diverge most, and the whole reason to point at one is cost — the
+// search call, not the tokens, is what makes a lookup expensive. A model
+// answering from its own knowledge gets Kicker, JL and Rockford right and is
+// close to free; the richer OpenAI/Anthropic paths remain available for
+// obscure gear.
+// ---------------------------------------------------------------------------
+
+/** Response format for one rung, in Chat Completions terms. */
+function compatResponseFormat(rung: Rung): Record<string, unknown> | undefined {
+  if (rung === 1) {
+    return {
+      type: 'json_schema',
+      json_schema: { name: 'product_candidates', schema: AI_CANDIDATE_SCHEMA, strict: true },
+    }
+  }
+  // Widely supported where json_schema is not.
+  if (rung === 2) return { type: 'json_object' }
+  // Rung 3 constrains nothing and leans on the prompt plus a lenient parse.
+  return undefined
+}
+
+async function resolveViaCompatible(
+  baseUrl: string,
+  apiKey: string,
+  prompt: string,
+  upc: string | null,
+  diag: ProviderDiag,
+  rung: Rung,
+  model: string,
+): Promise<Candidate[]> {
+  const responseFormat = compatResponseFormat(rung)
+  const body: Record<string, unknown> = {
+    model,
+    messages: [{ role: 'user', content: rung === 3 ? prompt + JSON_ONLY_INSTRUCTION : prompt }],
+  }
+  if (responseFormat) body.response_format = responseFormat
+
+  const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+  if (!res.ok) {
+    noteProviderError(diag, `AI endpoint (${RUNG_LABEL[rung]})`, res.status, await res.text().catch(() => ''))
+    return []
+  }
+
+  const data = await res.json()
+  const text = data?.choices?.[0]?.message?.content
+  return parseAiCandidates(typeof text === 'string' ? text : null, upc, 'AI endpoint')
+}
+
 async function resolveViaAi(prompt: string, upc: string | null, diag: ProviderDiag): Promise<Candidate[]> {
+  const compatBase = Deno.env.get('AI_BASE_URL')?.trim()
+  const compatKey = Deno.env.get('AI_API_KEY')?.trim()
   const openAiKey = Deno.env.get('OPENAI_API_KEY')
   const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY')
   try {
+    // Explicitly configured endpoint wins: setting it is a deliberate choice
+    // about cost, and it should not be silently overridden by a leftover
+    // OPENAI_API_KEY from an earlier setup.
+    if (compatBase && compatKey) {
+      const model = Deno.env.get('AI_MODEL')?.trim() || 'gemini-2.5-flash'
+      for (const rung of RUNGS) {
+        const candidates = await resolveViaCompatible(compatBase, compatKey, prompt, upc, diag, rung, model)
+        if (candidates.length > 0) {
+          diag.error = null
+          diag.provider = 'compatible'
+          diag.model = model
+          diag.rung = rung
+          return candidates
+        }
+      }
+      return []
+    }
     if (openAiKey) {
       return await climbLadder('openai', openAiKey, diag, (rung, model) =>
         resolveViaOpenAi(openAiKey, prompt, upc, diag, rung, model),
@@ -1097,7 +1188,11 @@ Deno.serve(async (req: Request) => {
   // so nothing ever looked". Those are identical from the client's side
   // otherwise — both return zero candidates — and the shop is left thinking
   // lookup is broken when it was simply never switched on.
-  const aiConfigured = Boolean(Deno.env.get('OPENAI_API_KEY') || Deno.env.get('ANTHROPIC_API_KEY'))
+  const aiConfigured = Boolean(
+    (Deno.env.get('AI_BASE_URL') && Deno.env.get('AI_API_KEY')) ||
+      Deno.env.get('OPENAI_API_KEY') ||
+      Deno.env.get('ANTHROPIC_API_KEY'),
+  )
   // Collects the first provider failure of this request, so a key that is set
   // but not working says so instead of looking like an empty result.
   const diag: ProviderDiag = { error: null, provider: null, model: null, rung: null }

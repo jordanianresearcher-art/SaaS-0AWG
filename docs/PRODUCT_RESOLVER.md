@@ -416,3 +416,49 @@ Setting a secret does **not** deploy code:
 `supabase secrets set OPENAI_API_KEY=…` changes what the function reads at its
 next invocation, but a function whose *code* is stale stays stale until it is
 deployed. Migrations are a third, separate step run in the SQL editor.
+
+## Pointing the resolver at a cheaper provider
+
+The web-search call, not the tokens, is what makes a lookup expensive:
+roughly $0.01–0.025 per grounded search against well under a tenth of a cent
+of tokens for a small model. So the cheapest meaningful change is not a
+cheaper model — it is not making a search call.
+
+Any OpenAI-compatible endpoint can serve the resolver. It takes three secrets
+and no code change:
+
+```bash
+supabase secrets set AI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
+supabase secrets set AI_API_KEY=<your key>
+supabase secrets set AI_MODEL=gemini-2.5-flash
+supabase functions deploy resolve-product
+```
+
+Check the current model id in your provider's console before setting
+`AI_MODEL` — names move, and a wrong one 404s. The self-test in Settings
+reports which model actually answered.
+
+Known-good base URLs:
+
+| Provider | `AI_BASE_URL` |
+|---|---|
+| Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` |
+| Groq | `https://api.groq.com/openai/v1` |
+| OpenRouter | `https://openrouter.ai/api/v1` |
+| OpenAI (cheap model) | `https://api.openai.com/v1` |
+
+When `AI_BASE_URL` and `AI_API_KEY` are both set they take precedence over
+`OPENAI_API_KEY` and `ANTHROPIC_API_KEY` — configuring an endpoint is a
+deliberate decision about cost, and a leftover key from an earlier setup
+should not quietly override it.
+
+**The trade-off, stated plainly:** this path sends no web-search tool. Tool
+support is where compatible endpoints diverge most, and avoiding the search
+call is the point. A model answering from its own knowledge identifies Kicker,
+JL Audio and Rockford Fosgate reliably and costs almost nothing; it is weaker
+on obscure or very new gear, where the OpenAI Responses or Anthropic paths —
+still available by unsetting `AI_BASE_URL` — do better.
+
+Two things already make repeat lookups free regardless of provider: the local
+catalog is checked first, and `product_resolution_cache` holds barcode results
+for 30 days and text results for 7. Cost is per *unique* product, not per scan.
