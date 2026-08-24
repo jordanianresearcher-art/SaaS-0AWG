@@ -479,12 +479,35 @@ When `AI_BASE_URL` and `AI_API_KEY` are both set they take precedence over
 deliberate decision about cost, and a leftover key from an earlier setup
 should not quietly override it.
 
-**The trade-off, stated plainly:** this path sends no web-search tool. Tool
-support is where compatible endpoints diverge most, and avoiding the search
-call is the point. A model answering from its own knowledge identifies Kicker,
-JL Audio and Rockford Fosgate reliably and costs almost nothing; it is weaker
-on obscure or very new gear, where the OpenAI Responses or Anthropic paths —
-still available by unsetting `AI_BASE_URL` — do better.
+### Web grounding on the compatible path
+
+Gemini exposes Google Search grounding through the OpenAI-compatible layer as a
+`google` block on the request body (what the OpenAI SDK calls `extra_body`),
+and only on **Gemini 3 and newer**. Rung 1 sends it, and only to Google's own
+host — other compatible endpoints reject unknown top-level fields, and there is
+no reason to spend a round trip proving that.
+
+This matters more than it sounds. An ungrounded model identifies a Kicker
+CompR from memory perfectly well, and cannot identify a JP284 amplifier at all
+— and obscure part numbers are most of what a shop actually scans. The first
+version of this path sent no search tool, purely for cost, and the result was a
+lookup that returned "no matches" for exactly the products it existed to
+identify.
+
+So rung 1 is now the *grounded* rung, and it asks for `json_object` rather than
+a strict `json_schema` — inverting the usual strictest-first order on purpose.
+The schema-plus-grounding combination is the likelier of the two to be
+rejected, and losing grounding costs far more than losing schema strictness:
+unstructured JSON is recovered by `parseLooseJson`, while a model without web
+access simply cannot answer.
+
+The self-test reports which rung answered and whether it reached the web, so a
+memory-only answer is never mistaken for a grounded one.
+
+**Cost note:** grounded queries are the expensive part (~$0.01-0.025 each
+against well under a tenth of a cent of tokens), which is why the local catalog,
+the shared catalog and the resolution cache all sit in front of it. Cost is per
+*unique* product, not per scan.
 
 Two things already make repeat lookups free regardless of provider: the local
 catalog is checked first, and `product_resolution_cache` holds barcode results

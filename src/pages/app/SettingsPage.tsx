@@ -313,10 +313,10 @@ function ProductLookupHealthSection() {
               {/* Only worth surfacing when it is NOT the best path — it means
                   the rich call failed and something is still worth fixing,
                   even though results are coming back. */}
-              {result.rung != null && result.rung > 1 ? (
+              {result.searchedWeb === false ? (
                 <p className="pt-1 text-amber-900">
-                  Working, but only on a fallback ({result.rungLabel}). Results will be less accurate than
-                  normal — usually the model name or web search is unavailable on this key.
+                  Answered from the model&apos;s own knowledge — it did not search the web ({result.rungLabel}).
+                  Well-known products will be right; obscure part numbers often won&apos;t be found at all.
                 </p>
               ) : null}
             </dl>

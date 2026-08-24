@@ -478,6 +478,14 @@ const RUNG_LABEL: Record<Rung, string> = {
   3: 'plain JSON reply',
 }
 
+/**
+ * Rung 1 is the only one that can reach the web. When a lookup succeeds on a
+ * lower rung, the answer came from the model's own memory — fine for a Kicker
+ * CompR, unreliable for an obscure part number — and that is worth saying out
+ * loud rather than presenting both as equally trustworthy.
+ */
+const RUNG_SEARCHED_WEB: Record<Rung, boolean> = { 1: true, 2: false, 3: false }
+
 /** Appended on rung 3, where nothing but the prompt constrains the shape. */
 const JSON_ONLY_INSTRUCTION =
   '\n\nReply with ONLY a JSON object of the form {"candidates":[...]} and no other text. ' +
@@ -1078,18 +1086,45 @@ async function climbLadder(
 // obscure gear.
 // ---------------------------------------------------------------------------
 
-/** Response format for one rung, in Chat Completions terms. */
+/**
+ * Response format for one rung, in Chat Completions terms.
+ *
+ * Rung 1 asks for `json_object` rather than a strict `json_schema`, which
+ * inverts the usual "strictest first" order. That is deliberate: rung 1 is the
+ * grounded rung, and the schema+grounding combination is the most likely of
+ * the two to be rejected. Losing grounding costs far more than losing schema
+ * strictness — a model without web access cannot identify an obscure part
+ * number at all, whereas unstructured JSON is recovered by parseLooseJson.
+ */
 function compatResponseFormat(rung: Rung): Record<string, unknown> | undefined {
-  if (rung === 1) {
+  if (rung === 1) return { type: 'json_object' }
+  if (rung === 2) {
     return {
       type: 'json_schema',
       json_schema: { name: 'product_candidates', schema: AI_CANDIDATE_SCHEMA, strict: true },
     }
   }
-  // Widely supported where json_schema is not.
-  if (rung === 2) return { type: 'json_object' }
   // Rung 3 constrains nothing and leans on the prompt plus a lenient parse.
   return undefined
+}
+
+/**
+ * Google Search grounding, for the one endpoint that offers it here.
+ *
+ * Gemini exposes grounding through the OpenAI-compatible layer as a `google`
+ * block on the request body (what the OpenAI SDK calls `extra_body`), and only
+ * on Gemini 3 and newer. It is sent on rung 1 only, and only to Google's own
+ * host — other compatible endpoints reject unknown top-level fields, and there
+ * is no reason to spend a round trip proving that.
+ *
+ * This is the difference between "identifies a Kicker CompR" and "identifies
+ * the JP284 amplifier sitting on the counter". Ungrounded models are fine at
+ * the former and useless at the latter, which is most of what a shop scans.
+ */
+function compatGrounding(baseUrl: string, rung: Rung): Record<string, unknown> | undefined {
+  if (rung !== 1) return undefined
+  if (!/generativelanguage\.googleapis\.com/i.test(baseUrl)) return undefined
+  return { tools: [{ google_search: {} }] }
 }
 
 async function resolveViaCompatible(
@@ -1102,11 +1137,13 @@ async function resolveViaCompatible(
   model: string,
 ): Promise<Candidate[]> {
   const responseFormat = compatResponseFormat(rung)
+  const grounding = compatGrounding(baseUrl, rung)
   const body: Record<string, unknown> = {
     model,
     messages: [{ role: 'user', content: rung === 3 ? prompt + JSON_ONLY_INSTRUCTION : prompt }],
   }
   if (responseFormat) body.response_format = responseFormat
+  if (grounding) body.google = grounding
 
   const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
     method: 'POST',
@@ -1333,6 +1370,7 @@ Deno.serve(async (req: Request) => {
       model: diag.model,
       rung: diag.rung,
       rungLabel: diag.rung ? RUNG_LABEL[diag.rung] : null,
+      searchedWeb: diag.rung ? RUNG_SEARCHED_WEB[diag.rung] : null,
       candidateCount: candidates.length,
       sample: candidates[0]?.name ?? null,
       elapsedMs: Date.now() - started,

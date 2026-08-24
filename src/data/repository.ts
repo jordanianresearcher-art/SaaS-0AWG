@@ -469,6 +469,14 @@ export interface ProductLookupSelfTest {
   /** Which fallback level produced the answer — 1 is the richest. */
   rung: number | null
   rungLabel: string | null
+  /**
+   * Whether the answer came from the web or from the model's own memory.
+   *
+   * A memory-only answer is fine for a Kicker CompR and unreliable for an
+   * obscure part number, which is most of what a shop actually scans — so the
+   * two must not be presented as equally trustworthy.
+   */
+  searchedWeb: boolean | null
   candidateCount: number
   /** The name of the first product found, as proof it really worked. */
   sample: string | null
