@@ -1169,6 +1169,58 @@ async function resolveViaCompatible(
   return parseAiCandidates(typeof text === 'string' ? text : null, upc, 'AI endpoint')
 }
 
+// ---------------------------------------------------------------------------
+// Model ranking -- mirrors src/lib/modelPreference.ts, where it is tested.
+// Deno cannot import from src/; same duplication rule as the email templates,
+// productNaming, barcodeIdentity and aiJson.
+// ---------------------------------------------------------------------------
+
+const NOT_CHAT = /embed|embedding|tts|whisper|audio|imagen|image-generation|aqa|rerank|moderation/i
+const TIER_ORDER = [/flash-lite/i, /flash/i, /mini/i, /lite/i, /haiku/i, /small/i]
+
+function tierRank(id: string): number {
+  for (let i = 0; i < TIER_ORDER.length; i++) {
+    if (TIER_ORDER[i].test(id)) return i
+  }
+  return TIER_ORDER.length
+}
+
+function isChatModel(id: string): boolean {
+  return Boolean(id) && !NOT_CHAT.test(id)
+}
+
+function modelVersion(id: string): number {
+  const match = id.match(/(\d+)(?:\.(\d+))?/)
+  if (!match) return -1
+  const major = Number(match[1])
+  const minor = match[2] ? Number(match[2]) : 0
+  if (!Number.isFinite(major)) return -1
+  return major + minor / 100
+}
+
+function pickBestModel(ids: string[], exclude: string[] = []): string | null {
+  const excluded = new Set(exclude.filter(Boolean).map((id) => id.toLowerCase()))
+  const candidates = ids
+    .map((id) => id.trim())
+    .filter(Boolean)
+    .map((id) => id.replace(/^models\//, ''))
+    .filter((id) => isChatModel(id))
+    .filter((id) => !excluded.has(id.toLowerCase()))
+    .map((id) => ({ id, unstable: /preview|exp|experimental|latest/i.test(id) }))
+
+  if (candidates.length === 0) return null
+
+  candidates.sort((a, b) => {
+    if (a.unstable !== b.unstable) return a.unstable ? 1 : -1
+    const versionDelta = modelVersion(b.id) - modelVersion(a.id)
+    if (versionDelta !== 0) return versionDelta
+    const tierDelta = tierRank(a.id) - tierRank(b.id)
+    if (tierDelta !== 0) return tierDelta
+    return a.id.localeCompare(b.id)
+  })
+  return candidates[0].id
+}
+
 /**
  * Ask a compatible endpoint what models it actually has.
  *
@@ -1181,8 +1233,14 @@ async function resolveViaCompatible(
  * quality compromise: the reason to point at a compatible endpoint at all is
  * cost, and identifying a Kicker CompR does not need a frontier model.
  */
-async function discoverCompatibleModel(baseUrl: string, apiKey: string): Promise<string | null> {
-  const cacheKey = `compat:${baseUrl}`
+async function discoverCompatibleModel(
+  baseUrl: string,
+  apiKey: string,
+  exclude: string[] = [],
+): Promise<string | null> {
+  // The exclusion list is part of the cache key: "best model" and "best model
+  // that isn't the one that just failed" are different questions.
+  const cacheKey = `compat:${baseUrl}:${exclude.join(',')}`
   if (discoveredModels.has(cacheKey)) return discoveredModels.get(cacheKey) ?? null
 
   let picked: string | null = null
@@ -1193,14 +1251,9 @@ async function discoverCompatibleModel(baseUrl: string, apiKey: string): Promise
     if (res.ok) {
       const body = await res.json()
       const ids: string[] = (Array.isArray(body?.data) ? body.data : [])
-        .map((m: { id?: unknown }) => (typeof m?.id === 'string' ? m.id.replace(/^models\//, '') : ''))
+        .map((m: { id?: unknown }) => (typeof m?.id === 'string' ? m.id : ''))
         .filter(Boolean)
-
-      picked =
-        ids.find((id) => /flash/i.test(id) && !/thinking|image|audio|tts|embed/i.test(id)) ??
-        ids.find((id) => /mini|lite/i.test(id) && !/embed/i.test(id)) ??
-        ids.find((id) => !/embed|tts|whisper|image|vision/i.test(id)) ??
-        null
+      picked = pickBestModel(ids, exclude)
     } else {
       console.error('resolve-product: compatible model discovery failed', res.status)
     }
@@ -1229,7 +1282,7 @@ async function resolveViaAi(prompt: string, upc: string | null, diag: ProviderDi
       // AI_MODEL is unset that is the FIRST thing tried, not the fallback.
       const configured =
         Deno.env.get('AI_MODEL')?.trim() ||
-        (await discoverCompatibleModel(compatBase, compatKey)) ||
+        (await discoverCompatibleModel(compatBase, compatKey, [])) ||
         // Only if discovery itself failed. Current per Google's OpenAI-
         // compatibility docs; still a guess, hence last.
         'gemini-3.7-flash'
@@ -1241,15 +1294,18 @@ async function resolveViaAi(prompt: string, upc: string | null, diag: ProviderDi
         let resolvedModel = model
         if (resolvedModel === null) {
           if (!/404|model/i.test(diag.error ?? '')) break
-          const discovered = await discoverCompatibleModel(compatBase, compatKey)
+          // Exclude the model that just failed. Without this, discovery
+          // cheerfully returns the same id it was called to replace and the
+          // retry is wasted — which is exactly what happened when a stale
+          // AI_MODEL was pinned and the list still advertised it.
+          const discovered = await discoverCompatibleModel(compatBase, compatKey, [configured])
           if (!discovered) {
             // Discovery is the recovery path, so its failure is the thing
             // worth reporting — otherwise the message blames a model id that
             // was never the whole story.
-            diag.error = `${diag.error ?? 'The AI endpoint failed'} — and it did not return a usable model list`
+            diag.error = `${diag.error ?? 'The AI endpoint failed'} — and no other usable model was offered`
             break
           }
-          if (discovered === configured) break
           resolvedModel = discovered
           diag.error = null
         }
