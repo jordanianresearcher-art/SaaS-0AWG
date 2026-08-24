@@ -136,15 +136,30 @@ provider.
    SECURITY DEFINER RPCs (`get_public_quote`, `record_public_quote_view`,
    `submit_public_quote_response`, `opt_out_public_quote_email`).
 3. Optional local dev seed: `supabase db reset` picks up `supabase/seed.sql`.
-4. Enable the **Email (magic link)** auth provider. Add your app URL to the
-   auth redirect allow-list.
+4. Enable the **Email (magic link)** auth provider, then set
+   **Authentication → URL Configuration**:
+
+   | Setting | Value |
+   |---|---|
+   | **Site URL** | `https://<your live domain>` |
+   | **Redirect URLs** | `https://<your live domain>/**` |
+
+   **Site URL is the one that breaks mobile sign-in.** The magic-link template
+   links to `{{ .SiteURL }}`, so this setting — not anything the app sends —
+   decides where the emailed link points. Left at `http://localhost:5173`, every
+   link mails a localhost address: it works on a desktop that happens to be
+   running `npm run dev`, and on a phone the browser reports a typo in the
+   address and sign-in is impossible. Test from a phone, not just a laptop.
 5. Put the project URL + anon key in `.env`.
-6. **Required — edit the "Magic Link" email template** (Authentication →
-   Email Templates → Magic Link, in the Supabase dashboard). Replace the
-   default body's link (`{{ .ConfirmationURL }}`) with:
+6. **Required — replace the "Magic Link" email template** with the branded
+   HTML in **[docs/EMAIL_TEMPLATES.md](docs/EMAIL_TEMPLATES.md)**
+   (Authentication → Email Templates → Magic Link).
+
+   The essential part is that it links with a bare `token_hash` rather than
+   `{{ .ConfirmationURL }}`:
 
    ```
-   <a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=magiclink">Sign in</a>
+   {{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=magiclink
    ```
 
    Both `/login` and `/signup` call `signInWithOtp`, so this one template
