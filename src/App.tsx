@@ -17,7 +17,7 @@ import ScanWorkspacePage from './pages/app/ScanWorkspacePage'
 import CalendarPage from './pages/app/CalendarPage'
 import InventoryPage from './pages/app/InventoryPage'
 import InventoryDetailPage from './pages/app/InventoryDetailPage'
-import NewInventoryItemPage from './pages/app/NewInventoryItemPage'
+import RapidIntakePage from './pages/app/RapidIntakePage'
 import InventoryCheckPage from './pages/app/InventoryCheckPage'
 import LabelPrintPage from './pages/app/LabelPrintPage'
 import QuotesPage from './pages/app/QuotesPage'
@@ -92,7 +92,7 @@ export default function App() {
         <Route index element={<DashboardOrInventory />} />
         <Route path="scan" element={<ScanWorkspacePage />} />
         <Route path="inventory" element={<InventoryPage />} />
-        <Route path="inventory/new" element={<NewInventoryItemPage />} />
+        <Route path="inventory/new" element={<RapidIntakePage />} />
         <Route path="inventory/check" element={<InventoryCheckPage />} />
         <Route path="inventory/labels" element={<LabelPrintPage />} />
         <Route path="inventory/:itemId" element={<InventoryDetailPage />} />
