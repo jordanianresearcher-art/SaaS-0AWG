@@ -105,6 +105,26 @@ body {
     break-after: page;
     border: none !important;
   }
+  /* Six 1-inch rows fill a 4x6 sheet exactly, which is why the @page margin
+     is 0 (see printLabels): a page margin would push the sixth label onto a
+     second sheet. border-box keeps the internal padding inside the inch. */
+  .label-print-area .mini-label {
+    box-sizing: border-box;
+    width: 4in;
+    height: 1in;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  /* A cut line between copies. Printed hairline-thin so it guides scissors
+     without being mistaken for part of the barcode's quiet zone. */
+  .label-print-area .mini-label + .mini-label {
+    border-top: 1px dashed #d4d4d8;
+  }
+  .label-print-area .mini-label svg {
+    display: block;
+    max-width: 100%;
+    height: auto;
+  }
   .label-print-area .label-sheet:last-child {
     page-break-after: auto;
     break-after: auto;

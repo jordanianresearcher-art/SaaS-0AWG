@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { code128ModuleCount, code128SvgMarkup, encodeCode128B } from './barcode'
+import { code128ModuleCount, code128SvgMarkup, encodeCode128B, fitModuleWidth } from './barcode'
 
 describe('encodeCode128B', () => {
   it('wraps the data in a start code and a stop code', () => {
@@ -105,5 +105,57 @@ describe('code128ModuleCount', () => {
 
   it('returns null for unencodable input', () => {
     expect(code128ModuleCount('café')).toBeNull()
+  })
+})
+
+describe('fitModuleWidth', () => {
+  it('gives a code the widest bars that still fit', () => {
+    // Wide bars read more reliably on cheap scanners and thermal printers, so
+    // the rule is "largest candidate that fits", not a fixed width. Asserted
+    // as the invariant rather than a hand-computed number: the module count
+    // depends on Code 128 internals (start, checksum and stop symbols) that
+    // are easy to get wrong on paper and pointless to duplicate here.
+    for (const value of ['A', 'ABC123', '0GA-KIC-CMP12', '7908706600230']) {
+      const chosen = fitModuleWidth(value, 340)!
+      const modules = code128ModuleCount(value)!
+      expect(modules * chosen).toBeLessThanOrEqual(340)
+      const wider = [3, 2.5, 2, 1.5, 1].filter((w) => w > chosen)
+      for (const w of wider) expect(modules * w).toBeGreaterThan(340)
+    }
+  })
+
+  it('narrows the bars as a code grows, and never widens them', () => {
+    // A barcode that runs off the edge of the label does not scan at all, so
+    // shrinking is always the right trade.
+    const short = fitModuleWidth('ABC', 340)!
+    const medium = fitModuleWidth('0GA-KIC-CMP12', 340)!
+    const long = fitModuleWidth('01234567890123456789012345', 340)!
+    expect(medium).toBeLessThanOrEqual(short)
+    expect(long).toBeLessThanOrEqual(medium)
+  })
+
+  it('returns the narrowest width when even that overflows, rather than nothing', () => {
+    // 26 characters needs 341 modules — one past a 340px label at the
+    // narrowest bars. A marginally-too-wide barcode still scans on most
+    // hardware; no barcode never does. Documented in fitModuleWidth.
+    const tooLong = '01234567890123456789012345'
+    expect(code128ModuleCount(tooLong)!).toBeGreaterThan(340)
+    expect(fitModuleWidth(tooLong, 340)).toBe(1)
+  })
+
+  it('only ever returns a width whose bars stay whole multiples', () => {
+    // Fractional module widths let a renderer round neighbouring bars
+    // differently, which is the distortion scanners reject.
+    for (const value of ['A', 'ABC123', '0GA-KIC-CMP12', '7908706600230']) {
+      expect([3, 2.5, 2, 1.5, 1]).toContain(fitModuleWidth(value, 340))
+    }
+  })
+
+  it('falls back to the narrowest width rather than refusing to print', () => {
+    expect(fitModuleWidth('ABC123', 5)).toBe(1)
+  })
+
+  it('returns null only for something Code 128-B cannot encode', () => {
+    expect(fitModuleWidth('café', 340)).toBeNull()
   })
 })

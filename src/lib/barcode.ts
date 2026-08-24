@@ -125,3 +125,31 @@ export function code128ModuleCount(value: string, quietZoneModules = 10): number
   }, 0)
   return dataModules + quietZoneModules * 2
 }
+
+/**
+ * The largest module width at which `value` still fits `maxWidthPx`.
+ *
+ * A label has a fixed width and a SKU does not — "0GA-KIC-CMP12" and a
+ * 13-digit EAN need very different module widths to fill the same 4 inches.
+ * Picking one fixed width either wastes half the label on short codes or runs
+ * a long one off the edge, and a barcode that runs off the edge does not scan
+ * at all.
+ *
+ * Candidates are discrete rather than a computed fraction on purpose: every
+ * bar in a Code 128 symbol must be an exact multiple of the module width, and
+ * fractional widths let a renderer round adjacent bars inconsistently, which
+ * is exactly the kind of distortion a scanner rejects.
+ *
+ * Returns null for a value Code 128-B cannot encode.
+ */
+export function fitModuleWidth(value: string, maxWidthPx: number, quietZoneModules = 10): number | null {
+  const modules = code128ModuleCount(value, quietZoneModules)
+  if (modules === null || modules <= 0) return null
+
+  for (const candidate of [3, 2.5, 2, 1.5, 1]) {
+    if (modules * candidate <= maxWidthPx) return candidate
+  }
+  // Nothing fits cleanly — hand back the smallest rather than null, since a
+  // slightly-too-wide barcode still scans while no barcode never does.
+  return 1
+}

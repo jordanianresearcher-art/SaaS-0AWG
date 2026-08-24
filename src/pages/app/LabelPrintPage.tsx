@@ -13,13 +13,19 @@
 // those printers directly, while "Save as PDF" in the same dialog covers a shop
 // that just wants a file. A jsPDF dependency would add weight and take away the
 // direct-to-printer path.
+//
+// Each 4x6 sheet carries SIX copies of the same label, stacked — 4" x 1" each.
+// One label per 4x6 sheet wasted most of the media, and a shop wants a strip it
+// can cut: one for the box, one for the shelf, spares for the next unit in.
+// The barcode is sized to fill the width (see fitModuleWidth) because a code
+// that has to be scanned across a counter is the whole point of the label.
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Printer, Tag } from 'lucide-react'
 import { useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
 import { Button, Card, EmptyState, LoadingBlock, PageHeader } from '../../components/ui'
-import { code128SvgMarkup } from '../../lib/barcode'
+import { code128SvgMarkup, fitModuleWidth } from '../../lib/barcode'
 import { formatItemDisplayName, formatItemShortName } from '../../lib/productNaming'
 import { formatCurrency } from '../../lib/format'
 import { errorMessage } from '../../lib/errors'
@@ -30,31 +36,48 @@ function labelCode(item: CatalogItem): string | null {
   return item.upc?.trim() || item.sku?.trim() || null
 }
 
-function LabelSheet({ item }: { item: CatalogItem }) {
+/** Copies per 4x6 sheet. Six 1-inch rows fill the media exactly. */
+const COPIES_PER_SHEET = 6
+
+/**
+ * Usable width for the barcode, in CSS pixels at 96/inch: a 4" label, less
+ * ~0.15" of padding each side. Anything wider runs off the edge and stops
+ * scanning altogether.
+ */
+const LABEL_BARCODE_WIDTH_PX = 340
+
+/** One 4" x 1" label. Six of these make a sheet. */
+function MiniLabel({ item }: { item: CatalogItem }) {
   const code = labelCode(item)
-  // moduleWidth 2 keeps the printed bars wide enough for cheap USB and
-  // phone-camera scanners; below that, thermal printers start dropping reads.
-  const svg = code ? code128SvgMarkup(code, { moduleWidth: 2, height: 90 }) : null
+  const moduleWidth = code ? fitModuleWidth(code, LABEL_BARCODE_WIDTH_PX) : null
+  const svg = code && moduleWidth ? code128SvgMarkup(code, { moduleWidth, height: 44 }) : null
 
   return (
-    <div className="label-sheet flex flex-col items-center justify-between border border-zinc-300 bg-white p-4 text-center">
-      <div className="w-full">
-        <p className="text-[15px] leading-tight font-black text-black">{formatItemShortName(item)}</p>
-        <p className="mt-1 line-clamp-3 text-[11px] leading-tight text-black">{formatItemDisplayName(item)}</p>
-      </div>
+    <div className="mini-label flex flex-col items-center justify-center overflow-hidden bg-white px-2 py-1 text-center">
+      <p className="w-full truncate text-[11px] leading-none font-black text-black">
+        {formatItemShortName(item)}
+        {item.defaultPriceCents !== null ? (
+          <span className="font-normal"> · {formatCurrency(item.defaultPriceCents)}</span>
+        ) : null}
+      </p>
 
       {svg ? (
-        <div className="my-2 flex w-full justify-center" dangerouslySetInnerHTML={{ __html: svg }} />
+        <div className="mt-0.5 flex w-full justify-center" dangerouslySetInnerHTML={{ __html: svg }} />
       ) : (
-        <p className="my-2 text-[11px] text-black">No barcode — generate a code first</p>
+        <p className="my-2 text-[10px] text-black">No barcode — generate a code first</p>
       )}
 
-      <div className="w-full">
-        {code ? <p className="font-mono text-[12px] tracking-wide text-black">{code}</p> : null}
-        {item.defaultPriceCents !== null ? (
-          <p className="mt-1 text-[20px] font-black text-black">{formatCurrency(item.defaultPriceCents)}</p>
-        ) : null}
-      </div>
+      {code ? <p className="mt-0.5 font-mono text-[10px] leading-none tracking-wide text-black">{code}</p> : null}
+    </div>
+  )
+}
+
+function LabelSheet({ item }: { item: CatalogItem }) {
+  return (
+    <div className="label-sheet bg-white">
+      {Array.from({ length: COPIES_PER_SHEET }, (_, i) => (
+        <MiniLabel key={i} item={item} />
+      ))}
     </div>
   )
 }
@@ -130,7 +153,10 @@ export default function LabelPrintPage() {
     // would force invoices and quote documents onto 4x6 paper too. Inject it
     // only around this print call, then take it back out.
     const pageRule = document.createElement('style')
-    pageRule.textContent = '@page { size: 4in 6in; margin: 0.15in; }'
+    // margin 0, not 0.15in: the six 1-inch rows add up to exactly 6in, so any
+    // page margin pushes the last one onto a second sheet. Padding lives
+    // inside each label instead, where it can't break the arithmetic.
+    pageRule.textContent = '@page { size: 4in 6in; margin: 0; }'
     document.head.appendChild(pageRule)
     try {
       window.print()

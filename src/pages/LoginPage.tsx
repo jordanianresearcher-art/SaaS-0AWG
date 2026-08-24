@@ -80,17 +80,6 @@ export default function LoginPage() {
           <div role="status" className="mt-5 rounded-xl border border-green-300 bg-green-50 p-4 text-base text-green-900">
             <p className="font-semibold">Check your email.</p>
             <p className="mt-1">We sent you a sign-in link. Open it on this device to get into your shop.</p>
-            {/* The emailed link's address comes from Supabase's Site URL
-                setting, which nothing here can read or influence. When it is
-                wrong every link points somewhere unreachable — classically
-                localhost, which works on a machine running the dev server and
-                fails on every phone. Printing the address the link SHOULD have
-                turns that from an invisible config error into a two-second
-                comparison. */}
-            <p className="mt-3 border-t border-green-200 pt-3 text-sm">
-              The link should open <span className="font-semibold break-all">{env.appUrl}</span>. If it points
-              anywhere else, the Site URL in Supabase (Authentication → URL Configuration) needs fixing.
-            </p>
           </div>
         ) : (
           <form onSubmit={handleSubmit(onSubmit)} className="mt-5 space-y-4" noValidate>
