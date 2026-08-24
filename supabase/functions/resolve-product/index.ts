@@ -114,7 +114,9 @@ function configuredModel(provider: 'openai' | 'anthropic'): string {
  * leak. Null means "asked and got nothing usable" — cached too, so a broken
  * key doesn't trigger a discovery call on every lookup.
  */
-const discoveredModels = new Map<'openai' | 'anthropic', string | null>()
+// Keyed by provider name, or by `compat:<baseUrl>` for a configured
+// endpoint — one cache serves all three.
+const discoveredModels = new Map<string, string | null>()
 
 async function discoverModel(provider: 'openai' | 'anthropic', apiKey: string): Promise<string | null> {
   if (discoveredModels.has(provider)) return discoveredModels.get(provider) ?? null
@@ -1113,13 +1115,64 @@ async function resolveViaCompatible(
   })
 
   if (!res.ok) {
-    noteProviderError(diag, `AI endpoint (${RUNG_LABEL[rung]})`, res.status, await res.text().catch(() => ''))
+    // The model id is the single most likely thing to be wrong on a
+    // compatible endpoint, and a bare "returned 404" sends someone hunting
+    // through docs. Naming it turns the message into the fix.
+    noteProviderError(
+      diag,
+      `AI endpoint (${RUNG_LABEL[rung]}, model ${model})`,
+      res.status,
+      await res.text().catch(() => ''),
+    )
     return []
   }
 
   const data = await res.json()
   const text = data?.choices?.[0]?.message?.content
   return parseAiCandidates(typeof text === 'string' ? text : null, upc, 'AI endpoint')
+}
+
+/**
+ * Ask a compatible endpoint what models it actually has.
+ *
+ * Model ids move constantly and differ between providers, so a configured name
+ * is a guess that goes stale. Every OpenAI-compatible endpoint implements
+ * GET /models, which turns the guess into a lookup. Gemini prefixes its ids
+ * with "models/", so that is stripped.
+ *
+ * Preference is for the small fast tiers — flash, mini, lite. That is not a
+ * quality compromise: the reason to point at a compatible endpoint at all is
+ * cost, and identifying a Kicker CompR does not need a frontier model.
+ */
+async function discoverCompatibleModel(baseUrl: string, apiKey: string): Promise<string | null> {
+  const cacheKey = `compat:${baseUrl}`
+  if (discoveredModels.has(cacheKey)) return discoveredModels.get(cacheKey) ?? null
+
+  let picked: string | null = null
+  try {
+    const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/models`, {
+      headers: { authorization: `Bearer ${apiKey}` },
+    })
+    if (res.ok) {
+      const body = await res.json()
+      const ids: string[] = (Array.isArray(body?.data) ? body.data : [])
+        .map((m: { id?: unknown }) => (typeof m?.id === 'string' ? m.id.replace(/^models\//, '') : ''))
+        .filter(Boolean)
+
+      picked =
+        ids.find((id) => /flash/i.test(id) && !/thinking|image|audio|tts|embed/i.test(id)) ??
+        ids.find((id) => /mini|lite/i.test(id) && !/embed/i.test(id)) ??
+        ids.find((id) => !/embed|tts|whisper|image|vision/i.test(id)) ??
+        null
+    } else {
+      console.error('resolve-product: compatible model discovery failed', res.status)
+    }
+  } catch (err) {
+    console.error('resolve-product: compatible model discovery threw', err)
+  }
+
+  discoveredModels.set(cacheKey, picked)
+  return picked
 }
 
 async function resolveViaAi(prompt: string, upc: string | null, diag: ProviderDiag): Promise<Candidate[]> {
@@ -1132,15 +1185,37 @@ async function resolveViaAi(prompt: string, upc: string | null, diag: ProviderDi
     // about cost, and it should not be silently overridden by a leftover
     // OPENAI_API_KEY from an earlier setup.
     if (compatBase && compatKey) {
-      const model = Deno.env.get('AI_MODEL')?.trim() || 'gemini-2.5-flash'
-      for (const rung of RUNGS) {
-        const candidates = await resolveViaCompatible(compatBase, compatKey, prompt, upc, diag, rung, model)
-        if (candidates.length > 0) {
+      const configured = Deno.env.get('AI_MODEL')?.trim() || 'gemini-2.5-flash'
+
+      // Second pass only if the first failed in a way that looks like the
+      // model id — a 404 or a message naming the model. Any other failure has
+      // already been reported and asking for a model list would not help.
+      for (const model of [configured, null]) {
+        let resolvedModel = model
+        if (resolvedModel === null) {
+          if (!/404|model/i.test(diag.error ?? '')) break
+          resolvedModel = await discoverCompatibleModel(compatBase, compatKey)
+          if (!resolvedModel || resolvedModel === configured) break
           diag.error = null
-          diag.provider = 'compatible'
-          diag.model = model
-          diag.rung = rung
-          return candidates
+        }
+
+        for (const rung of RUNGS) {
+          const candidates = await resolveViaCompatible(
+            compatBase,
+            compatKey,
+            prompt,
+            upc,
+            diag,
+            rung,
+            resolvedModel,
+          )
+          if (candidates.length > 0) {
+            diag.error = null
+            diag.provider = 'compatible'
+            diag.model = resolvedModel
+            diag.rung = rung
+            return candidates
+          }
         }
       }
       return []
