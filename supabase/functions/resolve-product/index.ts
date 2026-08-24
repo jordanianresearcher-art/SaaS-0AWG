@@ -1062,7 +1062,7 @@ async function climbLadder(
 //
 //   AI_BASE_URL   https://generativelanguage.googleapis.com/v1beta/openai
 //   AI_API_KEY    <key for that provider>
-//   AI_MODEL      gemini-2.5-flash          (or whatever that provider calls it)
+//   AI_MODEL      gemini-3.7-flash          (optional — discovered if unset)
 //
 // This is a separate path from resolveViaOpenAi rather than a parameter on it,
 // because that one speaks OpenAI's *Responses* API (/responses, `input`,
@@ -1185,7 +1185,17 @@ async function resolveViaAi(prompt: string, upc: string | null, diag: ProviderDi
     // about cost, and it should not be silently overridden by a leftover
     // OPENAI_API_KEY from an earlier setup.
     if (compatBase && compatKey) {
-      const configured = Deno.env.get('AI_MODEL')?.trim() || 'gemini-2.5-flash'
+      // No hardcoded default. A model id baked into this file is a guess with
+      // a shelf life — `gemini-2.5-flash` shipped here and was already retired,
+      // so every lookup 404'd on a correctly configured project. Asking the
+      // endpoint what it serves is the only answer that stays true, so when
+      // AI_MODEL is unset that is the FIRST thing tried, not the fallback.
+      const configured =
+        Deno.env.get('AI_MODEL')?.trim() ||
+        (await discoverCompatibleModel(compatBase, compatKey)) ||
+        // Only if discovery itself failed. Current per Google's OpenAI-
+        // compatibility docs; still a guess, hence last.
+        'gemini-3.7-flash'
 
       // Second pass only if the first failed in a way that looks like the
       // model id — a 404 or a message naming the model. Any other failure has
@@ -1194,8 +1204,16 @@ async function resolveViaAi(prompt: string, upc: string | null, diag: ProviderDi
         let resolvedModel = model
         if (resolvedModel === null) {
           if (!/404|model/i.test(diag.error ?? '')) break
-          resolvedModel = await discoverCompatibleModel(compatBase, compatKey)
-          if (!resolvedModel || resolvedModel === configured) break
+          const discovered = await discoverCompatibleModel(compatBase, compatKey)
+          if (!discovered) {
+            // Discovery is the recovery path, so its failure is the thing
+            // worth reporting — otherwise the message blames a model id that
+            // was never the whole story.
+            diag.error = `${diag.error ?? 'The AI endpoint failed'} — and it did not return a usable model list`
+            break
+          }
+          if (discovered === configured) break
+          resolvedModel = discovered
           diag.error = null
         }
 

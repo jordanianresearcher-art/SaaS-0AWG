@@ -437,13 +437,33 @@ and no code change:
 ```bash
 supabase secrets set AI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
 supabase secrets set AI_API_KEY=<your key>
-supabase secrets set AI_MODEL=gemini-2.5-flash
 supabase functions deploy resolve-product
 ```
 
-Check the current model id in your provider's console before setting
-`AI_MODEL` — names move, and a wrong one 404s. The self-test in Settings
-reports which model actually answered.
+**`AI_MODEL` is optional, and leaving it unset is the more reliable choice.**
+Unset, the resolver asks the endpoint what it serves (`GET /models`, which
+every compatible endpoint implements) and picks a small fast tier from the
+answer. A model id written into config is a guess with a shelf life —
+`gemini-2.5-flash` was this function's default and had already been retired, so
+every lookup 404'd on a project configured perfectly correctly. Discovery does
+not go stale.
+
+Set it only to pin a specific model:
+
+```bash
+supabase secrets set AI_MODEL=gemini-3.7-flash
+```
+
+To see what your key can actually reach:
+
+```bash
+curl -s -H "Authorization: Bearer $AI_API_KEY" \
+  https://generativelanguage.googleapis.com/v1beta/openai/models \
+  | grep -o '"id": *"[^"]*"'
+```
+
+The self-test in Settings reports the model that actually answered, which is
+the fastest confirmation of what the endpoint settled on.
 
 Known-good base URLs:
 
