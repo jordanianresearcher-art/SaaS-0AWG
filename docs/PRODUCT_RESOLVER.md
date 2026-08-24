@@ -391,10 +391,17 @@ Three things deploy separately and drifting between them is the most common
 cause of "it's broken":
 
 ```bash
-npm run deploy          # install + build + wrangler (app) + supabase functions (all)
-npm run deploy:web      # app only (installs first)
-npm run deploy:functions # Edge Functions only
+npm run deploy          # Edge Functions, then install + build + wrangler (app)
+npm run deploy:web      # app only (installs and checks env first)
+npm run deploy:functions # Edge Functions only — needs no VITE_* variables
 ```
+
+**Functions deploy before the app, deliberately.** A newly-deployed app calling
+an old function is the skew that produced "No AI provider key is set" on a
+project whose key was fine; the reverse — an old app calling a new function —
+is safe, because the function is kept backwards compatible. Ordering it this
+way also means a web-side failure (missing `VITE_*`) cannot block the half that
+had no such precondition.
 
 `deploy:web` runs `npm install` and an env check through npm's `predeploy:web`
 hook. The env check is the more important one: Vite bakes `VITE_*` variables

@@ -12,7 +12,7 @@
     "preview": "vite preview",
     "deploy:web": "npm run build && npx wrangler deploy",
     "deploy:functions": "supabase functions deploy",
-    "deploy": "npm run deploy:web && npm run deploy:functions",
+    "deploy": "npm run deploy:functions && npm run deploy:web",
     "predeploy:web": "npm install && node scripts/check-deploy-env.mjs"
   },
   "dependencies": {
