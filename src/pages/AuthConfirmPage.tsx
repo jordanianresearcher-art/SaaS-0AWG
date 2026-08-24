@@ -28,11 +28,12 @@
 
 import { useState } from 'react'
 import { Link, Navigate, useSearchParams } from 'react-router-dom'
-import { KeyRound } from 'lucide-react'
+import { Check, Copy, ExternalLink, KeyRound } from 'lucide-react'
 import { Logo, Button, LoadingBlock } from '../components/ui'
 import { getSupabase } from '../data/supabaseClient'
 import { supabaseConfigured } from '../lib/env'
 import { useAppData } from '../data/AppDataContext'
+import { currentInAppBrowser } from '../lib/inAppBrowser'
 
 // The Supabase email-otp types this app can plausibly receive. Any other
 // value in the link is treated as malformed rather than guessed at.
@@ -42,6 +43,21 @@ export default function AuthConfirmPage() {
   const { session, mode } = useAppData()
   const [searchParams] = useSearchParams()
   const [status, setStatus] = useState<'idle' | 'verifying' | 'error'>('idle')
+  const [copied, setCopied] = useState(false)
+  const inApp = currentInAppBrowser()
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 4000)
+    } catch {
+      // Clipboard access is frequently blocked inside embedded browsers, which
+      // is exactly where this button matters most — so the link is also
+      // rendered as selectable text below and never depends on this working.
+      setCopied(false)
+    }
+  }
 
   // Already signed in (e.g. a re-click after success) — just go.
   if (session || mode === 'demo') return <Navigate to="/app" replace />
@@ -112,10 +128,74 @@ export default function AuthConfirmPage() {
               <KeyRound className="h-7 w-7" aria-hidden="true" />
             </span>
             <p className="mt-4 text-lg font-bold text-ink">You&apos;re almost in</p>
-            <p className="mt-1 text-base text-zinc-600">Tap below to finish signing in.</p>
-            <Button onClick={() => void onConfirm()} className="mt-5 w-full">
-              Continue to your shop
+
+            {/* The link has not been spent yet — verifying only happens on the
+                tap below — so it can still be finished somewhere else. That is
+                the whole reason this offer can exist: a session created in an
+                app's built-in browser lives only there, and no web API can
+                move it to Chrome or Safari afterwards. Better to land in the
+                right browser than to sign in twice. */}
+            {inApp.isInApp ? (
+              <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-left">
+                <p className="text-base font-semibold text-amber-900">
+                  You&apos;re in {inApp.app === 'this app' ? 'an app' : `${inApp.app}`}&apos;s built-in browser
+                </p>
+                <p className="mt-1 text-sm text-amber-800">
+                  Signing in here only signs you in here — you&apos;d be signed out again in Chrome or Safari.
+                  Open this link in your normal browser first and you&apos;ll stay signed in.
+                </p>
+                <Button variant="secondary" className="mt-3 w-full" onClick={() => void copyLink()}>
+                  {copied ? (
+                    <>
+                      <Check className="h-5 w-5" aria-hidden="true" /> Link copied — paste it in your browser
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-5 w-5" aria-hidden="true" /> Copy this link
+                    </>
+                  )}
+                </Button>
+                <p className="mt-2 text-xs text-amber-800">
+                  Or use this app&apos;s menu (⋮) and choose &ldquo;Open in browser&rdquo;.
+                </p>
+              </div>
+            ) : (
+              <p className="mt-1 text-base text-zinc-600">Tap below to finish signing in.</p>
+            )}
+
+            <Button
+              onClick={() => void onConfirm()}
+              variant={inApp.isInApp ? 'secondary' : 'primary'}
+              className="mt-4 w-full"
+            >
+              {inApp.isInApp ? 'Sign in here anyway' : 'Continue to your shop'}
             </Button>
+
+            {/* Always available, never only on detection: an iOS app opening
+                links in SFSafariViewController is close to indistinguishable
+                from Safari, so the escape hatch cannot depend on spotting it. */}
+            {!inApp.isInApp ? (
+              <details className="mt-4 text-left">
+                <summary className="cursor-pointer text-sm font-semibold text-zinc-500">
+                  Opened this inside an app?
+                </summary>
+                <p className="mt-2 text-sm text-zinc-600">
+                  Signing in from an app&apos;s built-in browser only signs you in there. Copy this link and
+                  paste it into Chrome or Safari to stay signed in.
+                </p>
+                <Button variant="secondary" className="mt-2 w-full" onClick={() => void copyLink()}>
+                  {copied ? (
+                    <>
+                      <Check className="h-5 w-5" aria-hidden="true" /> Copied
+                    </>
+                  ) : (
+                    <>
+                      <ExternalLink className="h-5 w-5" aria-hidden="true" /> Copy this link
+                    </>
+                  )}
+                </Button>
+              </details>
+            ) : null}
           </>
         )}
       </div>
