@@ -422,6 +422,7 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
     id: SHOP_ID,
     name: 'Big Tex Audio',
     slug: 'big-tex-audio',
+    contributesToGlobalCatalog: true,
     phone: '214-555-0100',
     email: 'shop@bigtexaudio.example.com',
     replyToEmail: 'quotes@bigtexaudio.example.com',

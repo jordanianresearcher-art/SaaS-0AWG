@@ -1,6 +1,7 @@
 import { FunctionsHttpError, type SupabaseClient } from '@supabase/supabase-js'
 import { sanitizeFinancingOffers } from '../lib/financing'
 import { canonicalizeProductFields } from '../lib/productNaming'
+import { globalMatchKey, toGlobalProductDraft } from '../lib/globalCatalog'
 import type {
   Appointment,
   Bay,
@@ -45,7 +46,9 @@ import type {
   ProductResolutionCandidate,
   ProductResolveRequest,
   ProductResolveResult,
+  GlobalProductMatch,
   ProductLookupSelfTest,
+  ProductSuggestion,
   ProductSuggestionResult,
   SendEmailResult,
   ShopifyImportOptions,
@@ -149,6 +152,7 @@ function mapShop(r: Row): Shop {
     bookingDepositCents: r.booking_deposit_cents ?? null,
     // Default true: a pilot shop should get automatic follow-ups without configuring anything.
     autoFollowUpEnabled: r.auto_follow_up_enabled ?? true,
+    contributesToGlobalCatalog: r.contributes_to_global_catalog ?? true,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }
@@ -596,6 +600,8 @@ export class SupabaseRepository implements DataRepository {
     if (patch.lowStockAlertEmail !== undefined) row.low_stock_alert_email = patch.lowStockAlertEmail
     if (patch.bookingDepositCents !== undefined) row.booking_deposit_cents = patch.bookingDepositCents
     if (patch.autoFollowUpEnabled !== undefined) row.auto_follow_up_enabled = patch.autoFollowUpEnabled
+    if (patch.contributesToGlobalCatalog !== undefined)
+      row.contributes_to_global_catalog = patch.contributesToGlobalCatalog
     const { data, error } = await this.supabase
       .from('shops')
       .update(row)
@@ -645,7 +651,13 @@ export class SupabaseRepository implements DataRepository {
       .select('*')
       .single()
     if (error) throw error
-    return mapCatalogItem(data)
+    const created = mapCatalogItem(data)
+    // Offer it to the shared catalog after the create has already succeeded,
+    // and never await it: identifying a product is work this shop did, and the
+    // next shop should not have to pay for it again — but that is a background
+    // courtesy, not part of what the operator asked for.
+    void this.contributeToGlobalCatalog(created)
+    return created
   }
 
   async updateCatalogItem(itemId: string, input: NewCatalogItemInput): Promise<CatalogItem> {
@@ -839,18 +851,115 @@ export class SupabaseRepository implements DataRepository {
   async lookupProductSuggestions(query: string, brandHint?: string | null): Promise<ProductSuggestionResult> {
     const trimmed = query.trim()
     if (trimmed.length < 2) return { suggestions: [], aiConfigured: true, aiError: null }
-    const result = await this.resolveProduct({ kind: 'text', query: trimmed, brandHint })
+
+    // The shared catalog first, and in parallel rather than in sequence: a hit
+    // there is instant and free, but waiting to find that out before starting
+    // the web call would make every miss twice as slow.
+    const [shared, result] = await Promise.all([
+      this.searchGlobalProducts(trimmed),
+      this.resolveProduct({ kind: 'text', query: trimmed, brandHint }),
+    ])
+
+    const sharedSuggestions: ProductSuggestion[] = shared.map((g) => ({
+      name: g.name,
+      brand: g.brand,
+      model: g.model,
+      unitPriceCents: g.referencePriceCents,
+      imageUrl: g.imageUrl,
+      sourceUrl: g.sourceUrl,
+    }))
+
+    const webSuggestions: ProductSuggestion[] = result.candidates.map((c) => ({
+      name: c.name,
+      brand: c.brand,
+      model: c.model,
+      unitPriceCents: c.referencePriceCents,
+      imageUrl: c.imageUrl,
+      sourceUrl: c.priceSourceUrl,
+    }))
+
+    // Shared entries lead: several shops agreeing on a product beats one
+    // model's guess about it. dedupeCandidates can't be reused here (it works
+    // on resolver candidates), so this drops web rows that repeat a shared
+    // brand+model outright.
+    const seen = new Set(
+      sharedSuggestions.map((s) => `${s.brand ?? ''}|${s.model ?? ''}`.toLowerCase().replace(/[^a-z0-9|]/g, '')),
+    )
+    const deduped = webSuggestions.filter(
+      (s) => !seen.has(`${s.brand ?? ''}|${s.model ?? ''}`.toLowerCase().replace(/[^a-z0-9|]/g, '')),
+    )
+
     return {
-      suggestions: result.candidates.map((c) => ({
-        name: c.name,
-        brand: c.brand,
-        model: c.model,
-        unitPriceCents: c.referencePriceCents,
-        imageUrl: c.imageUrl,
-        sourceUrl: c.priceSourceUrl,
-      })),
+      suggestions: [...sharedSuggestions, ...deduped],
       aiConfigured: result.aiConfigured,
       aiError: result.aiError,
+    }
+  }
+
+  async searchGlobalProducts(query: string): Promise<GlobalProductMatch[]> {
+    const trimmed = query.trim()
+    if (trimmed.length < 2) return []
+    try {
+      const { data, error } = await this.supabase.rpc('search_global_products', {
+        p_query: trimmed,
+        p_limit: 8,
+      })
+      if (error) {
+        // Never throws: the shared catalog is an accelerant, not a dependency.
+        // A shop mid-intake must not be blocked because a shared lookup failed.
+        console.error('search_global_products failed', error)
+        return []
+      }
+      return (Array.isArray(data) ? (data as Row[]) : []).map((r) => ({
+        id: r.id as string,
+        barcode: typeof r.barcode === 'string' ? r.barcode : null,
+        brand: typeof r.brand === 'string' ? r.brand : null,
+        model: typeof r.model === 'string' ? r.model : null,
+        name: typeof r.name === 'string' ? r.name : '',
+        category: (r.category ?? null) as GlobalProductMatch['category'],
+        specs: (r.specs ?? null) as Record<string, unknown> | null,
+        referencePriceCents: typeof r.reference_price_cents === 'number' ? r.reference_price_cents : null,
+        priceKind: (r.price_kind ?? null) as GlobalProductMatch['priceKind'],
+        imageUrl: typeof r.image_url === 'string' ? r.image_url : null,
+        sourceUrl: typeof r.source_url === 'string' ? r.source_url : null,
+        contributionCount: typeof r.contribution_count === 'number' ? r.contribution_count : 1,
+        verified: r.verified === true,
+      }))
+    } catch (err) {
+      console.error('search_global_products threw', err)
+      return []
+    }
+  }
+
+  /**
+   * Offer a product this shop has identified to the shared catalog.
+   *
+   * Fire-and-forget by design: it runs after the thing the operator actually
+   * asked for has already succeeded, and a failure here must never surface as
+   * an error on their screen. The RPC itself re-checks membership and the
+   * shop's own toggle, so this is not the only gate.
+   */
+  private async contributeToGlobalCatalog(item: CatalogItem): Promise<void> {
+    const draft = toGlobalProductDraft(item)
+    const matchKey = draft ? globalMatchKey(draft) : null
+    if (!draft || !matchKey) return
+    try {
+      await this.supabase.rpc('contribute_global_product', {
+        p_shop_id: this.shopId,
+        p_match_key: matchKey,
+        p_barcode: draft.barcode,
+        p_brand: draft.brand,
+        p_model: draft.model,
+        p_name: draft.name,
+        p_category: draft.category,
+        p_specs: draft.specs,
+        p_reference_price_cents: draft.referencePriceCents,
+        p_price_kind: draft.priceKind,
+        p_image_url: draft.imageUrl,
+        p_source_url: draft.sourceUrl,
+      })
+    } catch (err) {
+      console.error('contribute_global_product failed', err)
     }
   }
 

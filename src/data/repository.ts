@@ -117,6 +117,7 @@ export interface ShopSettingsPatch {
   lowStockAlertEmail?: string | null
   bookingDepositCents?: number | null
   autoFollowUpEnabled?: boolean
+  contributesToGlobalCatalog?: boolean
 }
 
 export interface NewCatalogItemInput {
@@ -484,6 +485,29 @@ export interface ProductLookupSelfTest {
   functionVersion: number | null
 }
 
+/**
+ * A product from the shared catalog. Public facts only — the shared table
+ * holds nothing else by construction (see supabase/migrations/0026).
+ */
+export interface GlobalProductMatch {
+  id: string
+  barcode: string | null
+  brand: string | null
+  model: string | null
+  name: string
+  category: ProductCategory | null
+  specs: Record<string, unknown> | null
+  /** Manufacturer/web list price — never any shop's selling price or cost. */
+  referencePriceCents: number | null
+  priceKind: PriceKind | null
+  imageUrl: string | null
+  sourceUrl: string | null
+  /** How many shops independently arrived at this record — the trust signal. */
+  contributionCount: number
+  /** Curated by a platform admin; outranks automatic contributions. */
+  verified: boolean
+}
+
 export interface ShopifyImportOptions {
   /** Resume a prior run — pass back the nextCursor from its result. */
   afterCursor?: string | null
@@ -560,6 +584,14 @@ export interface DataRepository {
   lookupProductSuggestions(query: string, brandHint?: string | null): Promise<ProductSuggestionResult>
   /** Ask the backend whether product lookup actually works right now, and why not if it doesn't. */
   testProductLookup(): Promise<ProductLookupSelfTest>
+  /**
+   * Products other shops have already identified.
+   *
+   * Checked before any web/AI call: a product one shop paid to resolve should
+   * be free for the next, which is the entire point of the shared catalog.
+   * Never throws — a shared-catalog outage must not block manual entry.
+   */
+  searchGlobalProducts(query: string): Promise<GlobalProductMatch[]>
   /**
    * The universal resolver: called when a barcode or typed query doesn't
    * match anything already in this shop's catalog. Never throws and never

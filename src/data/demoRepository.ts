@@ -36,6 +36,7 @@ import type {
   ProductResolutionCandidate,
   ProductResolveRequest,
   ProductResolveResult,
+  GlobalProductMatch,
   ProductLookupSelfTest,
   ProductSuggestionResult,
   SendEmailResult,
@@ -430,6 +431,14 @@ export class DemoRepository implements DataRepository {
         sourceUrl: c.priceSourceUrl,
       })),
     }
+  }
+
+  async searchGlobalProducts(query: string): Promise<GlobalProductMatch[]> {
+    // Demo mode has no shared catalog and must never imply one exists — the
+    // whole value of the shared catalog is that it holds real products other
+    // real shops contributed.
+    void query
+    return []
   }
 
   async testProductLookup(): Promise<ProductLookupSelfTest> {

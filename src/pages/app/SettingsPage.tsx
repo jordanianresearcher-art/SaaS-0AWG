@@ -257,6 +257,8 @@ function ProductLookupHealthSection() {
         {running ? 'Checking…' : 'Test product lookup'}
       </Button>
 
+      <SharedCatalogToggle />
+
       {result ? (
         <div
           className={`rounded-xl border p-4 ${
@@ -356,6 +358,83 @@ function ProductLookupHealthSection() {
         </div>
       ) : null}
     </Card>
+  )
+}
+
+
+/**
+ * Whether this shop contributes what it identifies back to the shared catalog.
+ *
+ * Framed around the trade rather than the mechanism: a shop is being asked to
+ * give something, so the reason to say yes has to be visible, and so does the
+ * exact boundary. Vague reassurance ("we only share anonymous data") is what
+ * makes people say no; naming the excluded fields is what makes them say yes.
+ *
+ * Reading the shared catalog is deliberately not switchable — a shop that opts
+ * out of giving still benefits from what is there. That asymmetry is the
+ * honest offer during a pilot, and pretending otherwise would just push shops
+ * to leave it on for the wrong reason.
+ */
+function SharedCatalogToggle() {
+  const { shop, refresh } = useAppData()
+  const repo = useRepo()
+  const toast = useToast()
+  const [saving, setSaving] = useState(false)
+  const enabled = shop?.contributesToGlobalCatalog ?? true
+
+  const set = async (next: boolean) => {
+    setSaving(true)
+    try {
+      await repo.updateShop({ contributesToGlobalCatalog: next })
+      await refresh()
+      toast('success', next ? 'Sharing product details with other shops.' : 'No longer sharing product details.')
+    } catch (err) {
+      toast('error', errorMessage(err) ?? 'Could not save that.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-base font-bold text-ink">Help build the shared product list</p>
+          <p className="mt-1 text-sm text-zinc-600">
+            When you identify a product, its details go into a list every shop can search — so nobody pays to look
+            up the same subwoofer twice. You get the benefit of it either way.
+          </p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={enabled}
+          aria-label="Share product details with other shops"
+          disabled={saving}
+          onClick={() => void set(!enabled)}
+          className={`relative h-7 w-12 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
+            enabled ? 'bg-brand' : 'bg-zinc-300'
+          }`}
+        >
+          <span
+            className={`absolute top-1 h-5 w-5 rounded-full bg-white transition-all ${enabled ? 'left-6' : 'left-1'}`}
+          />
+        </button>
+      </div>
+
+      {/* The specific list, not a reassurance. This is the whole basis of the
+          decision, and it is short enough to read. */}
+      <dl className="mt-3 grid gap-2 border-t border-zinc-200 pt-3 text-sm sm:grid-cols-2">
+        <div>
+          <dt className="font-semibold text-green-800">Shared</dt>
+          <dd className="text-zinc-600">Brand, model, specs, photo, barcode, manufacturer list price</dd>
+        </div>
+        <div>
+          <dt className="font-semibold text-red-800">Never shared</dt>
+          <dd className="text-zinc-600">Your prices, your cost, your stock levels, your customers</dd>
+        </div>
+      </dl>
+    </div>
   )
 }
 

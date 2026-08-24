@@ -144,5 +144,12 @@ from (
              where n.nspname = 'public'
                and p.proname = 'create_shop_with_owner'
                and pg_get_functiondef(p.oid) like '%insert into bays%'))
+,
+
+    ('0026 global product catalog',
+     to_regclass('public.global_products') is not null
+       and exists (select 1 from information_schema.columns
+                   where table_schema = 'public' and table_name = 'shops'
+                     and column_name = 'contributes_to_global_catalog'))
 ) as t(migration, applied)
 order by migration;

@@ -232,6 +232,13 @@ export interface Shop {
   bookingDepositCents: number | null
   /** When true, due follow-up emails send themselves. Per-quote pause is Quote.emailFollowUpAllowed. */
   autoFollowUpEnabled: boolean
+  /**
+   * When true, products this shop resolves are contributed to the shared
+   * catalog — public product facts only, never pricing, cost, or stock
+   * (src/lib/globalCatalog.ts enforces the boundary field by field).
+   * Reading the shared catalog is always allowed regardless.
+   */
+  contributesToGlobalCatalog: boolean
   createdAt: string
   updatedAt: string
 }
