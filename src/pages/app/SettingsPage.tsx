@@ -1070,7 +1070,11 @@ function CatalogSection({ reloadSignal }: { reloadSignal: number }) {
 
       <Modal open={editing !== null} onClose={() => setEditing(null)} title={editing === 'new' ? 'Add product' : 'Edit product'}>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
-          <div className="grid gap-4 sm:grid-cols-2">
+          {/* Not side by side: the Model field carries the search dropdown, and
+              in a half-width column every suggestion truncated to "Kicker
+              Comp…" — which cannot be told apart from "Kicker CompRT…", the
+              exact distinction the picker exists to make. */}
+          <div className="space-y-4">
             <Field label="Brand" htmlFor="cat-brand">
               <Input id="cat-brand" {...register('brand')} placeholder="Kicker" />
             </Field>
