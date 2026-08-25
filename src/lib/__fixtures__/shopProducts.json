@@ -1,0 +1,617 @@
+[
+ {
+  "barcode": "677478807501",
+  "model": "UM-1200X4D",
+  "name": "4-channel Amp"
+ },
+ {
+  "barcode": "850038647889",
+  "model": "EPICPRO6S",
+  "name": "AUDIOCONTROL 6.5\" EPIC PRO SPEAKERS"
+ },
+ {
+  "barcode": "713034001423",
+  "model": "KISLOC2",
+  "name": "KICKER"
+ },
+ {
+  "barcode": "709483018389",
+  "model": "TWS.4",
+  "name": "SOUNDSTREAM 1\" NEODYMIUM TWEETER"
+ },
+ {
+  "barcode": "FR-M800.4D11250239",
+  "model": "FR-M800.4D",
+  "name": "NEMESIS AUDIO 4-CHANNEL AMPLIFIER 800W"
+ },
+ {
+  "barcode": "093207100994",
+  "model": "DB3",
+  "name": "DIRECTED"
+ },
+ {
+  "barcode": "093207104015",
+  "model": "VSM550",
+  "name": "VIPER SMARTSTART PRO"
+ },
+ {
+  "barcode": "728953000006",
+  "model": "LINKR-LT3",
+  "name": "LINKR MOBILE CONTORL TRACK.ALERT"
+ },
+ {
+  "barcode": "663593066923",
+  "model": "BT-TWO BTAUDIO RECEIVER",
+  "name": "DS18 BTAUDIO RECEIVER"
+ },
+ {
+  "barcode": "609098903509",
+  "model": "AP4-GM71",
+  "name": "AMP-GM71 MODULAR"
+ },
+ {
+  "barcode": "609098817400",
+  "model": "RP4.2_TY11",
+  "name": "RADIOPRO4 MODULAR"
+ },
+ {
+  "barcode": "8261051023200787",
+  "model": "AP4_GM61",
+  "name": "AMPPRO4 MODULAR"
+ },
+ {
+  "barcode": "627780000008",
+  "model": "KIT_CHA1",
+  "name": "MAESTRO DODGE 2015+"
+ },
+ {
+  "barcode": "0.0",
+  "model": "COL-65MR",
+  "name": "NA SPEAKER 6.5\" COLOSSAL SERIES 300W RMS"
+ },
+ {
+  "barcode": "0.0",
+  "model": "NA-PRO65",
+  "name": "NA SPEAKER 275WRMS PRO 6.5"
+ },
+ {
+  "barcode": "0.0",
+  "model": "NA-65MR",
+  "name": "NA SPEAKER 350W MIDRANGE 6.5"
+ },
+ {
+  "barcode": "0.0",
+  "model": "NA-6.5SLM",
+  "name": "NA SPEAKER MIDRANDE RMS 200W 6.5"
+ },
+ {
+  "barcode": "0.0",
+  "model": "NEOPRO-6.5",
+  "name": "NA SPEAKER MIDRANGE RMS 150W"
+ },
+ {
+  "barcode": "0.0",
+  "model": "NEO-BAMF65",
+  "name": "NA SPEAKER MIDRANGR RMS 175W"
+ },
+ {
+  "barcode": "0.0",
+  "model": "PRO-DRV55",
+  "name": "DRIVER HORN 6.2 RMS 350W"
+ },
+ {
+  "barcode": "810075521047",
+  "model": "TW350TI-4 SLIM",
+  "name": "PRV AUDIO TWEETER 120W"
+ },
+ {
+  "barcode": "810075520293",
+  "model": "69MR500-4BULLET",
+  "name": "PRV 6X9\" 250W RMS 1 PC"
+ },
+ {
+  "barcode": "810075521887",
+  "model": "6MB550FT",
+  "name": "PRV MIBDASS 6.5 275W"
+ },
+ {
+  "barcode": "810075520651",
+  "model": "6MR400-4BULLET",
+  "name": "PRV AUDIO 400W"
+ },
+ {
+  "barcode": "850038647889",
+  "model": "EPICPRO6S",
+  "name": "AUDIOCONTROLEPIC"
+ },
+ {
+  "barcode": "0.0",
+  "model": "NA SUPER TWEETER 500W MAX",
+  "name": "SUPER TWEETER"
+ },
+ {
+  "barcode": "650905749735",
+  "model": "NA-TW-1",
+  "name": "NA 1\" HIGH PERFORMANCE TWEETERS"
+ },
+ {
+  "barcode": "0.0",
+  "model": "NEO-TW33 400W MAX",
+  "name": "NA SUPER TWEETER NEO BLACK"
+ },
+ {
+  "barcode": "0.0",
+  "model": "SUPER TWEETER 480W MAX",
+  "name": "NA SUPER TWEETER"
+ },
+ {
+  "barcode": "0.0",
+  "model": "NA-5MR",
+  "name": "NA MIDRANGE SPEAKER 5.25\""
+ },
+ {
+  "barcode": "0.0",
+  "model": "NA-4MR",
+  "name": "NA MIDRANGE SPEAKER 4\""
+ },
+ {
+  "barcode": "810005184441",
+  "model": "PRO-TWN4",
+  "name": "DS18 TWEETER 280W"
+ },
+ {
+  "barcode": "810005184656810005184656",
+  "model": "PRO-TWX1/SLSILVER",
+  "name": "DS18 TWEETER 120W"
+ },
+ {
+  "barcode": "663593058232",
+  "model": "PRO-X6.4BM",
+  "name": "DS18 6.5\" 250W RMS"
+ },
+ {
+  "barcode": "810005181877",
+  "model": "PRO-X694BM",
+  "name": "DS18MID RANGE 6X9\""
+ },
+ {
+  "barcode": "NA-PS1200X4D23080085",
+  "model": "NA-PS1200X4D",
+  "name": "CLASS D AMPLIFIER 1200 W"
+ },
+ {
+  "barcode": "687077404889",
+  "model": "012-AK4G",
+  "name": "OMNI12 TWELVEVOLT CCA"
+ },
+ {
+  "barcode": "650905748592",
+  "model": "SL-4PK",
+  "name": "STREETLINK 4AWG AMP KIT 3500W"
+ },
+ {
+  "barcode": "687077404902",
+  "model": "4AWGAMPKIT",
+  "name": "OMNI12 4AMGAMPIK OFC"
+ },
+ {
+  "barcode": "343485432257",
+  "model": "4AWGAMPKIT",
+  "name": "OMNI12 OFC"
+ },
+ {
+  "barcode": "687077404896",
+  "model": "OAWGAMPKIT OFC.",
+  "name": "OMNI12 OFC AMP KIT"
+ },
+ {
+  "barcode": "687077404872",
+  "model": "CCA OMNI12",
+  "name": "OAWGAMPKIT AMPKIT"
+ },
+ {
+  "barcode": "4650185710919",
+  "model": "M67AC PRO RMS300W.",
+  "name": "DEAF BONCE APOCALYPE 300W"
+ },
+ {
+  "barcode": "330820468082400029",
+  "model": "NA-6.5MRPK 280W",
+  "name": "NA 6.5 MIDRANGE TWEETER"
+ },
+ {
+  "barcode": "4650185709999",
+  "model": "APM67AC NEO 300W",
+  "name": "APOCALYPSE NEO RMS 300W"
+ },
+ {
+  "barcode": "4650185710667",
+  "model": "MG1SE NEO RMS 180W",
+  "name": "APOCALYPSE DEAF BONCE 180W"
+ },
+ {
+  "barcode": "4650185706158",
+  "model": "AP-M61SE SYLVESTER",
+  "name": "MIN- RANGE SPEAKERS DEAF BONCE RMS 130W"
+ },
+ {
+  "barcode": "4650185708664",
+  "model": "AP-X69A RMS 200W",
+  "name": "APOCALYPSE  DEAF BONCE COAXIAL SPEAKERS"
+ },
+ {
+  "barcode": "4650185709814",
+  "model": "MLH69  RMS 75W",
+  "name": "MACHETE LITE RMS 75W"
+ },
+ {
+  "barcode": "702588002918",
+  "model": "PRX6903 3 WAY SPEAKER",
+  "name": "MEMPHIS AUDIO 3 WAY COAXIAL SPEAKER"
+ },
+ {
+  "barcode": "650905749735",
+  "model": "NA 5-.7HCX  HECTIC SERIES",
+  "name": "NA 5.7 HIGH-PERORMANCE COAXIAL SPEAKER"
+ },
+ {
+  "barcode": "0.0",
+  "model": "DB-2800D",
+  "name": "DIABLO MONOBLOCK AMPLIFIER"
+ },
+ {
+  "barcode": "DB-4500D202108300792+",
+  "model": "DB- 4500D",
+  "name": "DIABLO MONOBLOCK AMPLIFIER"
+ },
+ {
+  "barcode": "DB-2K0042024120692",
+  "model": "DB- 2500.4 2500W 4CH AMPLIFIER",
+  "name": "DIABLO  4 CHENNEL"
+ },
+ {
+  "barcode": "677478807495",
+  "model": "MICRO- 2600X5D",
+  "name": "NA 5CH AMP"
+ },
+ {
+  "barcode": "677478848436",
+  "model": "NANO-3600X5D",
+  "name": "NA 5 CHANNEL FULL RANGE"
+ },
+ {
+  "barcode": "677478848405",
+  "model": "NANO-3500X4D",
+  "name": "NA 4 CHANNEL AMPLIFIER"
+ },
+ {
+  "barcode": "677478848474",
+  "model": "FIERCE-4500X5D 5 CHANNELS FULL RANGE DIGITAL AMPLIFIER",
+  "name": "NA 5 CHANNELS"
+ },
+ {
+  "barcode": "732388973088",
+  "model": "FIERCE-3000X4D",
+  "name": "NA FIERCE 4 CH AMP"
+ },
+ {
+  "barcode": "0.0",
+  "model": "RL680.4 L-3 SERIES",
+  "name": "RECOIL CLASS-D 4 CHANNEL AMPLIFIER"
+ },
+ {
+  "barcode": "677478807501",
+  "model": "UM-1200X4D",
+  "name": "NA 4 CHANNEL CLASS D ULTRA AMPLIFIER"
+ },
+ {
+  "barcode": "850038647797",
+  "model": "EPIC FOUR",
+  "name": "EPIC FOUR CHANNEL AUDIO CONTROL"
+ },
+ {
+  "barcode": "732388974481",
+  "model": "FR-M800.4D",
+  "name": "NA 4 CHANNEL 800W RMS"
+ },
+ {
+  "barcode": "677478807464",
+  "model": "MICRO- 2000X4D",
+  "name": "NA 4 CH FULL RANGE CLASS D AMPLIFIER"
+ },
+ {
+  "barcode": "677478848429",
+  "model": "NANO- 1800X4D",
+  "name": "NA 4 CHANNEL CLASS D AMPIFIER"
+ },
+ {
+  "barcode": "40NA500X4D04240266",
+  "model": "NA - 500X4D",
+  "name": "NA  CLASS AB MOSFET AMPLIFIER"
+ },
+ {
+  "barcode": "NA-1600X4D25090795",
+  "model": "NA- 1600X4D",
+  "name": "NA CLASS AB MOSFET AMPLIFIER"
+ },
+ {
+  "barcode": "0.0",
+  "model": "MP-800",
+  "name": "P.L.Z RADIO"
+ },
+ {
+  "barcode": "677478807945",
+  "model": "N.A-FR2500D  V.2",
+  "name": "NA FULL RANGE CLASS D 2500W RMS"
+ },
+ {
+  "barcode": "677478807082",
+  "model": "NA-BZ12000D",
+  "name": "NA MONO FULL RANGE CLASS D AMPLIFIER"
+ },
+ {
+  "barcode": "DB-8500D202105300168",
+  "model": "DB-8500D",
+  "name": "DIABLO 8500W MAX"
+ },
+ {
+  "barcode": "0.0",
+  "model": "NA-6KM",
+  "name": "NA 6K"
+ },
+ {
+  "barcode": "0.0",
+  "model": "NA-2KM",
+  "name": "NA 2000W MAX"
+ },
+ {
+  "barcode": "677478848498",
+  "model": "FIERCE-5KD",
+  "name": "NA 5000W MAX/1CH"
+ },
+ {
+  "barcode": "677478848481",
+  "model": "FIERCE-6KD",
+  "name": "NA 6000W MAX"
+ },
+ {
+  "barcode": "677478807013",
+  "model": "FIERCE-3.5KD",
+  "name": "NA 3500W MAX/1CH"
+ },
+ {
+  "barcode": "25112955",
+  "model": "JP234",
+  "name": "D4C 640W"
+ },
+ {
+  "barcode": "4650185708787",
+  "model": "MACHETE",
+  "name": "MFA 1920W"
+ },
+ {
+  "barcode": "851523007997",
+  "model": "BASS RESTORATION PROCESSOR",
+  "name": "AUDIO  CONTROL"
+ },
+ {
+  "barcode": "850038647216",
+  "model": "LC7-PRO",
+  "name": "AUDIO CONTROL SIX CHANNEL"
+ },
+ {
+  "barcode": "815592026914",
+  "model": "EP1800X OUTPUT VOLTAGE 7V",
+  "name": "BLAUPUNKT 7- BAND EQUALIZER"
+ },
+ {
+  "barcode": "815592026914",
+  "model": "7-BAND EQUALIZER",
+  "name": "BLAUPUNKT OUTPUT VOLTAGE 7V RMS"
+ },
+ {
+  "barcode": "650905748073",
+  "model": "NA-BASSPRO",
+  "name": "NA SERIS DIGITAL BASS PROCESSOR"
+ },
+ {
+  "barcode": "855814005860",
+  "model": "BASS RESTORATION PROCESSOR",
+  "name": "AUDIO CONTROL RESTORATION PROCESSOR"
+ },
+ {
+  "barcode": "160585NTW25H0042175",
+  "model": "5908V",
+  "name": "VIPER 1 WAY REMOTE START & SECURITY"
+ },
+ {
+  "barcode": "783855995706",
+  "model": "552-SSR",
+  "name": "SILENCER  PLUS"
+ },
+ {
+  "barcode": "728953000204",
+  "model": "AL- 1870-308",
+  "name": "EXCALIBUR REMOTE START & SECURITY PERFECTED"
+ },
+ {
+  "barcode": "044476160592",
+  "model": "5308V",
+  "name": "VIPER 2 WAY LCD REMOTE START & SECURITY"
+ },
+ {
+  "barcode": "093207064715",
+  "model": "3105V",
+  "name": "VIPER 1 WAY SECURITY  SYS"
+ },
+ {
+  "barcode": "783855995386",
+  "model": "322SS",
+  "name": "SILENCER PLUS"
+ },
+ {
+  "barcode": "o",
+  "model": "NA-69MR",
+  "name": "NA 6.8 700W MAX"
+ },
+ {
+  "barcode": "0.0",
+  "model": "NA-PRO69",
+  "name": "NA 6.9 600W MAX"
+ },
+ {
+  "barcode": "0.0",
+  "model": "NA 57PRO",
+  "name": "NA 5.7 500W MAX"
+ },
+ {
+  "barcode": "0.0",
+  "model": "NA-57MR",
+  "name": "NA 5.7 400W MAX"
+ },
+ {
+  "barcode": "0.0",
+  "model": "NAO-BAMF65",
+  "name": "NA SPEAKER MIDRANGE 350WMAX"
+ },
+ {
+  "barcode": "0.0",
+  "model": "REF-8632CFX",
+  "name": "INFINITY 6.8 180W"
+ },
+ {
+  "barcode": "050036364058",
+  "model": "CLUB8622F",
+  "name": "JBL  6.8\\ 60W RMS"
+ },
+ {
+  "barcode": "650905749407",
+  "model": "NA-65FMRLT",
+  "name": "NA MID-RANGE LOUDSPEAKER WITH RGB LED BULLET 6.5 500W"
+ },
+ {
+  "barcode": "650905749735",
+  "model": "NA-6.9HCX",
+  "name": "NA SPEKERS HECTIC SERIES 6.9"
+ },
+ {
+  "barcode": "0.0",
+  "model": "STAGE3637F",
+  "name": "JBL 125W 45 RMS"
+ },
+ {
+  "barcode": "650905749735",
+  "model": "NA-6.5M SPEAKERS",
+  "name": "NA - MYSTICAL  SERIES"
+ },
+ {
+  "barcode": "6925281948060",
+  "model": "STAGES 637F",
+  "name": "JBC HARMAN 135W 45W RMS"
+ },
+ {
+  "barcode": "650905749735",
+  "model": "NA -5.25M",
+  "name": "NA COAXIAL SPEAKERS"
+ },
+ {
+  "barcode": "650905749735",
+  "model": "NA - 46M",
+  "name": "NA MYSTICAL SERIES"
+ },
+ {
+  "barcode": "650905749735",
+  "model": "3.5 COAXIAL SPEAKERS",
+  "name": "NA COAXIAL SPEAKERS"
+ },
+ {
+  "barcode": "650905749735",
+  "model": "2.75 FULL RANGE",
+  "name": "NA  2.75 FULL RANDE SPEAKER"
+ },
+ {
+  "barcode": "709483051072",
+  "model": "VR-651B",
+  "name": "SOUND STREAM TECHNOLOGIES"
+ },
+ {
+  "barcode": "650905749735",
+  "model": "NA - 3.5 COAXIAL",
+  "name": "NA 3.5 COAXIAL SPEAKERS"
+ },
+ {
+  "barcode": "6925281961168",
+  "model": "8622F",
+  "name": "JBL SPEAKERS 180W 60W RMS"
+ },
+ {
+  "barcode": "6925281961168",
+  "model": "8622F",
+  "name": "JBL HARMAN SPEAKERS"
+ },
+ {
+  "barcode": "6925281948077",
+  "model": "STAGE3 9637F",
+  "name": "JBL SPEAKERS"
+ },
+ {
+  "barcode": "713034088332",
+  "model": "50W RMS CSC4",
+  "name": "KICKER  COAXIAL SPEAKERS"
+ },
+ {
+  "barcode": "791489128827",
+  "model": "ML43B",
+  "name": "SSL 200 WATTS"
+ },
+ {
+  "barcode": "046838002427",
+  "model": "KD- X280BT",
+  "name": "JVC DIGITAL MEDIA RECEIVER"
+ },
+ {
+  "barcode": "046838002427",
+  "model": "KD- X280BT",
+  "name": "JVC DIGITAL MEDIA RECEIVER"
+ },
+ {
+  "barcode": "046838002410",
+  "model": "KD- X38MBS",
+  "name": "JVC DIGITAL MEADIA RECEIVER"
+ },
+ {
+  "barcode": "019048234056",
+  "model": "KMM- BT408",
+  "name": "KENWOOD  DIGITAL MEDIA RECEIVER"
+ },
+ {
+  "barcode": "4650185710285",
+  "model": "DB- 53ODSP",
+  "name": "DEAF BONCE RECEIER"
+ },
+ {
+  "barcode": "793276040855",
+  "model": "UTE- 73BT",
+  "name": "ALPINE DRIVING MOBILE MEDIA"
+ },
+ {
+  "barcode": "793276085979",
+  "model": "ILX- W770",
+  "name": "ALPINE 7- INCH AUDIO"
+ },
+ {
+  "barcode": "793276085979",
+  "model": "KW- M595BT",
+  "name": "JVC MONITOR WITH RECEIVER / MONITOR AVEC RECEPTEUR"
+ },
+ {
+  "barcode": "884938533720",
+  "model": "DMH-1800NEX",
+  "name": "PIONEER  RD AV RECEIVER / RECEPTEUR AV  AVES"
+ },
+ {
+  "barcode": "810005181570",
+  "model": "NXL-PS8R",
+  "name": "DS18 HYDRO"
+ }
+]

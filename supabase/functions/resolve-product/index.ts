@@ -486,6 +486,25 @@ const RUNG_LABEL: Record<Rung, string> = {
  */
 const RUNG_SEARCHED_WEB: Record<Rung, boolean> = { 1: true, 2: false, 3: false }
 
+/**
+ * Where car-audio products actually live on the web, named explicitly.
+ *
+ * A bare "search the web" leaves the model to pick its own sources, and for
+ * this catalog it picks badly: generic marketplaces and spec-scraper sites
+ * that carry a plausible-looking listing for almost any string, which is how
+ * a search for a real SKU comes back with a confident wrong product.
+ *
+ * The shop's own list is the specification here. Big marketplaces carry the
+ * long tail with real barcodes on the listing page; the specialist retailers
+ * are where the brands this trade actually sells (Down4Sound, Taramps,
+ * Nemesis, Sundown, B2 Audio) are stocked and described properly -- these are
+ * frequently the *only* sites that carry a given model at all.
+ */
+const PRODUCT_SOURCES =
+  "the manufacturer's own website, Amazon, eBay, Crutchfield, Sonic Electronix, " +
+  'Parts Express, mooncarstereo.com, elitecaraudio.com, down4soundshop.com, ' +
+  'sundownaudio.com, b2audio.com, and other car-audio specialist retailers'
+
 /** Appended on rung 3, where nothing but the prompt constrains the shape. */
 const JSON_ONLY_INSTRUCTION =
   '\n\nReply with ONLY a JSON object of the form {"candidates":[...]} and no other text. ' +
@@ -734,14 +753,15 @@ const PAGE_URL_SCHEMA = {
 }
 
 const OFFICIAL_PAGE_PROMPT = (query: string) =>
-  `Find the single best official product page for: ${query}. Prioritize the manufacturer's own site or a ` +
-  "major car-audio retailer. Return null if you can't confidently find one for this exact product."
+  `Find the single best product page for: ${query}. Prefer the manufacturer's own site, then ` +
+  `${PRODUCT_SOURCES}. Return null if you can't confidently find one for this exact product.`
 
 const VISION_IDENTIFY_PROMPT =
   'This is a photo of a car-audio shop product (amplifier, subwoofer, speaker, head unit, wiring, ' +
   'enclosure, radio, DSP, etc), taken by staff. Identify the exact brand and model if you can read it in ' +
   'the photo or on its packaging/label. Use web search to confirm the model, find its MSRP in USD, and a ' +
-  'plain-language category hint. Return up to 3 candidates, most-likely first, ranked by confidence -- or ' +
+  `plain-language category hint, searching ${PRODUCT_SOURCES}. Return up to 3 candidates, most-likely first, ` +
+  'ranked by confidence -- or ' +
   "zero if the photo doesn't show an identifiable product clearly enough; never invent a product from a " +
   'blurry or ambiguous photo.'
 
@@ -1567,15 +1587,20 @@ Deno.serve(async (req: Request) => {
       candidates = []
     } else {
       candidates = await resolveViaAi(
-        `A car-audio shop employee scanned a barcode/UPC that isn't in a standard barcode database: "${rawCode}". ` +
+        `Identify the car-audio product with barcode/UPC "${rawCode}".\n\n` +
           (brandHint
-            ? `The shop says this is a "${brandHint}" product, so search that manufacturer's own catalog and its retailers first. `
+            ? `The shop receiving it says this is a "${brandHint}" product, so start with ${brandHint}'s own site and its dealers. `
             : '') +
-          'Search the web (barcode lookup sites, manufacturer sites, retailer listings) to try to identify what car-audio or ' +
-          'related shop product this barcode belongs to. Only set barcode_confirmed to true if a source explicitly ties this exact ' +
-          "code to the product -- otherwise leave it false/null and lower your confidence, since you're inferring from a general " +
-          'product search rather than a direct barcode match. Return up to 3 candidates, most-likely first, or zero if nothing ' +
-          'plausible turns up -- never invent a product.',
+          `Search the web for the number itself -- search the exact digits "${rawCode}" as a plain query, the way a person ` +
+          `would, and also try it together with words like "car audio", "amplifier", "subwoofer" or "speaker". Retail ` +
+          `listings on ${PRODUCT_SOURCES} print the UPC on the product page, so a plain search for the digits usually finds ` +
+          `the product even when no barcode-lookup API has it. Follow the search results to the actual listing and read the ` +
+          `product name off it.\n\n` +
+          'Set barcode_confirmed to true only if a source you actually found shows this exact code on the product page. If ' +
+          "you're inferring the product some other way, leave it false and lower your confidence -- but still return the " +
+          'candidate, because a likely answer the shop can confirm in one tap is far more useful to them than nothing.\n\n' +
+          'Return up to 3 candidates, most-likely first. Return zero only if the searches genuinely turned nothing up -- ' +
+          'never invent a product or guess a brand from the number alone.',
         rawCode,
         diag,
       )
@@ -1586,20 +1611,21 @@ Deno.serve(async (req: Request) => {
     // a few lines up -- the fallback is unreachable in practice.
     const textQuery = query ?? ''
     candidates = await resolveViaAi(
-      `A car-audio shop employee is adding a new product to their catalog and has typed: "${textQuery}" ` +
-        '(a partial or full SKU, model number, or product name). ' +
+      `A car-audio shop employee is adding a product to their catalog and typed: "${textQuery}" ` +
+        '-- a partial or full SKU, model number, or product name.\n\n' +
         (brandHint
-          ? `They are currently receiving a shipment from "${brandHint}", so treat what they typed as a ${brandHint} ` +
-            `model number or SKU. Search ${brandHint}'s own website and its authorized dealers/retailers first, and ` +
-            `strongly prefer real ${brandHint} products over similarly-named products from other manufacturers. ` +
-            'Smaller car-audio manufacturers often publish full specs on their own site even when their barcodes ' +
-            'appear in no barcode database, so the manufacturer page is usually the best source here. '
+          ? `They are receiving a shipment from "${brandHint}", so read what they typed as a ${brandHint} model number ` +
+            `or SKU. Search ${brandHint}'s own website and its authorized dealers first, and strongly prefer a real ` +
+            `${brandHint} product over a similarly-named product from another manufacturer.\n\n`
           : '') +
-        'Use web search to find up to 5 real, ' +
-        'specific car-audio products (amplifiers, subwoofers, speakers, head units, wiring, enclosures, ' +
-        'radios, DSPs, etc) that this could plausibly be, ranked most-likely-match first. Only include ' +
-        "products you're reasonably confident are real -- return fewer than 5 results (even zero) rather " +
-        "than guessing or inventing a product that doesn't exist.",
+        `Search ${PRODUCT_SOURCES}. Car-audio SKUs are written inconsistently across sites -- "EZY-RCA110-GX", ` +
+        '"EZY RCA110GX" and "ezyrca110gx" are one product, and a model like "TS 400X4" may be listed as "TS400X4" or ' +
+        '"TS-400x4". Try the query with and without spaces, hyphens and the brand name before concluding it does not ' +
+        'exist. Staff type what is printed on the box, so what they typed is almost always a real product that is ' +
+        'listed somewhere -- treat a miss as "search it a different way", not as "no such product".\n\n' +
+        'Return up to 5 real, specific products (amplifiers, subwoofers, speakers, head units, wiring, enclosures, ' +
+        'radios, DSPs, accessories), most-likely-match first. Prefer the exact model over near-matches from the same ' +
+        'line. Only include products you actually found -- return fewer, even zero, rather than inventing one.',
       null,
       diag,
     )
