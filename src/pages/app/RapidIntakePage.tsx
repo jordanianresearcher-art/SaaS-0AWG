@@ -28,9 +28,11 @@ import { useHardwareScanner } from '../../lib/useHardwareScanner'
 import { formatCurrency } from '../../lib/format'
 import { formatItemDisplayName } from '../../lib/productNaming'
 import { barcodeAdvice, classifyBarcode } from '../../lib/barcodeIdentity'
+import { searchLocalCatalog } from '../../lib/productSearch'
 import { errorMessage } from '../../lib/errors'
 import {
   addScan,
+  addTypedEntry,
   applyResolution,
   editLine,
   markResolving,
@@ -55,7 +57,13 @@ function loadBatch(): IntakeBatchLine[] {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY)
     const parsed = raw ? JSON.parse(raw) : null
-    return Array.isArray(parsed) ? (parsed as IntakeBatchLine[]) : []
+    if (!Array.isArray(parsed)) return []
+    // Batches saved before typed entries existed have no `entry` field; every
+    // line back then came from a scanner.
+    return (parsed as IntakeBatchLine[]).map((l) => ({
+      ...l,
+      entry: l.entry === 'typed' ? ('typed' as const) : ('scan' as const),
+    }))
   } catch {
     return []
   }
@@ -71,7 +79,9 @@ export default function RapidIntakePage() {
   const [phase, setPhase] = useState<'scanning' | 'review'>('scanning')
   const [cameraOpen, setCameraOpen] = useState(false)
   const [committing, setCommitting] = useState(false)
+  const [typedText, setTypedText] = useState('')
   const scanRef = useRef<HTMLInputElement>(null)
+  const typedRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     void repo.listCatalogItems().then(setCatalog)
@@ -87,7 +97,13 @@ export default function RapidIntakePage() {
   }, [batch])
 
   const focusScan = useCallback(() => {
-    setTimeout(() => scanRef.current?.focus(), 30)
+    setTimeout(() => {
+      // The scan box normally reclaims focus so the next trigger-pull always
+      // lands somewhere — but never while someone is typing a no-barcode
+      // product into the field below, or it would steal the cursor mid-word.
+      if (document.activeElement === typedRef.current) return
+      scanRef.current?.focus()
+    }, 30)
   }, [])
 
   const handleScan = useCallback(
@@ -99,6 +115,15 @@ export default function RapidIntakePage() {
     },
     [focusScan],
   )
+
+  const handleTypedAdd = useCallback(() => {
+    const text = typedText.trim()
+    if (text.length < 2) return
+    setBatch((prev) => addTypedEntry(prev, text))
+    setTypedText('')
+    // Focus stays here: someone typing products in is going to type another.
+    typedRef.current?.focus()
+  }, [typedText])
 
   useHardwareScanner((code) => handleScan(code), phase === 'scanning' && !cameraOpen)
 
@@ -121,6 +146,62 @@ export default function RapidIntakePage() {
 
     void (async () => {
       try {
+        // A typed line is a text search, not a barcode: no classification,
+        // no barcode databases. Its own catalog check matches on model/SKU/
+        // name the way the search box does, and only an exact-grade match
+        // (score >= 880: full model, SKU, or brand+model) binds to an
+        // existing item — a fuzzy local match would silently merge two
+        // different products' stock counts.
+        if (line.entry === 'typed') {
+          const localHit = searchLocalCatalog(catalog ?? [], line.code, null, 1)[0]
+          if (localHit && localHit.score >= 880 && localHit.catalogItemId) {
+            setBatch((prev) =>
+              applyResolution(
+                prev,
+                line.code,
+                {
+                  status: 'resolved',
+                  brand: localHit.brand,
+                  model: localHit.model,
+                  name: localHit.name,
+                  imageUrl: localHit.imageUrl,
+                  source: 'catalog',
+                  catalogItemId: localHit.catalogItemId,
+                },
+                startedAtRevision,
+              ),
+            )
+            return
+          }
+
+          // The resolver's text path: live retailer listings first, the AI
+          // only for what no store carries. Shared-catalog rows come back as
+          // candidates too, marked with their source.
+          const result = await repo.resolveProduct({ kind: 'text', query: line.code })
+          const top = result.candidates[0]
+          if (top) {
+            setBatch((prev) =>
+              applyResolution(
+                prev,
+                line.code,
+                {
+                  status: 'resolved',
+                  brand: top.brand,
+                  model: top.model,
+                  name: top.name,
+                  imageUrl: top.imageUrl,
+                  referencePriceCents: top.referencePriceCents,
+                  source: top.source === 'shared_catalog' ? 'shared' : 'web',
+                },
+                startedAtRevision,
+              ),
+            )
+          } else {
+            setBatch((prev) => applyResolution(prev, line.code, { status: 'unidentified' }, startedAtRevision))
+          }
+          return
+        }
+
         // 1. This shop's own catalog. Instant, free, and the most likely hit
         //    on a re-order — no reason to ask anyone else first.
         const local = (catalog ?? []).find((i) => i.upc === line.code || i.sku === line.code)
@@ -244,7 +325,10 @@ export default function RapidIntakePage() {
             model: line.model,
             name: line.name || line.code,
             defaultPriceCents: null,
-            upc: line.code,
+            // A scanned code is the product's barcode; typed text is just
+            // what someone called it, and saving it as a UPC would poison
+            // every future scan-match against this item.
+            upc: line.entry === 'typed' ? null : line.code,
             upcIsGenerated: false,
             imageUrl: line.imageUrl,
           })
@@ -351,6 +435,26 @@ export default function RapidIntakePage() {
                 <Button variant="secondary" className="w-full" onClick={() => setCameraOpen(true)}>
                   <Camera className="h-5 w-5" aria-hidden="true" /> Use the camera
                 </Button>
+                <div>
+                  <p className="mb-1.5 text-sm font-medium text-zinc-600">No barcode on the box?</p>
+                  <div className="flex gap-2">
+                    <Input
+                      ref={typedRef}
+                      value={typedText}
+                      onChange={(e) => setTypedText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter') return
+                        e.preventDefault()
+                        handleTypedAdd()
+                      }}
+                      placeholder="Type the model or name — e.g. JP234"
+                      autoComplete="off"
+                    />
+                    <Button variant="secondary" onClick={handleTypedAdd} disabled={typedText.trim().length < 2}>
+                      Add
+                    </Button>
+                  </div>
+                </div>
               </Card>
             )}
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   addScan,
+  addTypedEntry,
   applyResolution,
   editLine,
   markResolving,
@@ -147,5 +148,50 @@ describe('summarize', () => {
 
   it('an empty batch is not "settled" — there is nothing to review', () => {
     expect(summarize([]).settled).toBe(false)
+  })
+})
+
+describe('addTypedEntry', () => {
+  it('adds a typed line marked as typed, newest first', () => {
+    const lines = addTypedEntry(addScan([], '677478807501'), 'nemesis fr-m800')
+    expect(lines[0]).toMatchObject({ code: 'nemesis fr-m800', entry: 'typed', status: 'pending', quantity: 1 })
+    expect(lines[1].entry).toBe('scan')
+  })
+
+  it('counts a re-entered product as another unit, same as a re-scan', () => {
+    let lines = addTypedEntry([], 'JP234')
+    lines = addTypedEntry(lines, 'JP234')
+    expect(lines).toHaveLength(1)
+    expect(lines[0].quantity).toBe(2)
+  })
+
+  it('ignores a single character — a slip, not a product', () => {
+    expect(addTypedEntry([], 'J')).toEqual([])
+    expect(addTypedEntry([], '  ')).toEqual([])
+  })
+
+  it('keeps typed and scanned identities separate even when the text matches a code', () => {
+    // Improbable but cheap to pin: a typed entry that happens to equal an
+    // already-scanned code merges into it rather than duplicating the line —
+    // the operator is talking about the same box either way.
+    let lines = addScan([], '12345678')
+    lines = addTypedEntry(lines, '12345678')
+    expect(lines).toHaveLength(1)
+    expect(lines[0].quantity).toBe(2)
+    expect(lines[0].entry).toBe('scan')
+  })
+
+  it('resolves and edits like any other line', () => {
+    let lines = addTypedEntry([], 'sundown sae-1200')
+    lines = applyResolution(
+      lines,
+      'sundown sae-1200',
+      { status: 'resolved', brand: 'Sundown', model: 'SAE-1200D', name: 'Monoblock amplifier', source: 'web' },
+      0,
+    )
+    expect(lines[0].status).toBe('resolved')
+    expect(lines[0].entry).toBe('typed')
+    lines = editLine(lines, 'sundown sae-1200', { name: 'Mono amp' })
+    expect(lines[0].revision).toBe(1)
   })
 })

@@ -29,9 +29,19 @@ export type IntakeLineStatus =
 /** Where an identification came from, so review can show how much to trust it. */
 export type IntakeLineSource = 'catalog' | 'shared' | 'web'
 
+/**
+ * How the line entered the batch. Not every product has a barcode — smaller
+ * manufacturers ship boxes with nothing scannable on them — so intake accepts
+ * a typed name/SKU as a first-class line, resolved through text search
+ * instead of barcode lookup. The distinction matters again at commit time:
+ * a scanned code is saved as the item's UPC, typed text must never be.
+ */
+export type IntakeLineEntry = 'scan' | 'typed'
+
 export interface IntakeBatchLine {
-  /** The scanned code. Unique within a batch — it is the identity of the line. */
+  /** The scanned code, or the typed text. Unique within a batch — it is the identity of the line. */
   code: string
+  entry: IntakeLineEntry
   quantity: number
   status: IntakeLineStatus
   brand: string | null
@@ -63,9 +73,10 @@ export interface IntakeResolution {
   catalogItemId?: string | null
 }
 
-function blankLine(code: string): IntakeBatchLine {
+function blankLine(code: string, entry: IntakeLineEntry): IntakeBatchLine {
   return {
     code,
+    entry,
     quantity: 1,
     status: 'pending',
     brand: null,
@@ -95,7 +106,25 @@ export function addScan(lines: IntakeBatchLine[], rawCode: string): IntakeBatchL
   if (existing) {
     return lines.map((l) => (l.code === code ? { ...l, quantity: l.quantity + 1 } : l))
   }
-  return [blankLine(code), ...lines]
+  return [blankLine(code, 'scan'), ...lines]
+}
+
+/**
+ * Record a product typed by hand — the intake path for boxes with no barcode.
+ *
+ * Same merge rule as scanning: entering the same text again is another unit
+ * of the same product, not a duplicate row. The text needs at least two real
+ * characters; a single letter is a slip of the finger, not a product.
+ */
+export function addTypedEntry(lines: IntakeBatchLine[], rawText: string): IntakeBatchLine[] {
+  const text = rawText.trim()
+  if (text.length < 2) return lines
+
+  const existing = lines.find((l) => l.code === text)
+  if (existing) {
+    return lines.map((l) => (l.code === text ? { ...l, quantity: l.quantity + 1 } : l))
+  }
+  return [blankLine(text, 'typed'), ...lines]
 }
 
 /** Set an exact quantity. Zero or less removes the line — a miscount undone. */
