@@ -4,7 +4,7 @@
 // stock; scanning to sell/receive still happens in /app/scan.
 
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { ClipboardCheck, Plus, Search, Tag } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { Badge, EmptyState, Input, LinkButton, LoadingBlock, PageHeader, Select } from '../../components/ui'
@@ -14,12 +14,18 @@ import { computeInventorySummary, isLowStock, needsUpc } from '../../lib/invento
 import { formatCurrency } from '../../lib/format'
 import { formatItemShortName } from '../../lib/productNaming'
 import type { CatalogItem } from '../../types'
+import { useHardwareScanner } from '../../lib/useHardwareScanner'
+import { useToast } from '../../components/Toast'
+import { barcodeLookupForms, normalizeBarcodeInput } from '../../lib/barcodeIdentity'
+import { stashScanForIntake } from '../../lib/intakeStash'
 
 type SortKey = 'name' | 'price' | 'quantity'
 
 export default function InventoryPage() {
   const repo = useRepo()
   const { shop } = useAppData()
+  const navigate = useNavigate()
+  const toast = useToast()
   const [items, setItems] = useState<CatalogItem[] | null>(null)
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('')
@@ -32,6 +38,26 @@ export default function InventoryPage() {
   }, [repo])
 
   const defaultThreshold = shop?.defaultLowStockThreshold ?? 3
+
+  // Scanning is a first-class way to use this page: point the scanner at a
+  // box anywhere on the list and it either opens that item or — when the
+  // code is new — drops it straight into the rapid-intake batch, already
+  // queued for identification. A scan is never a dead end here.
+  useHardwareScanner((raw) => {
+    const code = normalizeBarcodeInput(raw)
+    if (!code || items === null) return
+    // Every equivalent spelling of the code (UPC-A and its EAN-13 twin), plus
+    // the code as scanned for SKUs and store-internal labels.
+    const forms = new Set([code, ...barcodeLookupForms(code)])
+    const hit = items.find((i) => (i.upc && forms.has(i.upc)) || (i.sku && forms.has(i.sku)))
+    if (hit) {
+      navigate(`/app/inventory/${hit.id}`)
+      return
+    }
+    stashScanForIntake(code)
+    toast('info', `${code} isn't in your catalog — added it to rapid intake.`)
+    navigate('/app/inventory/new')
+  }, items !== null)
 
   const categories = useMemo(
     () => PRODUCT_CATEGORIES.filter((c) => (items ?? []).some((i) => i.category === c)),

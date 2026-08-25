@@ -8,10 +8,11 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Barcode, Minus, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
-import { Badge, Button, Card, Field, Input, LoadingBlock, Select } from '../../components/ui'
+import { Badge, Button, Card, Field, Input, LoadingBlock, Modal, Select } from '../../components/ui'
 import { CategoryIcon } from '../../components/categoryIcon'
 import { PRODUCT_CATEGORY_INFO, PRODUCT_CATEGORIES } from '../../lib/audioConfigs'
 import { effectiveThreshold, isLowStock } from '../../lib/inventory'
+import { barcodeAdvice, classifyBarcode, normalizeBarcodeInput } from '../../lib/barcodeIdentity'
 import { formatCurrency, formatDateTime, parseDollarsToCents } from '../../lib/format'
 import { formatItemShortName } from '../../lib/productNaming'
 import type { CatalogItem, ProductCategory, StockMovement } from '../../types'
@@ -124,6 +125,53 @@ export default function InventoryDetailPage() {
     }
   }
 
+  const [attachOpen, setAttachOpen] = useState(false)
+  const [attachCode, setAttachCode] = useState('')
+  const [attachError, setAttachError] = useState<string | null>(null)
+  const [attaching, setAttaching] = useState(false)
+
+  /**
+   * Attach a scanned (or typed) barcode to this item.
+   *
+   * Two checks stand between the trigger-pull and the save, because a wrong
+   * binding here is worse than none — it makes every future scan of that
+   * code resolve to the wrong product:
+   *
+   *   1. The classifier's misread verdict. A 12/13-digit code with a failing
+   *      check digit is a bad read of a good label, and the fix is to scan
+   *      again, not to save the mangled number.
+   *   2. Uniqueness. A code already on another item means either a mis-scan
+   *      or a real data problem; either way it needs a person, named plainly.
+   */
+  async function attachBarcode() {
+    if (!item) return
+    const code = normalizeBarcodeInput(attachCode)
+    if (!code) return
+    const advice = barcodeAdvice(classifyBarcode(code))
+    if (classifyBarcode(code).likelyMisread) {
+      setAttachError("That scan didn't read cleanly — the check digit fails. Scan it again.")
+      return
+    }
+    setAttaching(true)
+    setAttachError(null)
+    try {
+      const existing = await repo.findCatalogItemByCode(code)
+      if (existing && existing.id !== item.id) {
+        setAttachError(`That code is already on "${formatItemShortName(existing)}". Remove it there first if this is the right box.`)
+        return
+      }
+      const updated = await repo.updateCatalogItem(item.id, currentInput(item, { upc: code, upcIsGenerated: false }))
+      setItem(updated)
+      setAttachOpen(false)
+      setAttachCode('')
+      toast('success', advice ? `Code ${code} attached. (${advice})` : `Barcode ${code} attached — scans find this item instantly now.`)
+    } catch (err) {
+      setAttachError(err instanceof Error ? err.message : 'Could not save the barcode.')
+    } finally {
+      setAttaching(false)
+    }
+  }
+
   async function generateCode() {
     if (!item) return
     setGeneratingSku(true)
@@ -210,6 +258,12 @@ export default function InventoryDetailPage() {
                 <Button variant="secondary" onClick={startEdit}>
                   <Pencil className="h-4 w-4" aria-hidden="true" /> Edit
                 </Button>
+                {!item.upc || item.upcIsGenerated ? (
+                  <Button variant="secondary" onClick={() => { setAttachOpen(true); setAttachError(null) }}>
+                    <Barcode className="h-4 w-4" aria-hidden="true" />
+                    {item.upc ? 'Scan the real barcode' : 'Scan its barcode'}
+                  </Button>
+                ) : null}
                 {!item.upc ? (
                   <Button variant="secondary" onClick={generateCode} disabled={generatingSku}>
                     <Barcode className="h-4 w-4" aria-hidden="true" /> {generatingSku ? 'Generating…' : 'Generate a code'}
@@ -320,6 +374,33 @@ export default function InventoryDetailPage() {
           </ul>
         )}
       </Card>
+      <Modal open={attachOpen} onClose={() => setAttachOpen(false)} title="Attach a barcode">
+        <div className="space-y-3">
+          <p className="text-sm text-zinc-600">
+            Point the scanner at the box and pull the trigger — or type the digits printed under the bars.
+            {item?.upc ? ' This replaces the app-generated internal code.' : ''}
+          </p>
+          <Field label="Barcode" htmlFor="attach-code" error={attachError ?? undefined}>
+            <Input
+              id="attach-code"
+              value={attachCode}
+              autoFocus
+              autoComplete="off"
+              inputMode="numeric"
+              onChange={(e) => setAttachCode(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter') return
+                e.preventDefault()
+                void attachBarcode()
+              }}
+              placeholder="e.g. 677478807501"
+            />
+          </Field>
+          <Button className="w-full" onClick={() => void attachBarcode()} disabled={attaching || !attachCode.trim()}>
+            {attaching ? 'Saving…' : 'Attach it'}
+          </Button>
+        </div>
+      </Modal>
     </div>
   )
 }

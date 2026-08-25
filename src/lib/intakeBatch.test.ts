@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   addScan,
   addTypedEntry,
+  chooseAlternate,
   applyResolution,
   editLine,
   markResolving,
@@ -193,5 +194,49 @@ describe('addTypedEntry', () => {
     expect(lines[0].entry).toBe('typed')
     lines = editLine(lines, 'sundown sae-1200', { name: 'Mono amp' })
     expect(lines[0].revision).toBe(1)
+  })
+})
+
+describe('chooseAlternate — a human picks between the machine\'s guesses', () => {
+  const alternates = [
+    { brand: 'Down4Sound', model: 'JP234', name: '4-channel amp', imageUrl: null, referencePriceCents: 32999, source: 'web' as const },
+    { brand: 'Down4Sound', model: 'JP23', name: '2-channel amp', imageUrl: null, referencePriceCents: 19999, source: 'web' as const },
+  ]
+
+  function resolvedLine() {
+    let lines = addTypedEntry([], 'jp23 amp')
+    return applyResolution(
+      lines,
+      'jp23 amp',
+      { status: 'resolved', ...alternates[0], alternates },
+      0,
+    )
+  }
+
+  it('applies the picked alternate\'s fields', () => {
+    const lines = chooseAlternate(resolvedLine(), 'jp23 amp', 1)
+    expect(lines[0]).toMatchObject({ model: 'JP23', name: '2-channel amp', referencePriceCents: 19999 })
+  })
+
+  it('bumps the revision so an in-flight lookup yields to the human choice', () => {
+    const before = resolvedLine()
+    const after = chooseAlternate(before, 'jp23 amp', 1)
+    expect(after[0].revision).toBe(before[0].revision + 1)
+    // The stale resolution that was already in flight lands afterwards — and
+    // must be discarded, exactly as it would be after a typed edit.
+    const clobbered = applyResolution(after, 'jp23 amp', { status: 'resolved', name: 'machine says otherwise' }, before[0].revision)
+    expect(clobbered[0].name).toBe('2-channel amp')
+  })
+
+  it('keeps the alternates so the operator can flip back', () => {
+    let lines = chooseAlternate(resolvedLine(), 'jp23 amp', 1)
+    expect(lines[0].alternates).toHaveLength(2)
+    lines = chooseAlternate(lines, 'jp23 amp', 0)
+    expect(lines[0].model).toBe('JP234')
+  })
+
+  it('ignores an index that does not exist', () => {
+    const before = resolvedLine()
+    expect(chooseAlternate(before, 'jp23 amp', 7)).toEqual(before)
   })
 })

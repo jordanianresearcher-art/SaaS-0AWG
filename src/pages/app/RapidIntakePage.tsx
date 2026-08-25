@@ -34,40 +34,21 @@ import {
   addScan,
   addTypedEntry,
   applyResolution,
+  chooseAlternate,
   editLine,
   markResolving,
   nextPending,
   removeLine,
   setQuantity,
   summarize,
+  type IntakeAlternate,
   type IntakeBatchLine,
 } from '../../lib/intakeBatch'
 import type { CatalogItem } from '../../types'
+import type { ProductResolutionCandidate } from '../../data/repository'
+import { loadIntakeBatch, saveIntakeBatch } from '../../lib/intakeStash'
 
 const BarcodeScanner = lazy(() => import('../../components/BarcodeScanner').then((m) => ({ default: m.BarcodeScanner })))
-
-/**
- * Survives a reload mid-pallet. Forty scans lost to a stray refresh is the
- * kind of thing that makes staff stop trusting a tool, and the batch is small
- * enough that storing it costs nothing.
- */
-const STORAGE_KEY = '0gauge-intake-batch'
-
-function loadBatch(): IntakeBatchLine[] {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
-    const parsed = raw ? JSON.parse(raw) : null
-    if (!Array.isArray(parsed)) return []
-    // Batches saved before typed entries existed have no `entry` field; every
-    // line back then came from a scanner.
-    return (parsed as IntakeBatchLine[]).map((l) => ({
-      ...l,
-      entry: l.entry === 'typed' ? ('typed' as const) : ('scan' as const),
-    }))
-  } catch {
-    return []
-  }
-}
 
 export default function RapidIntakePage() {
   const repo = useRepo()
@@ -75,7 +56,7 @@ export default function RapidIntakePage() {
   const toast = useToast()
 
   const [catalog, setCatalog] = useState<CatalogItem[] | null>(null)
-  const [batch, setBatch] = useState<IntakeBatchLine[]>(loadBatch)
+  const [batch, setBatch] = useState<IntakeBatchLine[]>(loadIntakeBatch)
   const [phase, setPhase] = useState<'scanning' | 'review'>('scanning')
   const [cameraOpen, setCameraOpen] = useState(false)
   const [committing, setCommitting] = useState(false)
@@ -88,12 +69,7 @@ export default function RapidIntakePage() {
   }, [repo])
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(batch))
-    } catch {
-      // A full or blocked storage quota must not break intake — the batch just
-      // stops surviving reloads, which is the pre-existing behaviour anyway.
-    }
+    saveIntakeBatch(batch)
   }, [batch])
 
   const focusScan = useCallback(() => {
@@ -115,6 +91,22 @@ export default function RapidIntakePage() {
     },
     [focusScan],
   )
+
+  /**
+   * The machine's top guesses as review options. Three is the ceiling the
+   * candidates already arrive under; anything the shop's own catalog or the
+   * shared catalog answered doesn't come through here, so everything in this
+   * list is genuinely a guess worth double-checking.
+   */
+  const toAlternates = (candidates: ProductResolutionCandidate[]): IntakeAlternate[] =>
+    candidates.slice(0, 3).map((c) => ({
+      brand: c.brand,
+      model: c.model,
+      name: c.name,
+      imageUrl: c.imageUrl,
+      referencePriceCents: c.referencePriceCents,
+      source: c.source === 'shared_catalog' ? ('shared' as const) : ('web' as const),
+    }))
 
   const handleTypedAdd = useCallback(() => {
     const text = typedText.trim()
@@ -225,6 +217,7 @@ export default function RapidIntakePage() {
                   imageUrl: top.imageUrl,
                   referencePriceCents: top.referencePriceCents,
                   source: top.source === 'shared_catalog' ? 'shared' : 'web',
+                  alternates: toAlternates(result.candidates),
                 },
                 startedAtRevision,
               ),
@@ -324,6 +317,7 @@ export default function RapidIntakePage() {
                 // shop's identification, not a web search, and the review
                 // screen's badge should say so.
                 source: top.source === 'shared_catalog' ? 'shared' : 'web',
+                alternates: toAlternates(result.candidates),
               },
               startedAtRevision,
             ),
@@ -526,6 +520,7 @@ export default function RapidIntakePage() {
           batch={batch}
           committing={committing}
           onEdit={(code, patch) => setBatch((prev) => editLine(prev, code, patch))}
+          onChooseAlternate={(code, index) => setBatch((prev) => chooseAlternate(prev, code, index))}
           onQuantity={(code, q) => setBatch((prev) => setQuantity(prev, code, q))}
           onRemove={(code) => setBatch((prev) => removeLine(prev, code))}
           onBack={() => {
@@ -612,6 +607,7 @@ function ReviewStep({
   batch,
   committing,
   onEdit,
+  onChooseAlternate,
   onQuantity,
   onRemove,
   onBack,
@@ -620,6 +616,7 @@ function ReviewStep({
   batch: IntakeBatchLine[]
   committing: boolean
   onEdit: (code: string, patch: Partial<Pick<IntakeBatchLine, 'brand' | 'model' | 'name'>>) => void
+  onChooseAlternate: (code: string, index: number) => void
   onQuantity: (code: string, q: number) => void
   onRemove: (code: string) => void
   onBack: () => void
@@ -712,6 +709,36 @@ function ReviewStep({
                   </button>
                 </div>
               </div>
+
+              {line.alternates.length > 1 ? (
+                <div>
+                  {/* The machine's other guesses, as one-tap options. The
+                      active chip is whichever the line currently matches, so
+                      flipping between them while holding the box reads as a
+                      selection, not a mystery button. */}
+                  <p className="mb-1.5 text-xs font-medium text-zinc-500">Which one is it?</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {line.alternates.map((alt, i) => {
+                      const active = line.name === alt.name && line.brand === alt.brand && line.model === alt.model
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => onChooseAlternate(line.code, i)}
+                          className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                            active
+                              ? 'border-brand bg-brand-tint text-brand'
+                              : 'border-zinc-300 bg-white text-zinc-700 hover:border-zinc-400'
+                          }`}
+                        >
+                          {[alt.brand, alt.model ?? alt.name].filter(Boolean).join(' ')}
+                          {alt.referencePriceCents !== null ? ` · ${formatCurrency(alt.referencePriceCents)}` : ''}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ) : null}
 
               <div className="grid gap-3 sm:grid-cols-3">
                 <Field label="Brand" htmlFor={`b-${line.code}`}>

@@ -38,6 +38,24 @@ export type IntakeLineSource = 'catalog' | 'shared' | 'web'
  */
 export type IntakeLineEntry = 'scan' | 'typed'
 
+/**
+ * One machine suggestion kept beyond the moment of resolution, so review can
+ * offer a choice instead of a fait accompli.
+ *
+ * Auto-applying the top candidate is right for speed — the batch keeps
+ * moving — but wrong as a final answer: the model's #1 pick is wrong often
+ * enough that silently discarding #2 and #3 turns every near-miss into a
+ * hand-typed correction. Keeping the runners-up makes the fix one tap.
+ */
+export interface IntakeAlternate {
+  brand: string | null
+  model: string | null
+  name: string
+  imageUrl: string | null
+  referencePriceCents: number | null
+  source: IntakeLineSource
+}
+
 export interface IntakeBatchLine {
   /** The scanned code, or the typed text. Unique within a batch — it is the identity of the line. */
   code: string
@@ -54,6 +72,8 @@ export interface IntakeBatchLine {
   source: IntakeLineSource | null
   /** Set when the code already maps to a row in this shop's catalog. */
   catalogItemId: string | null
+  /** The machine's other guesses, newest resolution's list. Empty when there was no choice to offer. */
+  alternates: IntakeAlternate[]
   /**
    * Bumped whenever a person changes the line. A resolution carrying an older
    * revision is discarded — see applyResolution.
@@ -71,6 +91,7 @@ export interface IntakeResolution {
   referencePriceCents?: number | null
   source?: IntakeLineSource | null
   catalogItemId?: string | null
+  alternates?: IntakeAlternate[]
 }
 
 function blankLine(code: string, entry: IntakeLineEntry): IntakeBatchLine {
@@ -86,6 +107,7 @@ function blankLine(code: string, entry: IntakeLineEntry): IntakeBatchLine {
     referencePriceCents: null,
     source: null,
     catalogItemId: null,
+    alternates: [],
     revision: 0,
   }
 }
@@ -173,6 +195,34 @@ export function applyResolution(
       referencePriceCents: resolution.referencePriceCents ?? line.referencePriceCents,
       source: resolution.source ?? line.source,
       catalogItemId: resolution.catalogItemId ?? line.catalogItemId,
+      alternates: resolution.alternates ?? line.alternates,
+    }
+  })
+}
+
+/**
+ * The operator picks one of the machine's other guesses.
+ *
+ * Bumps the revision — this is a human decision, and an in-flight lookup
+ * landing afterwards must yield to it exactly as it would to a typed edit.
+ * The alternates themselves are kept, so someone can flip between options
+ * while comparing against the box in their hand and settle on the right one.
+ */
+export function chooseAlternate(lines: IntakeBatchLine[], code: string, index: number): IntakeBatchLine[] {
+  return lines.map((line) => {
+    if (line.code !== code) return line
+    const pick = line.alternates[index]
+    if (!pick) return line
+    return {
+      ...line,
+      status: 'resolved' as const,
+      brand: pick.brand,
+      model: pick.model,
+      name: pick.name,
+      imageUrl: pick.imageUrl,
+      referencePriceCents: pick.referencePriceCents,
+      source: pick.source,
+      revision: line.revision + 1,
     }
   })
 }
