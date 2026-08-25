@@ -160,3 +160,69 @@ export function mergeSearchHits(local: ProductSearchHit[], web: ProductSearchHit
   }
   return merged.slice(0, limit)
 }
+
+// ---------------------------------------------------------------------------
+// Suggestion ranking across the three sources that can answer a typed query.
+//
+// The three arrive at wildly different speeds — the shop's own catalog is in
+// memory, the shared catalog is one indexed RPC, and the web resolver is a
+// grounded model call measured in seconds. Rendering them in arrival order
+// would reorder the list under the user's finger; rendering them only when
+// all three are in makes every search as slow as the slowest one.
+//
+// So arrival order is decoupled from display order: whatever has landed is
+// ranked by *source authority* and shown immediately. A later phase can only
+// append.
+//
+// Authority order, and why:
+//   1. catalog — the shop's own stock. If they have it, that IS the answer,
+//      including their real price. Nothing outranks it.
+//   2. shared  — several shops independently identified this product. That
+//      beats one model's opinion about it.
+//   3. web     — a fresh guess. Useful, least trustworthy, last.
+
+/** The shared shape the ranker needs; both ProductSuggestion and a catalog row satisfy it. */
+export interface RankableSuggestion {
+  name: string
+  brand: string | null
+  model: string | null
+}
+
+/**
+ * The identity two rows are considered "the same product" on.
+ *
+ * brand+model when a model is known, because that is what actually identifies
+ * a product across sources — the same amp is "JP-284" at one retailer and
+ * "JP284 (2-Channel)" at another, and both normalize equal. Falls back to the
+ * name only when no model exists, which is the weaker comparison but the only
+ * one available for accessories that genuinely have no model number.
+ */
+export function suggestionIdentity(s: RankableSuggestion): string {
+  const brand = normalizeModelKey(s.brand ?? '')
+  const model = normalizeModelKey(s.model ?? '')
+  return model ? `${brand}|${model}` : `${brand}|~${normalizeModelKey(s.name)}`
+}
+
+/**
+ * Concatenates source groups in authority order, dropping any row that
+ * repeats a product an earlier (more authoritative) group already offered.
+ *
+ * Callers pass groups most-authoritative-first. Deduping forward rather than
+ * backward is what makes this safe to re-run as later phases arrive: adding a
+ * web group to an already-rendered [catalog, shared] list cannot disturb the
+ * rows above it, so the list only ever grows downward.
+ */
+export function dedupeSuggestions<T extends RankableSuggestion>(groups: T[][], limit = 8): T[] {
+  const seen = new Set<string>()
+  const out: T[] = []
+  for (const group of groups) {
+    for (const row of group) {
+      if (out.length >= limit) return out
+      const key = suggestionIdentity(row)
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push(row)
+    }
+  }
+  return out
+}

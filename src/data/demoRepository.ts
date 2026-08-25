@@ -38,6 +38,7 @@ import type {
   ProductResolveResult,
   GlobalProductMatch,
   ProductLookupSelfTest,
+  ProductSuggestion,
   ProductSuggestionResult,
   SendEmailResult,
   ShopifyImportResult,
@@ -53,6 +54,7 @@ import { buildSkuBase, nextAvailableSku } from '../lib/sku'
 import { newId } from '../lib/ids'
 import { canonicalizeProductFields } from '../lib/productNaming'
 import { barcodeLookupForms } from '../lib/barcodeIdentity'
+import { searchLocalCatalog } from '../lib/productSearch'
 
 const STORAGE_KEY = '0gauge-demo-db'
 
@@ -415,6 +417,20 @@ export class DemoRepository implements DataRepository {
       return { source: 'candidates', candidates: result.candidates, retainedInput: result.retainedInput }
     }
     return { source: 'not_found' }
+  }
+
+  async suggestProductsFast(query: string, brandHint?: string | null): Promise<ProductSuggestion[]> {
+    // Demo mode has no shared catalog, so the fast phase is the demo shop's
+    // own catalog only — which is genuinely the useful half here, since the
+    // demo data is seeded with real-looking products.
+    return searchLocalCatalog(this.db.catalogItems, query, brandHint).map((hit) => ({
+      name: hit.name,
+      brand: hit.brand,
+      model: hit.model,
+      unitPriceCents: hit.priceCents,
+      imageUrl: hit.imageUrl,
+      sourceUrl: null,
+    }))
   }
 
   async lookupProductSuggestions(query: string): Promise<ProductSuggestionResult> {

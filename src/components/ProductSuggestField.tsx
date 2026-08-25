@@ -6,7 +6,19 @@ import { formatCurrency } from '../lib/format'
 import { Input } from './ui'
 import { splitItemName } from '../lib/productNaming'
 
-const DEBOUNCE_MS = 600
+// Two debounces, because the two phases cost wildly different things.
+//
+// The fast phase reads the shop's own catalog (in memory) and one indexed
+// RPC — cheap enough to fire while someone is still typing, which is what
+// makes the field feel instant on products the shop already stocks.
+//
+// The web phase is a grounded model call that costs real money per keystroke,
+// so it waits for typing to actually stop. The gap between the two is the
+// whole trick: staff see their own stock in ~200ms and the web results arrive
+// underneath a second or two later, instead of staring at a spinner for the
+// full round trip before anything at all appears.
+const FAST_DEBOUNCE_MS = 180
+const WEB_DEBOUNCE_MS = 550
 const MIN_QUERY_LENGTH = 3
 
 /**
@@ -38,6 +50,13 @@ export function ProductSuggestField({
 }) {
   const repo = useRepo()
   const [suggestions, setSuggestions] = useState<ProductSuggestion[]>([])
+  // Bumped on every query change. Each in-flight lookup captures the value at
+  // the moment it started and drops its own result if the counter has moved
+  // on — otherwise a slow web search for "jp2" can land after the fast search
+  // for "jp284" and replace correct results with stale ones. `cancelled` in
+  // the effect cleanup covers unmount and re-run, but not two responses for
+  // two different queries racing each other on the way back.
+  const queryRef = useRef(0)
   // Why the list is empty, when it is empty for a reason other than "no
   // match" — an unfunded key or a provider that refused the call. Shown in
   // the dropdown rather than as a toast: this fires on a debounced keystroke,
@@ -54,6 +73,7 @@ export function ProductSuggestField({
 
   useEffect(() => {
     const query = value.trim()
+    const revision = ++queryRef.current
     if (query.length < MIN_QUERY_LENGTH) {
       setSuggestions([])
       setLookupNote(null)
@@ -62,12 +82,36 @@ export function ProductSuggestField({
       return
     }
     let cancelled = false
+    const fresh = () => !cancelled && queryRef.current === revision
     setLoading(true)
-    const timer = setTimeout(() => {
+
+    // Phase 1 — the shop's own catalog and the shared catalog.
+    const fastTimer = setTimeout(() => {
+      void repo
+        .suggestProductsFast(query)
+        .then((fast) => {
+          if (!fresh() || fast.length === 0) return
+          // Deliberately does not clear `loading`: the web phase is still
+          // running, and the spinner is what tells staff more rows may yet
+          // appear below the ones they can already see.
+          setSuggestions(fast)
+          setSearched(true)
+          setOpen(true)
+        })
+        .catch(() => {
+          // A failed fast phase is not worth reporting — the web phase is
+          // still coming, and this half is an accelerant, not a dependency.
+        })
+    }, FAST_DEBOUNCE_MS)
+
+    // Phase 2 — the web search. Its result already contains everything phase
+    // one found, in the same order, so replacing the list here appends rather
+    // than reshuffles.
+    const webTimer = setTimeout(() => {
       void repo
         .lookupProductSuggestions(query)
         .then((result) => {
-          if (cancelled) return
+          if (!fresh()) return
           setSuggestions(result.suggestions)
           setLookupNote(
             !result.aiConfigured
@@ -80,12 +124,14 @@ export function ProductSuggestField({
           setOpen(true)
         })
         .finally(() => {
-          if (!cancelled) setLoading(false)
+          if (fresh()) setLoading(false)
         })
-    }, DEBOUNCE_MS)
+    }, WEB_DEBOUNCE_MS)
+
     return () => {
       cancelled = true
-      clearTimeout(timer)
+      clearTimeout(fastTimer)
+      clearTimeout(webTimer)
     }
   }, [value, repo])
 
@@ -140,7 +186,7 @@ export function ProductSuggestField({
         <div className="mt-1 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-lg">
           {suggestions.length === 0 ? (
             <p className={`px-3 py-2.5 text-sm ${!loading && lookupNote ? 'text-amber-800' : 'text-zinc-500'}`}>
-              {loading ? 'Searching the web…' : (lookupNote ?? 'No matches found.')}
+              {loading ? 'Searching…' : (lookupNote ?? 'No matches found.')}
             </p>
           ) : (
             <ul className="max-h-72 divide-y divide-zinc-100 overflow-y-auto">

@@ -589,6 +589,20 @@ export interface DataRepository {
    */
   lookupProductByUpc(code: string, options?: { fast?: boolean; brandHint?: string | null }): Promise<UpcLookupResult>
   /** AI+web-search autocomplete for a partially-typed SKU/model/name when adding a new catalog product. `brandHint` scopes the search to the brand being received. Demo mode never makes a real call — always resolves []. Production degrades to [] on any failure rather than throwing, same pattern as lookupProductByUpc. Delegates to resolveProduct() underneath. */
+  /**
+   * The sub-second half of a typed lookup: the shop's own catalog plus the
+   * shared catalog, with no web/AI call at all.
+   *
+   * Exists so a search UI can put something on screen while the web search is
+   * still in flight. Callers that want the complete list in one await should
+   * use lookupProductSuggestions instead — its result is guaranteed to start
+   * with everything this returns, in the same order, so rendering this first
+   * and that second only ever appends rows.
+   *
+   * Never throws: every source degrades to [] on its own.
+   */
+  suggestProductsFast(query: string, brandHint?: string | null): Promise<ProductSuggestion[]>
+  /** Everything suggestProductsFast finds, plus web/AI candidates appended behind it. */
   lookupProductSuggestions(query: string, brandHint?: string | null): Promise<ProductSuggestionResult>
   /** Ask the backend whether product lookup actually works right now, and why not if it doesn't. */
   testProductLookup(): Promise<ProductLookupSelfTest>

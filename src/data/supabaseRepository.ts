@@ -2,6 +2,7 @@ import { FunctionsHttpError, type SupabaseClient } from '@supabase/supabase-js'
 import { sanitizeFinancingOffers } from '../lib/financing'
 import { canonicalizeProductFields } from '../lib/productNaming'
 import { globalMatchKey, toGlobalProductDraft } from '../lib/globalCatalog'
+import { dedupeSuggestions, searchLocalCatalog } from '../lib/productSearch'
 import type {
   Appointment,
   Bay,
@@ -651,6 +652,7 @@ export class SupabaseRepository implements DataRepository {
       .select('*')
       .single()
     if (error) throw error
+    this.invalidateCatalogCache()
     const created = mapCatalogItem(data)
     // Offer it to the shared catalog after the create has already succeeded,
     // and never await it: identifying a product is work this shop did, and the
@@ -668,12 +670,14 @@ export class SupabaseRepository implements DataRepository {
       .select('*')
       .single()
     if (error) throw error
+    this.invalidateCatalogCache()
     return mapCatalogItem(data)
   }
 
   async deleteCatalogItem(itemId: string): Promise<void> {
     const { error } = await this.supabase.from('catalog_items').delete().eq('id', itemId)
     if (error) throw error
+    this.invalidateCatalogCache()
   }
 
   async runShopifyImport(options: ShopifyImportOptions = {}): Promise<ShopifyImportResult> {
@@ -695,6 +699,8 @@ export class SupabaseRepository implements DataRepository {
       }
       throw error
     }
+    // An import can rewrite the whole catalog; anything cached is now stale.
+    this.invalidateCatalogCache()
     return data as ShopifyImportResult
   }
 
@@ -848,28 +854,88 @@ export class SupabaseRepository implements DataRepository {
     }
   }
 
+  /**
+   * The two cheap sources, both of which can answer in well under a second:
+   * the shop's own catalog (in memory after the first call) and the shared
+   * catalog (one indexed RPC).
+   *
+   * Split out from the full lookup so the UI can render an answer while the
+   * web search is still running. Previously both phases were awaited together
+   * in a Promise.all, which meant a product the shop already stocks — the
+   * single most common case while receiving a shipment — still took as long
+   * as a grounded model call to appear. Parallel was the right instinct and
+   * the wrong shape: the two calls did run at once, but the fast one could
+   * not be *shown* until the slow one finished.
+   *
+   * Never throws. Both halves degrade to [] independently.
+   */
+  async suggestProductsFast(query: string, brandHint?: string | null): Promise<ProductSuggestion[]> {
+    const trimmed = query.trim()
+    if (trimmed.length < 2) return []
+
+    const [items, shared] = await Promise.all([
+      this.cachedCatalogItems().catch(() => [] as CatalogItem[]),
+      this.searchGlobalProducts(trimmed),
+    ])
+
+    const local: ProductSuggestion[] = searchLocalCatalog(items, trimmed, brandHint).map((hit) => ({
+      name: hit.name,
+      brand: hit.brand,
+      model: hit.model,
+      unitPriceCents: hit.priceCents,
+      imageUrl: hit.imageUrl,
+      sourceUrl: null,
+    }))
+
+    return dedupeSuggestions([local, shared.map(globalToSuggestion)])
+  }
+
+  /**
+   * The shop's own catalog, cached briefly in memory.
+   *
+   * Justified by the access pattern rather than by size: this is read on a
+   * debounced keystroke, so without a cache every letter typed is a full
+   * table fetch. The window is deliberately short — a product added on
+   * another device should show up in autocomplete within seconds, and the
+   * cache is dropped outright whenever this repository writes a catalog item
+   * (see invalidateCatalogCache) so a shop never fails to find something they
+   * just entered themselves.
+   */
+  private catalogCache: { items: CatalogItem[]; at: number } | null = null
+
+  private async cachedCatalogItems(): Promise<CatalogItem[]> {
+    const CACHE_MS = 30_000
+    const cached = this.catalogCache
+    if (cached && Date.now() - cached.at < CACHE_MS) return cached.items
+    const items = await this.listCatalogItems()
+    this.catalogCache = { items, at: Date.now() }
+    return items
+  }
+
+  private invalidateCatalogCache(): void {
+    this.catalogCache = null
+  }
+
+  /**
+   * Everything suggestProductsFast finds, plus the web resolver's candidates
+   * appended behind them.
+   *
+   * Kept as one call that returns the complete list so a caller that does not
+   * want progressive rendering still gets a correct answer from a single
+   * await. Callers that do want it run suggestProductsFast on a short timer
+   * and this on a longer one; dedupeSuggestions guarantees the second result
+   * is an extension of the first, never a reshuffle of it.
+   */
   async lookupProductSuggestions(query: string, brandHint?: string | null): Promise<ProductSuggestionResult> {
     const trimmed = query.trim()
     if (trimmed.length < 2) return { suggestions: [], aiConfigured: true, aiError: null }
 
-    // The shared catalog first, and in parallel rather than in sequence: a hit
-    // there is instant and free, but waiting to find that out before starting
-    // the web call would make every miss twice as slow.
-    const [shared, result] = await Promise.all([
-      this.searchGlobalProducts(trimmed),
+    const [fast, result] = await Promise.all([
+      this.suggestProductsFast(trimmed, brandHint),
       this.resolveProduct({ kind: 'text', query: trimmed, brandHint }),
     ])
 
-    const sharedSuggestions: ProductSuggestion[] = shared.map((g) => ({
-      name: g.name,
-      brand: g.brand,
-      model: g.model,
-      unitPriceCents: g.referencePriceCents,
-      imageUrl: g.imageUrl,
-      sourceUrl: g.sourceUrl,
-    }))
-
-    const webSuggestions: ProductSuggestion[] = result.candidates.map((c) => ({
+    const web: ProductSuggestion[] = result.candidates.map((c) => ({
       name: c.name,
       brand: c.brand,
       model: c.model,
@@ -878,19 +944,8 @@ export class SupabaseRepository implements DataRepository {
       sourceUrl: c.priceSourceUrl,
     }))
 
-    // Shared entries lead: several shops agreeing on a product beats one
-    // model's guess about it. dedupeCandidates can't be reused here (it works
-    // on resolver candidates), so this drops web rows that repeat a shared
-    // brand+model outright.
-    const seen = new Set(
-      sharedSuggestions.map((s) => `${s.brand ?? ''}|${s.model ?? ''}`.toLowerCase().replace(/[^a-z0-9|]/g, '')),
-    )
-    const deduped = webSuggestions.filter(
-      (s) => !seen.has(`${s.brand ?? ''}|${s.model ?? ''}`.toLowerCase().replace(/[^a-z0-9|]/g, '')),
-    )
-
     return {
-      suggestions: [...sharedSuggestions, ...deduped],
+      suggestions: dedupeSuggestions([fast, web]),
       aiConfigured: result.aiConfigured,
       aiError: result.aiError,
     }
@@ -1896,5 +1951,24 @@ export class SupabaseRepository implements DataRepository {
       .update({ reminder_sent_at: new Date().toISOString() })
       .eq('id', appointmentId)
     if (error) throw error
+  }
+}
+
+/**
+ * A shared-catalog row as an autocomplete suggestion.
+ *
+ * `referencePriceCents` is a web/manufacturer reference, never another shop's
+ * selling price — the shared catalog deliberately carries no shop pricing (see
+ * globalCatalog.ts). So what lands in `unitPriceCents` here is a starting
+ * point for staff to overwrite, not a competitor's number leaking sideways.
+ */
+function globalToSuggestion(g: GlobalProductMatch): ProductSuggestion {
+  return {
+    name: g.name,
+    brand: g.brand,
+    model: g.model,
+    unitPriceCents: g.referencePriceCents,
+    imageUrl: g.imageUrl,
+    sourceUrl: g.sourceUrl,
   }
 }

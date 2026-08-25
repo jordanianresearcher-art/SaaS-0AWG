@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
+  dedupeSuggestions,
   knownBrands,
   mergeSearchHits,
   normalizeModelKey,
   scoreCatalogMatch,
   searchLocalCatalog,
+  suggestionIdentity,
   type ProductSearchHit,
 } from './productSearch'
 import type { CatalogItem } from '../types'
@@ -130,5 +132,72 @@ describe('mergeSearchHits', () => {
       { key: 'web:3', source: 'web', brand: 'Nemesis Audio', model: 'NA-18F', name: 'NA-18F', priceCents: null, imageUrl: null, score: 999 },
     ]
     expect(mergeSearchHits(twoLocal, web).slice(0, 2).map((h) => h.key)).toEqual(['catalog:a', 'catalog:b'])
+  })
+})
+
+describe('suggestionIdentity', () => {
+  it('treats punctuation and case differences in a model as the same product', () => {
+    const a = { brand: 'Down4Sound', model: 'JP-284', name: 'JP-284 Amplifier' }
+    const b = { brand: 'DOWN4SOUND', model: 'jp284', name: 'JP284 2-Channel Amp' }
+    expect(suggestionIdentity(a)).toBe(suggestionIdentity(b))
+  })
+
+  it('does not collide two models from the same brand', () => {
+    const a = { brand: 'Taramps', model: 'TS 400X4', name: 'TS 400x4' }
+    const b = { brand: 'Taramps', model: 'TS 800X4', name: 'TS 800x4' }
+    expect(suggestionIdentity(a)).not.toBe(suggestionIdentity(b))
+  })
+
+  it('falls back to the name when a product genuinely has no model number', () => {
+    const a = { brand: 'Kicker', model: null, name: 'Speaker wire, 16ga' }
+    const b = { brand: 'Kicker', model: null, name: 'RCA cable, 3ft' }
+    expect(suggestionIdentity(a)).not.toBe(suggestionIdentity(b))
+  })
+
+  it('keeps a modelless row from colliding with a real model of the same brand', () => {
+    // Without the '~' marker, brand 'X' + model '' and brand 'X' + name ''
+    // could both normalize to "x|" and silently swallow one another.
+    const noModel = { brand: 'Kicker', model: null, name: 'CompR' }
+    const withModel = { brand: 'Kicker', model: 'CompR', name: 'Something else' }
+    expect(suggestionIdentity(noModel)).not.toBe(suggestionIdentity(withModel))
+  })
+})
+
+describe('dedupeSuggestions', () => {
+  const catalog = { brand: 'Down4Sound', model: 'JP-284', name: 'JP-284 (shop stock)' }
+  const shared = { brand: 'down4sound', model: 'jp284', name: 'JP284 from shared catalog' }
+  const web = { brand: 'Down4Sound', model: 'JP 284', name: 'JP 284 from a retailer' }
+
+  it('keeps the most authoritative copy of a product and drops the rest', () => {
+    const out = dedupeSuggestions([[catalog], [shared], [web]])
+    expect(out).toEqual([catalog])
+  })
+
+  it('preserves group order so a later phase can only append', () => {
+    const other = { brand: 'Taramps', model: 'TS 400X4', name: 'TS 400x4' }
+    const out = dedupeSuggestions([[catalog], [other]])
+    expect(out.map((s) => s.model)).toEqual(['JP-284', 'TS 400X4'])
+  })
+
+  it('produces a prefix of the fuller list when a slow group has not arrived yet', () => {
+    // This is the property that makes progressive rendering safe: adding the
+    // web group must never reorder or remove what is already on screen.
+    const early = dedupeSuggestions([[catalog], [shared]])
+    const late = dedupeSuggestions([[catalog], [shared], [web]])
+    expect(late.slice(0, early.length)).toEqual(early)
+  })
+
+  it('honours the limit across groups, not per group', () => {
+    const many = Array.from({ length: 6 }, (_, i) => ({
+      brand: 'B',
+      model: `M${i}`,
+      name: `n${i}`,
+    }))
+    const out = dedupeSuggestions([many, many.map((m) => ({ ...m, model: `X${m.model}` }))], 8)
+    expect(out).toHaveLength(8)
+  })
+
+  it('ignores empty groups', () => {
+    expect(dedupeSuggestions([[], [], [web]])).toEqual([web])
   })
 })
