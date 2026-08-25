@@ -383,22 +383,28 @@ export default function ScanWorkspacePage() {
     const imageUrl = customSuggestion?.imageUrl ?? null
     const name = customName.trim()
 
-    // Selling a product IS how the catalog gets built. When the line came from
-    // a real web/AI match (not free text someone typed), file it in the
-    // catalog on the way past — canonically named, with its photo — so the
-    // second unit of that product costs zero lookups and the shop ends up with
-    // a real product database as a side effect of ordinary counter work.
+    // Selling a product IS how the catalog gets built. Two cases earn a
+    // catalog row on the way past:
+    //
+    //   - the line came from a real web/AI match (not bare typed text), so
+    //     it arrives canonically named with a photo; or
+    //   - a scanned code is sitting in unresolvedCode. That code failed every
+    //     lookup, a person just told us what the box is, and this exact
+    //     pairing — their code, their name — is the one identification that
+    //     can never be bought from any database. Losing it here would mean
+    //     paying the same "no match" again on the very next unit.
     //
     // Best-effort on purpose: a catalog write must never block a sale. If it
     // fails, the line still goes in the cart as a one-off.
     let catalogItemId: string | null = null
-    if (customSuggestion) {
+    if (customSuggestion || unresolvedCode) {
       try {
         const saved = await repo.createCatalogItem({
           brand,
           model,
           name,
           defaultPriceCents: priceCents || null,
+          upc: unresolvedCode,
           imageUrl,
           // Records where this came from, so an owner reviewing the catalog can
           // tell AI-resolved rows from hand-typed ones.
@@ -669,7 +675,8 @@ export default function ScanWorkspacePage() {
                 {unresolvedCode ? (
                   <p className="flex items-start gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
                     <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                    Scanned code {unresolvedCode} — no confident match. It's kept here; fill in the details and it'll still go in as a one-off item.
+                    Scanned code {unresolvedCode} — no confident match. Type what it is and it goes in the
+                    order <em>and</em> your catalog with this barcode attached, so the next scan finds it instantly.
                   </p>
                 ) : null}
                 <div className="flex flex-wrap items-start gap-2">

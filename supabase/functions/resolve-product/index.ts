@@ -87,7 +87,7 @@ function fail(status: number, message: string): Response {
  * the UI, as "no AI provider key is set" — to an owner who had just set one.
  * Reporting the version makes that mismatch visible instead of a guess.
  */
-const FUNCTION_VERSION = 8
+const FUNCTION_VERSION = 9
 
 const ANTHROPIC_VERSION = '2023-06-01'
 
@@ -259,6 +259,23 @@ interface Candidate {
   confidenceLevel: 'high' | 'probable' | 'low'
   evidence: string[]
   warnings: string[]
+}
+
+/**
+ * Do two candidates plausibly describe the same product? Deliberately loose:
+ * one shared 3+ character token across brand/model/name (normalized) counts.
+ * This gates an evidence upgrade, not a rejection -- a false "same" only
+ * strengthens a candidate a person still confirms, while a false "different"
+ * pushes the database's answer in as a second option, which costs one tap.
+ */
+function namesShareAToken(a: Candidate, b: Candidate): boolean {
+  const tokens = (c: Candidate) =>
+    `${c.brand ?? ''} ${c.model ?? ''} ${c.name}`
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((t) => t.length >= 3)
+  const bTokens = new Set(tokens(b))
+  return tokens(a).some((t) => bTokens.has(t))
 }
 
 function confidenceLevel(score: number): 'high' | 'probable' | 'low' {
@@ -959,7 +976,7 @@ const PRODUCT_SOURCES =
 /** Appended on rung 3, where nothing but the prompt constrains the shape. */
 const JSON_ONLY_INSTRUCTION =
   '\n\nReply with ONLY a JSON object of the form {"candidates":[...]} and no other text. ' +
-  'Each candidate has the keys: name (string), brand, model, category_hint, barcode_confirmed, ' +
+  'Each candidate has the keys: name (string), brand, model, category_hint, upc, barcode_confirmed, ' +
   'unit_price (number in USD), price_kind, image_url, source_url, source_name, ' +
   'confidence (number 0-1), evidence (array of short strings). Use null for anything you do not know.'
 
@@ -983,6 +1000,7 @@ const AI_CANDIDATE_SCHEMA = {
           brand: NULLABLE_STRING,
           model: NULLABLE_STRING,
           category_hint: { ...NULLABLE_STRING, description: 'Plain-language category, e.g. "car subwoofer", "4-channel amplifier". Null if unsure.' },
+          upc: { ...NULLABLE_STRING, description: 'For photo lookups only: the digits printed under the barcode, transcribed exactly as printed. Null unless every digit is clearly legible — never guess or complete a partial number.' },
           barcode_confirmed: { ...NULLABLE_BOOLEAN, description: 'True only if a source explicitly ties this exact barcode/UPC to this product. False or null otherwise. Always null for a text-query search.' },
           unit_price: { ...NULLABLE_NUMBER, description: 'Price in USD found from web search. Null if unknown.' },
           price_kind: { ...NULLABLE_STRING, description: '"msrp", "retail", or null if unclear which kind of price this is.' },
@@ -993,7 +1011,7 @@ const AI_CANDIDATE_SCHEMA = {
           evidence: { type: 'array', items: { type: 'string' }, description: 'Short reasons supporting this match.' },
         },
         required: [
-          'name', 'brand', 'model', 'category_hint', 'barcode_confirmed', 'unit_price',
+          'name', 'brand', 'model', 'category_hint', 'upc', 'barcode_confirmed', 'unit_price',
           'price_kind', 'image_url', 'source_url', 'source_name', 'confidence', 'evidence',
         ],
         additionalProperties: false,
@@ -1009,6 +1027,7 @@ interface RawAiCandidate {
   brand: unknown
   model: unknown
   category_hint: unknown
+  upc: unknown
   barcode_confirmed: unknown
   unit_price: unknown
   price_kind: unknown
@@ -1140,6 +1159,20 @@ function parseAiCandidates(
         console.error(`resolve-product: dropped degenerate ${providerLabel} candidate`, name.slice(0, 120))
         return null
       }
+      // A code transcribed from the photo is only trusted when its check
+      // digit verifies -- vision misreads a digit far more often than it
+      // fabricates a whole product, and a wrong barcode silently bound to a
+      // right product poisons every future scan of it. The scanned code (the
+      // upc parameter), when present, always wins over a transcription.
+      const transcribed = typeof c.upc === 'string' ? c.upc.trim().replace(/[\s-]/g, '') : ''
+      // Retail length and a verifying check digit -- that is the whole test.
+      // Store-assigned prefixes are fine here (the code on the box is the
+      // code on the box); what is not fine is a misread digit, which is
+      // exactly what the check digit exists to catch.
+      const transcribedValid =
+        /^\d{8}$|^\d{12,13}$/.test(transcribed) &&
+        gs1CheckDigit(transcribed.slice(0, -1)) === Number(transcribed[transcribed.length - 1])
+      const candidateUpc = upc ?? (transcribedValid ? transcribed : null)
       const barcodeConfirmed = c.barcode_confirmed === true
       const selfReported = typeof c.confidence === 'number' && Number.isFinite(c.confidence) ? Math.max(0, Math.min(1, c.confidence)) : 0.3
       // A barcode search where the source didn't explicitly confirm the
@@ -1157,7 +1190,7 @@ function parseAiCandidates(
         model: typeof c.model === 'string' ? c.model : null,
         name,
         categoryHint: typeof c.category_hint === 'string' ? c.category_hint : null,
-        upc,
+        upc: candidateUpc,
         imageUrl: typeof c.image_url === 'string' ? c.image_url : null,
         referencePriceCents: typeof c.unit_price === 'number' ? Math.round(c.unit_price * 100) : null,
         priceKind: c.price_kind === 'msrp' ? 'msrp' : c.price_kind === 'retail' ? 'retail' : 'unknown',
@@ -1254,7 +1287,9 @@ const OFFICIAL_PAGE_PROMPT = (query: string) =>
 const VISION_IDENTIFY_PROMPT =
   'This is a photo of a car-audio shop product (amplifier, subwoofer, speaker, head unit, wiring, ' +
   'enclosure, radio, DSP, etc), taken by staff. Identify the exact brand and model if you can read it in ' +
-  'the photo or on its packaging/label. Use web search to confirm the model, find its MSRP in USD, and a ' +
+  'the photo or on its packaging/label. If a barcode is visible and the digits printed under it are ' +
+  'legible, transcribe them into the upc field exactly as printed -- and only then: a guessed or ' +
+  'partially-read number is worse than none, so leave upc null unless every digit is clear. Use web search to confirm the model, find its MSRP in USD, and a ' +
   `plain-language category hint, searching ${PRODUCT_SOURCES}. Return up to 3 candidates, most-likely first, ` +
   'ranked by confidence -- or ' +
   "zero if the photo doesn't show an identifiable product clearly enough; never invent a product from a " +
@@ -2042,6 +2077,37 @@ Deno.serve(async (req: Request) => {
     }
 
     const candidates = await resolveViaVision(imageBase64, mediaType, diag)
+
+    // "Extract the UPC, then run a search, then validate": when the model
+    // transcribed a check-digit-valid code off the box, ask the barcode
+    // database about that code. Agreement upgrades the candidate from "a
+    // model read a photo" to "a photo and an independent database agree",
+    // which is the strongest identification this function can produce.
+    // Disagreement is NOT silently resolved either way -- the database's
+    // answer joins the list as its own option and a person picks, because
+    // both sources are fallible in different ways (vision misreads digits,
+    // UPCitemdb carries stale titles).
+    const top = candidates[0]
+    if (top?.upc) {
+      const dbHit = await resolveViaUpcItemDbAllForms(top.upc)
+      if (dbHit) {
+        const overlap = namesShareAToken(top, dbHit)
+        if (overlap) {
+          top.confidence = Math.max(top.confidence, 0.85)
+          top.confidenceLevel = confidenceLevel(top.confidence)
+          top.evidence = [...top.evidence, `Barcode ${top.upc} independently confirmed by the UPCitemdb barcode database.`]
+          top.imageUrl = top.imageUrl ?? dbHit.imageUrl
+          top.referencePriceCents = top.referencePriceCents ?? dbHit.referencePriceCents
+        } else {
+          dbHit.warnings = [
+            ...dbHit.warnings,
+            'The barcode database and the photo disagree about what this product is — check the box before picking.',
+          ]
+          candidates.push(dbHit)
+        }
+      }
+    }
+
     return json(200, { ok: true, candidates, cached: false, aiConfigured, aiError: diag.error })
   }
 
