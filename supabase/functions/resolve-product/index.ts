@@ -87,7 +87,7 @@ function fail(status: number, message: string): Response {
  * the UI, as "no AI provider key is set" — to an owner who had just set one.
  * Reporting the version makes that mismatch visible instead of a guess.
  */
-const FUNCTION_VERSION = 3
+const FUNCTION_VERSION = 4
 
 const ANTHROPIC_VERSION = '2023-06-01'
 
@@ -192,6 +192,9 @@ function normalizeQuery(raw: string): string {
 // and honest.
 // ---------------------------------------------------------------------------
 
+// MIRROR-BEGIN barcodeIdentity — keep behaviourally identical to src/lib/barcodeIdentity.ts
+// (src/lib/edgeFunctionMirrors.test.ts runs both copies over the same inputs).
+
 function gs1CheckDigit(payload: string): number {
   let sum = 0
   let weight = 3
@@ -233,6 +236,7 @@ function barcodeLookupForms(raw: string): string[] {
   else if (code.length === 13 && code.startsWith('0')) forms.push(code.slice(1))
   return forms
 }
+// MIRROR-END barcodeIdentity
 
 // ---------------------------------------------------------------------------
 // Candidate shape -- mirrors ProductResolutionCandidate in src/data/repository.ts.
@@ -413,6 +417,9 @@ async function scrapeProductImages(pageUrl: string, max = 8): Promise<string[]> 
 // productNaming, and barcodeIdentity).
 // ---------------------------------------------------------------------------
 
+// MIRROR-BEGIN aiJson — keep behaviourally identical to src/lib/aiJson.ts
+// (src/lib/edgeFunctionMirrors.test.ts runs both copies over the same inputs).
+
 function extractJsonBlock(raw: string): string | null {
   if (!raw) return null
   const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/i)
@@ -452,6 +459,7 @@ function parseLooseJson<T = unknown>(raw: string | null | undefined): T | null {
   if (!block) return null
   try { return JSON.parse(block) as T } catch { return null }
 }
+// MIRROR-END aiJson
 
 // ---------------------------------------------------------------------------
 // The ladder.
@@ -500,6 +508,21 @@ const RUNG_SEARCHED_WEB: Record<Rung, boolean> = { 1: true, 2: false, 3: false }
  * Nemesis, Sundown, B2 Audio) are stocked and described properly -- these are
  * frequently the *only* sites that carry a given model at all.
  */
+/**
+ * How long any one provider call gets before it is abandoned.
+ *
+ * A grounded search that runs long is not free to wait on: staff are standing
+ * at a counter with a box in their hand, and the Edge Function itself has a
+ * wall-clock limit that a hung upstream would otherwise consume entirely,
+ * killing the request with no diagnosis at all. Abandoning the call turns a
+ * hang into an ordinary rung failure the ladder can climb down from.
+ *
+ * 25s is deliberately generous — a grounded multi-search answer genuinely
+ * takes ten or more — and is a stop for something broken, not a latency
+ * target.
+ */
+const PROVIDER_TIMEOUT_MS = 25_000
+
 const PRODUCT_SOURCES =
   "the manufacturer's own website, Amazon, eBay, Crutchfield, Sonic Electronix, " +
   'Parts Express, mooncarstereo.com, elitecaraudio.com, down4soundshop.com, ' +
@@ -587,6 +610,18 @@ interface ProviderDiag {
   model: string | null
   /** Which rung of the ladder produced the result. Null when none did. */
   rung: Rung | null
+  /**
+   * How many calls failed *mechanically* — a non-2xx status, or output that
+   * could not be parsed.
+   *
+   * The ladder needs this to tell two outcomes apart that both look like an
+   * empty candidate list from the outside: "the call broke" and "the call
+   * worked and there is genuinely no such product". Only the first is worth
+   * climbing down for, because every lower rung is the same request with a
+   * capability removed — if a grounded, web-searching call found nothing, an
+   * ungrounded one certainly will not.
+   */
+  faults: number
 }
 
 /**
@@ -614,6 +649,7 @@ function providerErrorCode(body: string): string | null {
 
 function noteProviderError(diag: ProviderDiag, provider: string, status: number, body: string): void {
   const code = providerErrorCode(body)
+  diag.faults++
   diag.error = `${provider} returned ${status}${code ? ` (${code})` : ''}`
   console.error(`resolve-product: ${provider} API error`, status, body.slice(0, 500))
 }
@@ -621,9 +657,15 @@ function noteProviderError(diag: ProviderDiag, provider: string, status: number,
 // Shared by both providers: parse a provider's raw structured-output text
 // into candidates, applying the same barcode-confirmation confidence cap
 // either way. `providerLabel` is only for the console.error breadcrumb.
-function parseAiCandidates(rawText: string | null | undefined, upc: string | null, providerLabel: string): Candidate[] {
+function parseAiCandidates(
+  rawText: string | null | undefined,
+  upc: string | null,
+  providerLabel: string,
+  diag: ProviderDiag,
+): Candidate[] {
   if (typeof rawText !== 'string') {
     console.error(`resolve-product: no text output in ${providerLabel} response`)
+    diag.faults++
     return []
   }
 
@@ -635,6 +677,9 @@ function parseAiCandidates(rawText: string | null | undefined, upc: string | nul
   const parsed = parseLooseJson<{ candidates?: RawAiCandidate[] } | RawAiCandidate[]>(rawText)
   if (!parsed) {
     console.error(`resolve-product: unparseable ${providerLabel} output`, rawText.slice(0, 500))
+    // A shape problem, not an answer — and precisely what the next rung down
+    // exists to fix, so it must not be mistaken for "found nothing".
+    diag.faults++
     return []
   }
 
@@ -703,6 +748,7 @@ async function resolveViaClaude(
   model: string,
 ): Promise<Candidate[]> {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
+    signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
     method: 'POST',
     headers: {
       'x-api-key': apiKey,
@@ -719,7 +765,7 @@ async function resolveViaClaude(
 
   const data = await res.json()
   const textBlock = Array.isArray(data?.content) ? data.content.find((b: { type?: string }) => b?.type === 'text') : null
-  return parseAiCandidates(textBlock?.text, upc, 'Anthropic')
+  return parseAiCandidates(textBlock?.text, upc, 'Anthropic', diag)
 }
 
 // ---------------------------------------------------------------------------
@@ -774,6 +820,7 @@ async function findOfficialPhotoUrlClaude(apiKey: string, name: string, brand: s
   const query = [brand, name].filter(Boolean).join(' ')
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
+      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
       method: 'POST',
       headers: {
         'x-api-key': apiKey,
@@ -810,6 +857,7 @@ async function findOfficialPhotoUrlOpenAi(apiKey: string, name: string, brand: s
   const query = [brand, name].filter(Boolean).join(' ')
   try {
     const res = await fetch('https://api.openai.com/v1/responses', {
+      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
       method: 'POST',
       headers: {
         authorization: `Bearer ${apiKey}`,
@@ -853,6 +901,7 @@ async function resolveViaVisionClaude(
   model: string,
 ): Promise<Candidate[]> {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
+    signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
     method: 'POST',
     headers: {
       'x-api-key': apiKey,
@@ -878,7 +927,7 @@ async function resolveViaVisionClaude(
 
   const data = await res.json()
   const textBlock = Array.isArray(data?.content) ? data.content.find((b: { type?: string }) => b?.type === 'text') : null
-  const candidates = parseAiCandidates(textBlock?.text, null, 'Anthropic vision')
+  const candidates = parseAiCandidates(textBlock?.text, null, 'Anthropic vision', diag)
 
   // The identify call above can't see <img> tags (see the note on
   // scrapeProductImages), so a strong top match with no photo yet gets one
@@ -907,6 +956,7 @@ async function resolveViaVisionOpenAi(
   model: string,
 ): Promise<Candidate[]> {
   const res = await fetch('https://api.openai.com/v1/responses', {
+    signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
     method: 'POST',
     headers: {
       authorization: `Bearer ${apiKey}`,
@@ -942,7 +992,7 @@ async function resolveViaVisionOpenAi(
     ? messageItem.content.find((c: { type?: string }) => c?.type === 'output_text')
     : null
   const rawText = typeof textPart?.text === 'string' ? textPart.text : typeof data?.output_text === 'string' ? data.output_text : null
-  const candidates = parseAiCandidates(rawText, null, 'OpenAI vision')
+  const candidates = parseAiCandidates(rawText, null, 'OpenAI vision', diag)
 
   const top = candidates[0]
   if (top && !top.imageUrl) {
@@ -1010,6 +1060,7 @@ async function resolveViaOpenAi(
   model: string,
 ): Promise<Candidate[]> {
   const res = await fetch('https://api.openai.com/v1/responses', {
+    signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
     method: 'POST',
     headers: {
       authorization: `Bearer ${apiKey}`,
@@ -1031,7 +1082,7 @@ async function resolveViaOpenAi(
   // `output_text` is also offered as a root-level convenience field by the
   // API -- fall back to it if the shape above ever changes underneath us.
   const rawText = typeof textPart?.text === 'string' ? textPart.text : typeof data?.output_text === 'string' ? data.output_text : null
-  return parseAiCandidates(rawText, upc, 'OpenAI')
+  return parseAiCandidates(rawText, upc, 'OpenAI', diag)
 }
 
 // The one entry point the handler calls -- picks whichever provider this
@@ -1065,7 +1116,19 @@ async function climbLadder(
     }
 
     for (const rung of RUNGS) {
-      const candidates = await attempt(rung, resolvedModel)
+      const faultsBefore = diag.faults
+      let candidates: Candidate[] = []
+      try {
+        candidates = await attempt(rung, resolvedModel)
+      } catch (err) {
+        // A thrown rung — a timeout, a DNS failure, a socket reset — is a
+        // mechanical failure like any other, and the ladder exists to step
+        // around exactly this. Caught here rather than in resolveViaAi so it
+        // costs one rung instead of aborting the whole climb.
+        diag.faults++
+        diag.error = `AI request failed (${RUNG_LABEL[rung]})`
+        console.error(`resolve-product: rung ${rung} threw`, err)
+      }
       if (candidates.length > 0) {
         // A lower rung succeeding is worth knowing about but is not a failure
         // — clear the errors the rungs above it recorded on the way down.
@@ -1074,6 +1137,14 @@ async function climbLadder(
         diag.model = resolvedModel
         diag.rung = rung
         return candidates
+      }
+      if (diag.faults === faultsBefore) {
+        // The call went through, parsed, and returned no product. Climbing
+        // down would re-ask the same question with the web search and the
+        // strict schema taken away, which cannot do better and costs another
+        // two round trips — so a genuine "not found" used to take three
+        // grounded searches to report. Stop here instead.
+        return []
       }
     }
   }
@@ -1166,6 +1237,7 @@ async function resolveViaCompatible(
   if (grounding) body.google = grounding
 
   const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+    signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
     method: 'POST',
     headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
     body: JSON.stringify(body),
@@ -1186,7 +1258,7 @@ async function resolveViaCompatible(
 
   const data = await res.json()
   const text = data?.choices?.[0]?.message?.content
-  return parseAiCandidates(typeof text === 'string' ? text : null, upc, 'AI endpoint')
+  return parseAiCandidates(typeof text === 'string' ? text : null, upc, 'AI endpoint', diag)
 }
 
 // ---------------------------------------------------------------------------
@@ -1194,6 +1266,9 @@ async function resolveViaCompatible(
 // Deno cannot import from src/; same duplication rule as the email templates,
 // productNaming, barcodeIdentity and aiJson.
 // ---------------------------------------------------------------------------
+
+// MIRROR-BEGIN modelPreference — keep behaviourally identical to src/lib/modelPreference.ts
+// (src/lib/edgeFunctionMirrors.test.ts runs both copies over the same inputs).
 
 const NOT_CHAT = /embed|embedding|tts|whisper|audio|imagen|image-generation|aqa|rerank|moderation/i
 const TIER_ORDER = [/flash-lite/i, /flash/i, /mini/i, /lite/i, /haiku/i, /small/i]
@@ -1240,6 +1315,7 @@ function pickBestModel(ids: string[], exclude: string[] = []): string | null {
   })
   return candidates[0].id
 }
+// MIRROR-END modelPreference
 
 /**
  * Ask a compatible endpoint what models it actually has.
@@ -1266,6 +1342,7 @@ async function discoverCompatibleModel(
   let picked: string | null = null
   try {
     const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/models`, {
+      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
       headers: { authorization: `Bearer ${apiKey}` },
     })
     if (res.ok) {
@@ -1401,7 +1478,7 @@ Deno.serve(async (req: Request) => {
   )
   // Collects the first provider failure of this request, so a key that is set
   // but not working says so instead of looking like an empty result.
-  const diag: ProviderDiag = { error: null, provider: null, model: null, rung: null }
+  const diag: ProviderDiag = { error: null, provider: null, model: null, rung: null, faults: 0 }
 
   const body = await req.json().catch(() => null)
   const shopId = typeof body?.shopId === 'string' ? body.shopId : ''
