@@ -87,7 +87,7 @@ function fail(status: number, message: string): Response {
  * the UI, as "no AI provider key is set" — to an owner who had just set one.
  * Reporting the version makes that mismatch visible instead of a guess.
  */
-const FUNCTION_VERSION = 7
+const FUNCTION_VERSION = 8
 
 const ANTHROPIC_VERSION = '2023-06-01'
 
@@ -503,6 +503,15 @@ const PROVIDER_TIMEOUT_MS = 20_000
  * beats an unbounded one ending the same way.
  */
 const AI_BUDGET_MS = 40_000
+
+/**
+ * Budget for the small helper calls that sit outside a ladder climb: asking
+ * an endpoint which models it serves, and fetching a product page for its
+ * photo. They have no request diag to draw a deadline from, and they are
+ * single fast round trips rather than grounded searches, so they get a flat
+ * short cap.
+ */
+const HELPER_TIMEOUT_MS = 8_000
 
 /**
  * The abort signal for one provider call: the per-call cap, or whatever is
@@ -1260,7 +1269,7 @@ async function findOfficialPhotoUrlClaude(apiKey: string, name: string, brand: s
   const query = [brand, name].filter(Boolean).join(' ')
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
-      signal: providerSignal(diag),
+      signal: AbortSignal.timeout(HELPER_TIMEOUT_MS),
       method: 'POST',
       headers: {
         'x-api-key': apiKey,
@@ -1297,7 +1306,7 @@ async function findOfficialPhotoUrlOpenAi(apiKey: string, name: string, brand: s
   const query = [brand, name].filter(Boolean).join(' ')
   try {
     const res = await fetch('https://api.openai.com/v1/responses', {
-      signal: providerSignal(diag),
+      signal: AbortSignal.timeout(HELPER_TIMEOUT_MS),
       method: 'POST',
       headers: {
         authorization: `Bearer ${apiKey}`,
@@ -1454,13 +1463,21 @@ async function resolveViaVision(
   const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY')
   try {
     if (openAiKey) {
-      return await climbLadder('openai', openAiKey, diag, (rung, model) =>
-        resolveViaVisionOpenAi(openAiKey, imageBase64, mediaType, diag, rung, model),
+      return await climbLadder(
+        'openai',
+        diag,
+        async () => configuredModel('openai'),
+        () => discoverModel('openai', openAiKey),
+        (rung, model) => resolveViaVisionOpenAi(openAiKey, imageBase64, mediaType, diag, rung, model),
       )
     }
     if (anthropicKey) {
-      return await climbLadder('anthropic', anthropicKey, diag, (rung, model) =>
-        resolveViaVisionClaude(anthropicKey, imageBase64, mediaType, diag, rung, model),
+      return await climbLadder(
+        'anthropic',
+        diag,
+        async () => configuredModel('anthropic'),
+        () => discoverModel('anthropic', anthropicKey),
+        (rung, model) => resolveViaVisionClaude(anthropicKey, imageBase64, mediaType, diag, rung, model),
       )
     }
   } catch (err) {
@@ -1538,20 +1555,49 @@ async function resolveViaOpenAi(
  * because a wrong model id fails every rung identically — climbing all three
  * before discovering that would be three wasted round trips.
  */
+/**
+ * The one ladder, for every provider.
+ *
+ * There used to be two: this, and a hand-rolled copy inside the
+ * OpenAI-compatible branch of resolveViaAi. The copy predated every fix made
+ * here -- no per-rung error containment, so a single thrown call collapsed
+ * the whole climb into the useless "Could not reach the AI provider"; no
+ * fault counting, so an honest empty answer still cost three grounded
+ * searches; no deadline, so the 40s budget did not apply to it at all. A
+ * shop switching to Gemini to save money would have silently got the worst
+ * version of all three.
+ *
+ * Model selection is the only real difference between providers, so it is
+ * the only thing passed in.
+ */
 async function climbLadder(
-  provider: 'openai' | 'anthropic',
-  apiKey: string,
+  provider: 'openai' | 'anthropic' | 'compatible',
   diag: ProviderDiag,
+  firstModel: () => Promise<string | null>,
+  discover: (exclude: string[]) => Promise<string | null>,
   attempt: (rung: Rung, model: string) => Promise<Candidate[]>,
 ): Promise<Candidate[]> {
-  for (const model of [configuredModel(provider), null]) {
+  const first = await firstModel()
+  if (!first) {
+    diag.error = diag.error ?? 'The AI endpoint offered no usable model'
+    return []
+  }
+
+  for (const model of [first, null]) {
     let resolvedModel = model
     if (resolvedModel === null) {
       // Second pass: only worth making if the first failed on the model id
       // itself. Any other failure has already been reported by the rungs.
       if (!/model|404/i.test(diag.error ?? '')) break
-      resolvedModel = await discoverModel(provider, apiKey)
-      if (!resolvedModel) break
+      // Exclude the model that just failed. Without this, discovery
+      // cheerfully returns the id it was called to replace and the retry is
+      // wasted -- exactly what happened with a stale pinned model that the
+      // endpoint still advertised.
+      resolvedModel = await discover([first])
+      if (!resolvedModel) {
+        diag.error = `${diag.error ?? 'The AI endpoint failed'} — and no other usable model was offered`
+        break
+      }
       diag.error = null
     }
 
@@ -1789,7 +1835,7 @@ async function discoverCompatibleModel(
   let picked: string | null = null
   try {
     const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/models`, {
-      signal: providerSignal(diag),
+      signal: AbortSignal.timeout(HELPER_TIMEOUT_MS),
       headers: { authorization: `Bearer ${apiKey}` },
     })
     if (res.ok) {
@@ -1819,74 +1865,48 @@ async function resolveViaAi(prompt: string, upc: string | null, diag: ProviderDi
     // about cost, and it should not be silently overridden by a leftover
     // OPENAI_API_KEY from an earlier setup.
     if (compatBase && compatKey) {
-      // No hardcoded default. A model id baked into this file is a guess with
-      // a shelf life — `gemini-2.5-flash` shipped here and was already retired,
-      // so every lookup 404'd on a correctly configured project. Asking the
-      // endpoint what it serves is the only answer that stays true, so when
-      // AI_MODEL is unset that is the FIRST thing tried, not the fallback.
-      const configured =
-        Deno.env.get('AI_MODEL')?.trim() ||
-        (await discoverCompatibleModel(compatBase, compatKey, [])) ||
-        // Only if discovery itself failed. Current per Google's OpenAI-
-        // compatibility docs; still a guess, hence last.
-        'gemini-3.7-flash'
-
-      // Second pass only if the first failed in a way that looks like the
-      // model id — a 404 or a message naming the model. Any other failure has
-      // already been reported and asking for a model list would not help.
-      for (const model of [configured, null]) {
-        let resolvedModel = model
-        if (resolvedModel === null) {
-          if (!/404|model/i.test(diag.error ?? '')) break
-          // Exclude the model that just failed. Without this, discovery
-          // cheerfully returns the same id it was called to replace and the
-          // retry is wasted — which is exactly what happened when a stale
-          // AI_MODEL was pinned and the list still advertised it.
-          const discovered = await discoverCompatibleModel(compatBase, compatKey, [configured])
-          if (!discovered) {
-            // Discovery is the recovery path, so its failure is the thing
-            // worth reporting — otherwise the message blames a model id that
-            // was never the whole story.
-            diag.error = `${diag.error ?? 'The AI endpoint failed'} — and no other usable model was offered`
-            break
-          }
-          resolvedModel = discovered
-          diag.error = null
-        }
-
-        for (const rung of RUNGS) {
-          const candidates = await resolveViaCompatible(
-            compatBase,
-            compatKey,
-            prompt,
-            upc,
-            diag,
-            rung,
-            resolvedModel,
-          )
-          if (candidates.length > 0) {
-            diag.error = null
-            diag.provider = 'compatible'
-            diag.model = resolvedModel
-            diag.rung = rung
-            return candidates
-          }
-        }
-      }
-      return []
+      return await climbLadder(
+        'compatible',
+        diag,
+        // No hardcoded default. A model id baked into this file is a guess
+        // with a shelf life -- `gemini-2.5-flash` shipped here and was
+        // already retired, so every lookup 404'd on a correctly configured
+        // project. Asking the endpoint what it serves is the only answer
+        // that stays true, so with AI_MODEL unset that is tried FIRST rather
+        // than as a fallback.
+        async () =>
+          Deno.env.get('AI_MODEL')?.trim() ||
+          (await discoverCompatibleModel(compatBase, compatKey, [])) ||
+          // Only if discovery itself failed. Current per Google's
+          // OpenAI-compatibility docs; still a guess, hence last.
+          'gemini-3.7-flash',
+        (exclude) => discoverCompatibleModel(compatBase, compatKey, exclude),
+        (rung, model) => resolveViaCompatible(compatBase, compatKey, prompt, upc, diag, rung, model),
+      )
     }
     if (openAiKey) {
-      return await climbLadder('openai', openAiKey, diag, (rung, model) =>
-        resolveViaOpenAi(openAiKey, prompt, upc, diag, rung, model),
+      return await climbLadder(
+        'openai',
+        diag,
+        async () => configuredModel('openai'),
+        () => discoverModel('openai', openAiKey),
+        (rung, model) => resolveViaOpenAi(openAiKey, prompt, upc, diag, rung, model),
       )
     }
     if (anthropicKey) {
-      return await climbLadder('anthropic', anthropicKey, diag, (rung, model) =>
-        resolveViaClaude(anthropicKey, prompt, upc, diag, rung, model),
+      return await climbLadder(
+        'anthropic',
+        diag,
+        async () => configuredModel('anthropic'),
+        () => discoverModel('anthropic', anthropicKey),
+        (rung, model) => resolveViaClaude(anthropicKey, prompt, upc, diag, rung, model),
       )
     }
   } catch (err) {
-    diag.error = 'Could not reach the AI provider'
+    // Names which one. "The AI provider" is three different secrets, and an
+    // owner reading this has to know which to go and look at.
+    const which = compatBase && compatKey ? 'the configured AI endpoint' : openAiKey ? 'OpenAI' : 'Anthropic'
+    diag.error = `Could not reach ${which}`
     console.error('resolve-product: AI request threw', err)
   }
   return []
