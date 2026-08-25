@@ -252,6 +252,13 @@ function BuilderDropZone({
                 <span className="block truncate text-sm font-semibold text-ink">
                   {formatItemDisplayName(item)}
                 </span>
+                {/* A web-lookup row shows the price it will count as, so the
+                    subtotal never contains money nobody can see the source
+                    of. Catalog rows price live from the catalog and their
+                    price is visible on the tray card instead. */}
+                {item.catalogItemId === null && item.unitPriceCents !== null ? (
+                  <span className="block text-xs text-zinc-500">{formatCurrency(item.unitPriceCents)} each</span>
+                ) : null}
               </span>
               <span className="flex shrink-0 items-center gap-1">
                 <button
@@ -299,7 +306,7 @@ function CatalogTray({
   catalogItems: CatalogItem[]
   usageCounts: Map<string, number>
   onTapAdd: (item: CatalogItem) => void
-  onAddFreehand: (item: { brand: string | null; model: string | null; name: string; category: ProductCategory | null; imageUrl: string | null }) => void
+  onAddFreehand: (item: { brand: string | null; model: string | null; name: string; category: ProductCategory | null; imageUrl: string | null; unitPriceCents: number | null }) => void
 }) {
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState<ProductCategory | null>(null)
@@ -330,7 +337,7 @@ function CatalogTray({
         id="builder-catalog-search"
         value={search}
         onChange={setSearch}
-        onSelect={(s) => onAddFreehand({ brand: s.brand, model: s.model, name: s.name, category: null, imageUrl: s.imageUrl })}
+        onSelect={(s) => onAddFreehand({ brand: s.brand, model: s.model, name: s.name, category: null, imageUrl: s.imageUrl, unitPriceCents: s.unitPriceCents })}
         placeholder="Search your catalog or the web…"
       />
 

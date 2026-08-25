@@ -102,10 +102,10 @@ describe('addCatalogItemToBuilder', () => {
 })
 
 describe('addFreehandItemToBuilder', () => {
-  it('adds a row with no catalogItemId, e.g. from a web-search pick', () => {
-    const items = addFreehandItemToBuilder([], { brand: 'JL Audio', model: 'XD600/6', name: '6-channel amp', category: null, imageUrl: null })
+  it('adds a row with no catalogItemId, e.g. from a web-search pick, keeping its price', () => {
+    const items = addFreehandItemToBuilder([], { brand: 'JL Audio', model: 'XD600/6', name: '6-channel amp', category: null, imageUrl: null, unitPriceCents: 32999 })
     expect(items).toEqual([
-      expect.objectContaining({ catalogItemId: null, brand: 'JL Audio', model: 'XD600/6', name: '6-channel amp', quantity: 1 }),
+      expect.objectContaining({ catalogItemId: null, brand: 'JL Audio', model: 'XD600/6', name: '6-channel amp', quantity: 1, unitPriceCents: 32999 }),
     ])
   })
 })
@@ -139,9 +139,24 @@ describe('computeBuilderItemsSubtotalCents', () => {
     expect(computeBuilderItemsSubtotalCents(items, catalog)).toBe(9900 * 2 + 8900)
   })
 
-  it('is zero for a freehand row (no catalog product to price it from)', () => {
-    const items = addFreehandItemToBuilder([], { brand: null, model: null, name: 'Web result', category: null, imageUrl: null })
+  it('counts a web-lookup row at its own snapshot price', () => {
+    // The regression this whole field exists for: a product added from web
+    // lookup landed on the quote while the total silently excluded it. The
+    // predecessor of this test pinned that $0 as intended behaviour.
+    let items = addFreehandItemToBuilder([], { brand: 'Down4Sound', model: 'JP234', name: '4-channel amp', category: null, imageUrl: null, unitPriceCents: 32999 })
+    items = setBuilderItemQuantity(items, items[0].id, 2)
+    expect(computeBuilderItemsSubtotalCents(items, catalog)).toBe(65998)
+  })
+
+  it('is zero for a freehand row that genuinely has no price yet', () => {
+    const items = addFreehandItemToBuilder([], { brand: null, model: null, name: 'Web result', category: null, imageUrl: null, unitPriceCents: null })
     expect(computeBuilderItemsSubtotalCents(items, catalog)).toBe(0)
+  })
+
+  it('mixes live catalog pricing and snapshot pricing in one subtotal', () => {
+    let items = addCatalogItemToBuilder([], sub1) // 9900, priced live
+    items = addFreehandItemToBuilder(items, { brand: 'D4S', model: 'JP23', name: 'amp', category: null, imageUrl: null, unitPriceCents: 19999 })
+    expect(computeBuilderItemsSubtotalCents(items, catalog)).toBe(9900 + 19999)
   })
 
   it('is zero with no rows', () => {
@@ -151,7 +166,7 @@ describe('computeBuilderItemsSubtotalCents', () => {
 
 describe('builderItemsToQuoteItems / builderItemsToPackageItems', () => {
   const items: BuilderLineItem[] = [
-    { id: 'r1', catalogItemId: 'sub-1', brand: 'Kicker', model: 'CWRT8', name: '8" shallow subwoofer', quantity: 2, category: 'subwoofer', imageUrl: 'https://example.com/sub.jpg' },
+    { id: 'r1', catalogItemId: 'sub-1', brand: 'Kicker', model: 'CWRT8', name: '8" shallow subwoofer', quantity: 2, category: 'subwoofer', imageUrl: 'https://example.com/sub.jpg', unitPriceCents: null },
   ]
 
   it('maps rows into the option line-item shape', () => {
