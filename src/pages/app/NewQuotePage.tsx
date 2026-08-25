@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
   useFieldArray,
@@ -12,7 +12,7 @@ import {
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { addDays, format } from 'date-fns'
-import { Check, LayoutGrid, Package, Plus, Sparkles, Star, Trash2 } from 'lucide-react'
+import { Check, Pencil, Package, Plus, Sparkles, Star, Trash2 } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
 import { Button, Card, Field, Input, Modal, Select, Textarea } from '../../components/ui'
@@ -981,8 +981,29 @@ function MainOptionEditor({
   // The fast visual (drag-and-drop) package builder is a separate draft — it only
   // touches this option's real items/price once staff explicitly applies it, so
   // an abandoned or half-filled builder session never silently changes the quote.
-  const [builderOpen, setBuilderOpen] = useState(false)
+  
   const [builderValue, setBuilderValue] = useState<PackageBuilderValue>(createEmptyPackageBuilderValue)
+  // The item-rows grid is the fine-tune surface, not the front door — the
+  // drag-and-drop builder is. Opened automatically the moment there is
+  // anything to fine-tune (a template landed items, or the builder applied),
+  // and never auto-closed: hiding rows someone is editing is how edits get
+  // lost.
+  const [listOpen, setListOpen] = useState(false)
+  const mainItems = useWatch({ control, name: 'main.items' })
+  const prevItemCount = useRef(0)
+  useEffect(() => {
+    // Rows with an actual name — the form scaffolds one blank row on a fresh
+    // quote, and auto-opening the list for that invites typing into it,
+    // which is exactly the habit the inline builder is here to replace.
+    const count = Array.isArray(mainItems)
+      ? mainItems.filter((i) => typeof i?.name === 'string' && i.name.trim() !== '').length
+      : 0
+    // Open only on the 0 -> some transition (a template landed, or the
+    // builder applied). Re-opening on every render while items exist would
+    // fight anyone who chose to close it.
+    if (count > 0 && prevItemCount.current === 0) setListOpen(true)
+    prevItemCount.current = count
+  }, [mainItems])
   const [packageName, setPackageName] = useState('')
   const [savingPackage, setSavingPackage] = useState(false)
 
@@ -1015,7 +1036,8 @@ function MainOptionEditor({
       })),
     )
     setValue('main.price', (priceCents / 100).toFixed(2), { shouldValidate: true, shouldDirty: true })
-    setBuilderOpen(false)
+    setListOpen(true)
+    toast('success', `${items.length} product${items.length === 1 ? '' : 's'} on the quote.`)
   }
 
   async function saveAsPackageTemplate() {
@@ -1062,43 +1084,47 @@ function MainOptionEditor({
       </Field>
 
       <div>
-        <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
-          <p className="text-base font-semibold text-ink">Products</p>
-          {catalogItems.length > 0 ? (
-            <Button variant="ghost" onClick={() => setBuilderOpen(true)}>
-              <LayoutGrid className="h-5 w-5" aria-hidden="true" /> Build with drag & drop
-            </Button>
-          ) : null}
-        </div>
+        <p className="mb-1.5 text-base font-semibold text-ink">Products</p>
 
-        <Modal open={builderOpen} onClose={() => setBuilderOpen(false)} title="Build with drag & drop" size="xl">
-          <div className="space-y-3">
-            <PackageBuilder catalogItems={catalogItems} value={builderValue} onChange={setBuilderValue} usageCounts={usageCounts} />
-            <div className="flex flex-wrap items-center gap-2 border-t border-zinc-100 pt-3">
-              <Button type="button" onClick={applyBuilder} disabled={!canApplyBuilder}>
-                <Check className="h-5 w-5" aria-hidden="true" /> Apply
-              </Button>
-              <Button type="button" variant="ghost" onClick={() => setBuilderOpen(false)}>
-                Cancel
-              </Button>
-            </div>
-            <div className="flex flex-wrap items-end gap-2 border-t border-zinc-100 pt-3">
-              <Field label="Package name" htmlFor="main-pkg-name">
+        {/* The drag-and-drop builder IS the products editor — not a feature
+            behind a button. Search or scan on the tray, drag (or tap) onto
+            the package, then one deliberate Apply writes it to the quote.
+            The apply step is kept on purpose: writing through live would let
+            a later drag silently clobber fine-tune edits made in the list
+            below, and losing a person's edit to a gesture is the one thing
+            this page must never do. */}
+        <div className="rounded-xl border border-zinc-200 bg-white p-3">
+          <PackageBuilder catalogItems={catalogItems} value={builderValue} onChange={setBuilderValue} usageCounts={usageCounts} />
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-zinc-100 pt-3">
+            <Button type="button" onClick={applyBuilder} disabled={!canApplyBuilder}>
+              <Check className="h-5 w-5" aria-hidden="true" /> Put these on the quote
+            </Button>
+            <Field label="Save as a package" htmlFor="main-pkg-name">
+              <div className="flex gap-2">
                 <Input
                   id="main-pkg-name"
                   placeholder="e.g. Daily Bass 1×12"
                   value={packageName}
                   onChange={(e) => setPackageName(e.target.value)}
                 />
-              </Field>
-              <Button type="button" variant="secondary" disabled={savingPackage || !canApplyBuilder} onClick={() => void saveAsPackageTemplate()}>
-                {savingPackage ? 'Saving…' : 'Save as package'}
-              </Button>
-            </div>
+                <Button type="button" variant="secondary" disabled={savingPackage || !canApplyBuilder} onClick={() => void saveAsPackageTemplate()}>
+                  {savingPackage ? 'Saving…' : 'Save'}
+                </Button>
+              </div>
+            </Field>
           </div>
-        </Modal>
+        </div>
 
-        <ItemRows basePath="main.items" control={control} register={register} itemHistory={itemHistory} catalogItems={catalogItems} listIdPrefix="main-items" />
+        <div className="mt-3">
+          <Button type="button" variant="ghost" onClick={() => setListOpen((v) => !v)}>
+            <Pencil className="h-4 w-4" aria-hidden="true" /> {listOpen ? 'Hide the list view' : 'Fine-tune as a list'}
+          </Button>
+          {listOpen ? (
+            <div className="mt-2">
+              <ItemRows basePath="main.items" control={control} register={register} itemHistory={itemHistory} catalogItems={catalogItems} listIdPrefix="main-items" />
+            </div>
+          ) : null}
+        </div>
       </div>
 
       <Field label="Price (installed)" htmlFor="main-price" error={mainErrors?.price?.message}>

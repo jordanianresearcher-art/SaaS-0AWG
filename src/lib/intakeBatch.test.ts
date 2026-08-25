@@ -204,7 +204,7 @@ describe('chooseAlternate — a human picks between the machine\'s guesses', () 
   ]
 
   function resolvedLine() {
-    let lines = addTypedEntry([], 'jp23 amp')
+    const lines = addTypedEntry([], 'jp23 amp')
     return applyResolution(
       lines,
       'jp23 amp',
