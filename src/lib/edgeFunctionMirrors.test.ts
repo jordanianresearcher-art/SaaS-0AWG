@@ -31,6 +31,7 @@ import { pickBestModel } from './modelPreference'
 import fixture from './__fixtures__/shopProducts.json'
 import { centsFromPrice, parseBigCommerceQuickResults, parseShopifySuggest } from './retailerSearch'
 import { looksDegenerate } from './degenerateText'
+import { parseFitmentList } from './fitment'
 import shopifyFixture from './__fixtures__/retailerShopifySuggest.json'
 import bigcommerceFixture from './__fixtures__/retailerBigCommerceQuick.html?raw'
 import skyHighFixture from './__fixtures__/retailerBigCommerceSkyHigh.html?raw'
@@ -232,5 +233,25 @@ describe('degenerateText mirror', () => {
     ]
     const disagreements = cases.filter((c) => fnLooks(c) !== looksDegenerate(c))
     expect(disagreements).toEqual([])
+  })
+})
+
+describe('fitment mirror', () => {
+  const mirror = loadMirror('fitment', ['parseFitmentList'])
+  const fnParse = mirror.parseFitmentList as (raw: unknown) => unknown
+
+  it('parses every awkward shape the same way', () => {
+    const cases = [
+      [{ make: 'Toyota', model: 'Tacoma', year_start: 2005, year_end: 2015, note: null }],
+      [{ make: 'Ford', model: 'F-150', year_start: '2015-2021', year_end: null }],
+      [{ make: 'Ram', model: '1500', year_start: 2018, year_end: 2013 }],
+      [{ model: 'no make' }, { make: 'Toyota', year_start: 1902, year_end: 2099 }],
+      'garbage',
+      null,
+      Array.from({ length: 100 }, (_, i) => ({ make: `M${i}` })),
+    ]
+    for (const c of cases) {
+      expect(JSON.stringify(fnParse(c))).toBe(JSON.stringify(parseFitmentList(c)))
+    }
   })
 })

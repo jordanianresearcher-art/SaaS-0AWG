@@ -51,7 +51,7 @@ export interface DemoDB {
   seedVersion: number
 }
 
-export const DEMO_SEED_VERSION = 16
+export const DEMO_SEED_VERSION = 17
 
 const SHOP_ID = 'demo-shop'
 
@@ -728,6 +728,21 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
     demoCatalogItem({
       brand: 'MTX', model: 'TNP212D2', name: 'Dual 12" package with amp', category: null,
       defaultPriceCents: 39900,
+    }),
+    // Last on purpose: demo ids are positional (demo-cat-N) and the seeded
+    // stock movements below reference items by those ids, so new seed items
+    // append rather than shift everything after them.
+    // An integration part, so the vehicle-fitment flow (detail-page lookup,
+    // inventory chooser) is exercisable in demo mode.
+    demoCatalogItem({
+      brand: 'Metra', model: '99-8215', name: 'Single/double DIN dash kit', category: 'integration',
+      defaultPriceCents: 2499, msrpCents: 2999,
+      specs: {
+        vehicleFitment: [
+          { make: 'Toyota', model: 'Tacoma', year_start: 2005, year_end: 2015, note: null },
+        ],
+      },
+      quantityOnHand: 4,
     }),
   ]
 

@@ -13,6 +13,13 @@ import { CategoryIcon } from '../../components/categoryIcon'
 import { PRODUCT_CATEGORY_INFO, PRODUCT_CATEGORIES } from '../../lib/audioConfigs'
 import { effectiveThreshold, isLowStock } from '../../lib/inventory'
 import { barcodeAdvice, classifyBarcode, normalizeBarcodeInput } from '../../lib/barcodeIdentity'
+import {
+  brandNeedsFitment,
+  describeFitmentRange,
+  fitmentFromSpecs,
+  specsWithFitment,
+  type FitmentRange,
+} from '../../lib/fitment'
 import { formatCurrency, formatDateTime, parseDollarsToCents } from '../../lib/format'
 import { formatItemShortName } from '../../lib/productNaming'
 import type { CatalogItem, ProductCategory, StockMovement } from '../../types'
@@ -122,6 +129,43 @@ export default function InventoryDetailPage() {
       setDraftQty(item.quantityOnHand)
     } finally {
       setAdjusting(false)
+    }
+  }
+
+  // Web-looked-up fitment waiting for a human to approve. Never saved
+  // straight to the item: the owner's standing rule for AI answers is
+  // "give me options and take my input", and a wrong application list on a
+  // dash kit sells someone the wrong part for their truck.
+  const [fitmentPreview, setFitmentPreview] = useState<FitmentRange[] | null>(null)
+  const [fitmentBusy, setFitmentBusy] = useState(false)
+  const [fitmentError, setFitmentError] = useState<string | null>(null)
+
+  async function lookUpFitment() {
+    if (!item) return
+    setFitmentBusy(true)
+    setFitmentError(null)
+    setFitmentPreview(null)
+    try {
+      const result = await repo.lookupVehicleFitment({ brand: item.brand ?? '', model: item.model ?? item.name })
+      if (result.fitment.length > 0) setFitmentPreview(result.fitment)
+      else setFitmentError(result.aiError ?? "Couldn't find a published application list for this part.")
+    } finally {
+      setFitmentBusy(false)
+    }
+  }
+
+  async function saveFitment(ranges: FitmentRange[]) {
+    if (!item) return
+    try {
+      const updated = await repo.updateCatalogItem(
+        item.id,
+        currentInput(item, { specs: specsWithFitment(item.specs, ranges) }),
+      )
+      setItem(updated)
+      setFitmentPreview(null)
+      toast('success', `Saved fitment for ${ranges.length} vehicle${ranges.length === 1 ? '' : 's'}.`)
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : 'Could not save the fitment.')
     }
   }
 
@@ -313,6 +357,55 @@ export default function InventoryDetailPage() {
           )}
         </div>
       </Card>
+
+      {brandNeedsFitment(item.brand) ? (
+        <Card className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-xl font-bold text-ink">Vehicle fitment</h2>
+            <Button variant="secondary" onClick={() => void lookUpFitment()} disabled={fitmentBusy}>
+              {fitmentBusy ? 'Looking it up…' : fitmentFromSpecs(item.specs).length > 0 ? 'Re-check the web' : 'Look up from the web'}
+            </Button>
+          </div>
+
+          {fitmentFromSpecs(item.specs).length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {fitmentFromSpecs(item.specs).map((r, i) => (
+                <span key={i} className="rounded-full bg-zinc-100 px-3 py-1 text-sm font-medium text-zinc-800">
+                  {describeFitmentRange(r)}
+                </span>
+              ))}
+            </div>
+          ) : fitmentPreview === null ? (
+            <p className="text-sm text-zinc-600">
+              This is a vehicle-specific part with no application list saved yet. Look it up once and the
+              inventory page can answer &ldquo;what fits a 2018 Tacoma&rdquo; without anyone reading the box.
+            </p>
+          ) : null}
+
+          {fitmentError ? <p className="text-sm text-amber-800">{fitmentError}</p> : null}
+
+          {fitmentPreview ? (
+            <div className="rounded-xl border border-brand/40 bg-brand-tint/40 p-3">
+              {/* Found on the web, saved only on approval — a wrong application
+                  list on a dash kit sells someone the wrong part. */}
+              <p className="mb-2 text-sm font-semibold text-ink">Found this application list — does it match the box?</p>
+              <div className="mb-3 flex flex-wrap gap-1.5">
+                {fitmentPreview.map((r, i) => (
+                  <span key={i} className="rounded-full bg-white px-3 py-1 text-sm font-medium text-zinc-800 shadow-sm">
+                    {describeFitmentRange(r)}
+                  </span>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <Button onClick={() => void saveFitment(fitmentPreview)}>Save it</Button>
+                <Button variant="ghost" onClick={() => setFitmentPreview(null)}>
+                  Discard
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </Card>
+      ) : null}
 
       <Card>
         <h2 className="text-xl font-bold text-ink">Stock on hand</h2>

@@ -4,6 +4,7 @@ import { canonicalizeProductFields } from '../lib/productNaming'
 import { globalMatchKey, globalToCandidate, toGlobalProductDraft } from '../lib/globalCatalog'
 import { classifyBarcode } from '../lib/barcodeIdentity'
 import { dedupeSuggestions, searchLocalCatalog } from '../lib/productSearch'
+import { parseFitmentList, type FitmentRange } from '../lib/fitment'
 import type {
   Appointment,
   Bay,
@@ -1058,6 +1059,38 @@ export class SupabaseRepository implements DataRepository {
       })
     } catch (err) {
       console.error('contribute_global_product failed', err)
+    }
+  }
+
+  async lookupVehicleFitment(input: { brand: string; model: string }): Promise<{
+    fitment: FitmentRange[]
+    aiConfigured: boolean | null
+    aiError: string | null
+  }> {
+    try {
+      const { data, error } = await this.supabase.functions.invoke('resolve-product', {
+        body: { shopId: this.shopId, kind: 'fitment', brand: input.brand, model: input.model },
+      })
+      if (error) {
+        // A deployment older than the fitment contract rejects the kind with
+        // a 400 — surface that as the fix it is, not as a mystery failure.
+        return { fitment: [], aiConfigured: null, aiError: await describeFunctionError(error) }
+      }
+      const row = (data ?? {}) as Row
+      return {
+        // Parsed again client-side: the server already validated, but this
+        // response crosses a version boundary and a stale function shape
+        // must degrade to [] rather than store garbage in specs.
+        fitment: parseFitmentList(row.fitment),
+        aiConfigured: row.aiConfigured === undefined ? null : row.aiConfigured !== false,
+        aiError: typeof row.aiError === 'string' ? row.aiError : null,
+      }
+    } catch (err) {
+      return {
+        fitment: [],
+        aiConfigured: null,
+        aiError: err instanceof Error ? err.message : 'The lookup function could not be reached.',
+      }
     }
   }
 

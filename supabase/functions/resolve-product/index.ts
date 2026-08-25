@@ -87,7 +87,7 @@ function fail(status: number, message: string): Response {
  * the UI, as "no AI provider key is set" — to an owner who had just set one.
  * Reporting the version makes that mismatch visible instead of a guess.
  */
-const FUNCTION_VERSION = 9
+const FUNCTION_VERSION = 10
 
 const ANTHROPIC_VERSION = '2023-06-01'
 
@@ -630,6 +630,192 @@ function candidateLooksDegenerate(candidate: {
   )
 }
 // MIRROR-END degenerateText
+
+// ---------------------------------------------------------------------------
+// Vehicle fitment -- mirrors src/lib/fitment.ts, where it is tested (Deno
+// cannot import from src/; same duplication rule as the rest). Only the
+// parser is mirrored: matching and display are client concerns.
+// ---------------------------------------------------------------------------
+
+// MIRROR-BEGIN fitment — keep behaviourally identical to src/lib/fitment.ts
+// (src/lib/edgeFunctionMirrors.test.ts runs both copies over the same inputs).
+/** One "fits these vehicles" claim, e.g. Toyota Tacoma 2005-2015. */
+interface FitmentRange {
+  make: string
+  /** Null means the whole make (rare but real — some interfaces are make-wide). */
+  model: string | null
+  yearStart: number | null
+  yearEnd: number | null
+  /** The caveat that matters for harnesses: "with amplified JBL system", "non-NAV models". */
+  note: string | null
+}
+
+function clampYear(value: unknown): number | null {
+  const n =
+    typeof value === 'number' ? value : typeof value === 'string' ? Number.parseInt(value, 10) : NaN
+  if (!Number.isFinite(n)) return null
+  // Nothing this trade installs into predates in-dash electronics, and a
+  // model claiming a 2099 fitment is hallucinating, not forecasting.
+  if (n < 1980 || n > 2035) return null
+  return n
+}
+
+/**
+ * The model's fitment JSON, made trustworthy. Tolerates the shapes grounded
+ * models actually emit — string years, "2015-2021" packed into one field,
+ * swapped range ends — and drops rather than repairs anything without at
+ * least a make. Capped: a list longer than 60 vehicles is a model
+ * enumerating a catalog page, not describing this part.
+ */
+function parseFitmentList(raw: unknown): FitmentRange[] {
+  const list = Array.isArray(raw) ? raw : []
+  const out: FitmentRange[] = []
+  for (const entry of list) {
+    if (out.length >= 60) break
+    const e = entry as Record<string, unknown>
+    const make = typeof e?.make === 'string' ? e.make.trim() : ''
+    if (!make) continue
+
+    let yearStart = clampYear(e.year_start ?? e.yearStart)
+    let yearEnd = clampYear(e.year_end ?? e.yearEnd)
+    // "2015-2021" (or "2015–2021") packed into either year field.
+    for (const v of [e.year_start ?? e.yearStart, e.year_end ?? e.yearEnd]) {
+      if (typeof v === 'string') {
+        const m = v.match(/(\d{4})\s*[-–]\s*(\d{4})/)
+        if (m) {
+          yearStart = yearStart ?? clampYear(m[1])
+          yearEnd = yearEnd ?? clampYear(m[2])
+        }
+      }
+    }
+    if (yearStart !== null && yearEnd !== null && yearEnd < yearStart) {
+      ;[yearStart, yearEnd] = [yearEnd, yearStart]
+    }
+
+    const model = typeof e.model === 'string' && e.model.trim() ? e.model.trim() : null
+    const note = typeof e.note === 'string' && e.note.trim() ? e.note.trim().slice(0, 120) : null
+    out.push({ make, model, yearStart, yearEnd, note })
+  }
+  return out
+}
+// MIRROR-END fitment
+
+const FITMENT_JSON_INSTRUCTION =
+  '\n\nReply with ONLY a JSON object of the form {"fitment":[...]} and no other text. Each entry has the keys: ' +
+  'make (string), model (string or null when the fit is make-wide), year_start (number or null), ' +
+  'year_end (number or null, null when it fits current models), note (string or null -- only for a caveat that ' +
+  'changes what to sell, like "with amplified JBL system" or "non-NAV models").'
+
+function fitmentPrompt(brand: string, model: string): string {
+  return (
+    `List every vehicle the car-audio integration part "${brand} ${model}" fits.\n\n` +
+    `This is a vehicle-specific product (a dash kit, wiring harness, or interface) from ${brand}, and the ` +
+    "manufacturer publishes an exact application list. Search the manufacturer's own site first -- " +
+    'metraonline.com, pac-audio.com, scosche.com, idatalinkmaestro.com -- then retailer listings, and read the ' +
+    'fitment off the actual product page. Copy what the sources state; never guess a vehicle or extend a year ' +
+    'range beyond what a source shows. If you cannot find the part, return an empty list rather than a likely one.'
+  )
+}
+
+/**
+ * Ask the web which vehicles an integration part fits.
+ *
+ * Its own small resolver rather than a rung of the product ladder: the
+ * output shape is a fitment list, not a candidate list, so none of the
+ * candidate schema/parsing machinery applies. Provider coverage matches
+ * resolveViaAi -- configured compatible endpoint first (grounded, then plain
+ * JSON as the fallback), else OpenAI, else Anthropic, both on their
+ * plain-JSON forms which work on any account.
+ */
+async function resolveFitment(brand: string, model: string, diag: ProviderDiag): Promise<FitmentRange[]> {
+  const prompt = fitmentPrompt(brand, model) + FITMENT_JSON_INSTRUCTION
+  const compatBase = Deno.env.get('AI_BASE_URL')?.trim()
+  const compatKey = Deno.env.get('AI_API_KEY')?.trim()
+  const openAiKey = Deno.env.get('OPENAI_API_KEY')
+  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY')
+
+  const parse = (rawText: string | null | undefined): FitmentRange[] => {
+    const parsed = parseLooseJson<{ fitment?: unknown } | unknown[]>(typeof rawText === 'string' ? rawText : '')
+    if (!parsed) return []
+    return parseFitmentList(Array.isArray(parsed) ? parsed : parsed.fitment)
+  }
+
+  try {
+    if (compatBase && compatKey) {
+      const model_ =
+        Deno.env.get('AI_MODEL')?.trim() || (await discoverCompatibleModel(compatBase, compatKey, [])) || 'gemini-3.7-flash'
+      // Grounded first -- fitment is exactly the "read the manufacturer's
+      // page" job -- then plain JSON if the grounded call failed.
+      for (const grounded of [true, false]) {
+        const body: Record<string, unknown> = { model: model_, messages: [{ role: 'user', content: prompt }] }
+        if (grounded) {
+          const g = compatGrounding(compatBase, 1)
+          if (!g) continue
+          body.google = g
+        }
+        const res = await fetch(`${compatBase.replace(/\/+$/, '')}/chat/completions`, {
+          signal: providerSignal(diag),
+          method: 'POST',
+          headers: { authorization: `Bearer ${compatKey}`, 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        if (!res.ok) {
+          noteProviderError(diag, `AI endpoint (fitment, model ${model_})`, res.status, await res.text().catch(() => ''))
+          continue
+        }
+        const data = await res.json()
+        const ranges = parse(data?.choices?.[0]?.message?.content)
+        if (ranges.length > 0) {
+          diag.error = null
+          return ranges
+        }
+      }
+      return []
+    }
+    if (openAiKey) {
+      const res = await fetch('https://api.openai.com/v1/responses', {
+        signal: providerSignal(diag),
+        method: 'POST',
+        headers: { authorization: `Bearer ${openAiKey}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ model: configuredModel('openai'), input: prompt, tools: [{ type: 'web_search' }] }),
+      })
+      if (!res.ok) {
+        noteProviderError(diag, 'OpenAI (fitment)', res.status, await res.text().catch(() => ''))
+        return []
+      }
+      const data = await res.json()
+      const messageItem = Array.isArray(data?.output) ? data.output.find((o: { type?: string }) => o?.type === 'message') : null
+      const textPart = Array.isArray(messageItem?.content)
+        ? messageItem.content.find((c: { type?: string }) => c?.type === 'output_text')
+        : null
+      return parse(typeof textPart?.text === 'string' ? textPart.text : data?.output_text)
+    }
+    if (anthropicKey) {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        signal: providerSignal(diag),
+        method: 'POST',
+        headers: { 'x-api-key': anthropicKey, 'anthropic-version': ANTHROPIC_VERSION, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: configuredModel('anthropic'),
+          max_tokens: 1536,
+          messages: [{ role: 'user', content: prompt }],
+          tools: [{ type: 'web_search_20260318', name: 'web_search', max_uses: 3 }],
+        }),
+      })
+      if (!res.ok) {
+        noteProviderError(diag, 'Anthropic (fitment)', res.status, await res.text().catch(() => ''))
+        return []
+      }
+      const data = await res.json()
+      const textBlock = Array.isArray(data?.content) ? data.content.find((b: { type?: string }) => b?.type === 'text') : null
+      return parse(textBlock?.text)
+    }
+  } catch (err) {
+    diag.error = 'Could not reach the AI provider for fitment'
+    console.error('resolve-product: fitment request threw', err)
+  }
+  return []
+}
 
 // ---------------------------------------------------------------------------
 // Retailer storefront search -- mirrors src/lib/retailerSearch.ts, where the
@@ -1996,7 +2182,7 @@ Deno.serve(async (req: Request) => {
   const body = await req.json().catch(() => null)
   const shopId = typeof body?.shopId === 'string' ? body.shopId : ''
   const kind =
-    body?.kind === 'barcode' || body?.kind === 'text' || body?.kind === 'photo' || body?.kind === 'selftest'
+    body?.kind === 'barcode' || body?.kind === 'text' || body?.kind === 'photo' || body?.kind === 'fitment' || body?.kind === 'selftest'
       ? body.kind
       : null
   if (!kind) {
@@ -2055,6 +2241,36 @@ Deno.serve(async (req: Request) => {
   // file), so it only needs the membership check below, not the parsing
   // that barcode/text do first. Provider precedence matches resolveViaAi
   // (OpenAI first).
+  if (kind === 'fitment') {
+    // Vehicle fitment for an integration part (PAC/Metra/Scosche and kin).
+    // Not cached: the cache table's kind constraint predates this, the calls
+    // are rare and always explicit (a button, or one background attempt at
+    // intake), and fitment for a discontinued part never changes anyway.
+    const brand = typeof body?.brand === 'string' ? body.brand.trim() : ''
+    const model = typeof body?.model === 'string' ? body.model.trim() : ''
+    if (!brand || !model) return fail(400, 'Fitment lookup needs both a brand and a model.')
+
+    const { data: membership } = await admin
+      .from('shop_memberships')
+      .select('id')
+      .eq('shop_id', shopId)
+      .eq('user_id', user.id)
+      .maybeSingle()
+    if (!membership) {
+      return fail(403, 'You are not a member of this shop.')
+    }
+
+    const fitment = await resolveFitment(brand, model, diag)
+    return json(200, {
+      ok: true,
+      fitment,
+      aiConfigured,
+      aiError: diag.error,
+      tookMs: Date.now() - startedAt,
+      functionVersion: FUNCTION_VERSION,
+    })
+  }
+
   if (kind === 'photo') {
     const imageBase64 = typeof body?.imageBase64 === 'string' ? body.imageBase64 : ''
     if (!imageBase64) return fail(400, 'Missing photo')

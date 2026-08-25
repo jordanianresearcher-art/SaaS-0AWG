@@ -18,6 +18,7 @@ import { useHardwareScanner } from '../../lib/useHardwareScanner'
 import { useToast } from '../../components/Toast'
 import { barcodeLookupForms, normalizeBarcodeInput } from '../../lib/barcodeIdentity'
 import { stashScanForIntake } from '../../lib/intakeStash'
+import { fitmentFromSpecs, fitmentMakes, fitmentMatches } from '../../lib/fitment'
 
 type SortKey = 'name' | 'price' | 'quantity'
 
@@ -31,6 +32,11 @@ export default function InventoryPage() {
   const [category, setCategory] = useState('')
   const [lowStockOnly, setLowStockOnly] = useState(false)
   const [needsUpcOnly, setNeedsUpcOnly] = useState(false)
+  // The vehicle chooser: "show me what fits a 2018 Tacoma". Make is the
+  // switch — with it empty the chooser is off and nothing is filtered out.
+  const [fitMake, setFitMake] = useState('')
+  const [fitModel, setFitModel] = useState('')
+  const [fitYear, setFitYear] = useState('')
   const [sort, setSort] = useState<SortKey>('name')
 
   useEffect(() => {
@@ -71,6 +77,18 @@ export default function InventoryPage() {
       .filter((i) => !category || i.category === category)
       .filter((i) => !lowStockOnly || isLowStock(i, defaultThreshold))
       .filter((i) => !needsUpcOnly || needsUpc(i))
+      .filter((i) => {
+        if (!fitMake) return true
+        // The chooser answers "what do we stock for this truck" — only items
+        // that carry fitment can answer, so everything else drops out while
+        // it is active. That is the point, not a limitation.
+        const year = Number.parseInt(fitYear, 10)
+        return fitmentMatches(fitmentFromSpecs(i.specs), {
+          make: fitMake,
+          model: fitModel.trim() || null,
+          year: Number.isFinite(year) ? year : null,
+        })
+      })
       .filter(
         (i) =>
           !q ||
@@ -85,7 +103,9 @@ export default function InventoryPage() {
         if (sort === 'quantity') return a.quantityOnHand - b.quantityOnHand
         return formatItemShortName(a).localeCompare(formatItemShortName(b))
       })
-  }, [items, query, category, lowStockOnly, needsUpcOnly, sort, defaultThreshold])
+  }, [items, query, category, lowStockOnly, needsUpcOnly, fitMake, fitModel, fitYear, sort, defaultThreshold])
+
+  const vehicleMakes = useMemo(() => fitmentMakes(items ?? []), [items])
 
   const summary = useMemo(() => computeInventorySummary(items ?? [], defaultThreshold), [items, defaultThreshold])
 
@@ -158,6 +178,39 @@ export default function InventoryPage() {
           </button>
         </div>
       </div>
+
+      {vehicleMakes.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-semibold text-zinc-600">Fits vehicle:</span>
+          <Select value={fitMake} onChange={(e) => setFitMake(e.target.value)} className="w-auto min-w-0" aria-label="Vehicle make">
+            <option value="">Any vehicle</option>
+            {vehicleMakes.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </Select>
+          {fitMake ? (
+            <>
+              <Input
+                value={fitModel}
+                onChange={(e) => setFitModel(e.target.value)}
+                placeholder="Model (e.g. Tacoma)"
+                className="w-40"
+                aria-label="Vehicle model"
+              />
+              <Input
+                value={fitYear}
+                onChange={(e) => setFitYear(e.target.value)}
+                placeholder="Year"
+                inputMode="numeric"
+                className="w-24"
+                aria-label="Vehicle year"
+              />
+            </>
+          ) : null}
+        </div>
+      ) : null}
 
       {filtered.length === 0 ? (
         <EmptyState

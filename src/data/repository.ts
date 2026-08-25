@@ -1,3 +1,4 @@
+import type { FitmentRange } from '../lib/fitment'
 import type {
   Appointment,
   AppointmentSource,
@@ -621,6 +622,20 @@ export interface DataRepository {
   suggestProductsFast(query: string, brandHint?: string | null): Promise<ProductSuggestion[]>
   /** Everything suggestProductsFast finds, plus web/AI candidates appended behind it. */
   lookupProductSuggestions(query: string, brandHint?: string | null): Promise<ProductSuggestionResult>
+  /**
+   * Which vehicles an integration part (PAC/Metra/Scosche and kin) fits,
+   * looked up from the manufacturer's published application list on the web.
+   *
+   * Returns the ranges for a HUMAN to confirm — callers show them and save
+   * only on approval, except the one background attempt at intake time,
+   * which is best-effort and marked as machine-sourced by its provenance.
+   * Never throws; an unavailable resolver reports through aiError.
+   */
+  lookupVehicleFitment(input: { brand: string; model: string }): Promise<{
+    fitment: FitmentRange[]
+    aiConfigured: boolean | null
+    aiError: string | null
+  }>
   /** Ask the backend whether product lookup actually works right now, and why not if it doesn't. */
   testProductLookup(): Promise<ProductLookupSelfTest>
   /**

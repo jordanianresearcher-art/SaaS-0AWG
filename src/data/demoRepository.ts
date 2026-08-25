@@ -55,6 +55,7 @@ import { newId } from '../lib/ids'
 import { canonicalizeProductFields } from '../lib/productNaming'
 import { barcodeLookupForms } from '../lib/barcodeIdentity'
 import { searchLocalCatalog } from '../lib/productSearch'
+import { brandNeedsFitment, parseFitmentList, type FitmentRange } from '../lib/fitment'
 
 const STORAGE_KEY = '0gauge-demo-db'
 
@@ -455,6 +456,27 @@ export class DemoRepository implements DataRepository {
     // real shops contributed.
     void query
     return []
+  }
+
+  async lookupVehicleFitment(input: { brand: string; model: string }): Promise<{
+    fitment: FitmentRange[]
+    aiConfigured: boolean | null
+    aiError: string | null
+  }> {
+    // Deterministic, no network — same rule as every other demo lookup. A
+    // Metra part gets a plausible canned application list so the fitment UI
+    // is exercisable end to end; anything else honestly finds nothing.
+    if (brandNeedsFitment(input.brand)) {
+      return {
+        fitment: parseFitmentList([
+          { make: 'Toyota', model: 'Tacoma', year_start: 2005, year_end: 2015 },
+          { make: 'Toyota', model: 'Tundra', year_start: 2007, year_end: 2013, note: 'non-JBL systems' },
+        ]),
+        aiConfigured: true,
+        aiError: null,
+      }
+    }
+    return { fitment: [], aiConfigured: true, aiError: null }
   }
 
   async testProductLookup(): Promise<ProductLookupSelfTest> {

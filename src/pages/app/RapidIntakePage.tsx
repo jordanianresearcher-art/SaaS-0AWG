@@ -47,6 +47,7 @@ import {
 import type { CatalogItem } from '../../types'
 import type { ProductResolutionCandidate } from '../../data/repository'
 import { loadIntakeBatch, saveIntakeBatch } from '../../lib/intakeStash'
+import { brandNeedsFitment, specsWithFitment } from '../../lib/fitment'
 
 const BarcodeScanner = lazy(() => import('../../components/BarcodeScanner').then((m) => ({ default: m.BarcodeScanner })))
 
@@ -372,6 +373,27 @@ export default function RapidIntakePage() {
             imageUrl: line.imageUrl,
           })
           catalogItemId = created.id
+
+          // An integration part just entered the catalog — ask the web for
+          // its application list in the background. Best-effort and never
+          // awaited by the commit: fitment is a nice-to-have on the way past,
+          // not a step intake can stall or fail on. Anything found is saved
+          // as machine-sourced; the detail page shows it for correction.
+          if (brandNeedsFitment(created.brand)) {
+            void repo
+              .lookupVehicleFitment({ brand: created.brand ?? '', model: created.model ?? created.name })
+              .then((result) => {
+                if (result.fitment.length === 0) return
+                return repo.updateCatalogItem(created.id, {
+                  brand: created.brand,
+                  model: created.model,
+                  name: created.name,
+                  defaultPriceCents: created.defaultPriceCents,
+                  specs: specsWithFitment(created.specs, result.fitment),
+                })
+              })
+              .catch((err) => console.error('background fitment lookup failed', err))
+          }
         }
 
         await repo.recordStockMovement({
