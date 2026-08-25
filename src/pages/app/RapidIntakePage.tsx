@@ -20,7 +20,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Barcode, Camera, Check, Loader2, Package, Search, Trash2 } from 'lucide-react'
+import { Barcode, Camera, Check, Loader2, Minus, Package, Plus, Search, Trash2 } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
 import { Badge, Button, Card, EmptyState, Field, Input, LoadingBlock, PageHeader } from '../../components/ui'
@@ -82,11 +82,22 @@ export default function RapidIntakePage() {
     }, 30)
   }, [])
 
+  // The code most recently scanned or typed — what the phone's fixed
+  // quantity bar shows. Not simply batch[0]: rescanning a box from earlier
+  // in the pallet bumps that line's quantity without reordering the batch,
+  // and the bar must show the box in the operator's hand, not the newest row.
+  const [lastCode, setLastCode] = useState<string | null>(null)
+
   const handleScan = useCallback(
     (raw: string) => {
       const code = raw.trim()
       if (!code) return
       setBatch((prev) => addScan(prev, code))
+      setLastCode(code)
+      // One short pulse per registered scan. The whole premise of this screen
+      // is that nobody is looking at it — a buzz in the hand is confirmation
+      // the beep actually landed, without ever glancing down.
+      if (typeof navigator !== 'undefined') navigator.vibrate?.(40)
       focusScan()
     },
     [focusScan],
@@ -112,6 +123,7 @@ export default function RapidIntakePage() {
     const text = typedText.trim()
     if (text.length < 2) return
     setBatch((prev) => addTypedEntry(prev, text))
+    setLastCode(text)
     setTypedText('')
     // Focus stays here: someone typing products in is going to type another.
     typedRef.current?.focus()
@@ -434,7 +446,7 @@ export default function RapidIntakePage() {
               </Suspense>
             ) : (
               <Card className="space-y-3">
-                <div className="flex min-h-64 flex-col items-center justify-center rounded-xl border-2 border-dashed border-zinc-300 bg-zinc-50 p-6 text-center">
+                <div className="flex min-h-40 flex-col items-center justify-center rounded-xl border-2 border-dashed border-zinc-300 bg-zinc-50 p-4 text-center sm:min-h-64 sm:p-6">
                   <span className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-tint text-brand">
                     <Barcode className="h-7 w-7" aria-hidden="true" />
                   </span>
@@ -514,6 +526,11 @@ export default function RapidIntakePage() {
               <p className="mt-3 text-xs text-zinc-500">Demo mode never makes a real lookup call.</p>
             ) : null}
           </Card>
+
+          <LastScanBar
+            line={batch.find((l) => l.code === lastCode) ?? null}
+            onQuantity={(code, q) => setBatch((prev) => setQuantity(prev, code, q))}
+          />
         </div>
       ) : (
         <ReviewStep
@@ -600,6 +617,80 @@ function BatchRow({
         <Trash2 className="h-4 w-4" aria-hidden="true" />
       </button>
     </li>
+  )
+}
+
+/**
+ * The phone's answer to "I'm scanning boxes and not looking at this screen."
+ *
+ * On a phone the batch card sits below the fold, so a scan used to land
+ * somewhere invisible — the operator got no confirmation and no way to bump
+ * a quantity without stopping to scroll. This fixed bar (phones only; the
+ * desktop layout has the batch beside the scanner already) always shows the
+ * box just scanned, with steppers big enough to hit with a thumb while the
+ * other hand holds the scanner.
+ *
+ * It deliberately does NOT trap focus or behave like a modal: the next
+ * trigger-pull must keep landing in the scan input underneath, so this is
+ * furniture, not a dialog. Sits above the app's bottom nav (3.5rem + the
+ * device safe area).
+ */
+function LastScanBar({
+  line,
+  onQuantity,
+}: {
+  line: IntakeBatchLine | null
+  onQuantity: (code: string, quantity: number) => void
+}) {
+  if (!line) return null
+  return (
+    <div
+      className="fixed inset-x-0 z-30 border-t border-zinc-200 bg-white px-4 py-3 shadow-[0_-6px_20px_rgba(0,0,0,0.10)] md:hidden"
+      style={{ bottom: 'calc(3.5rem + env(safe-area-inset-bottom))' }}
+    >
+      <div className="flex items-center gap-3">
+        {line.imageUrl ? (
+          <img src={line.imageUrl} alt="" className="h-12 w-12 shrink-0 rounded-lg border border-zinc-200 object-contain" />
+        ) : (
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-zinc-400">
+            <Package className="h-6 w-6" aria-hidden="true" />
+          </span>
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-bold text-ink">
+            {line.name ? formatItemDisplayName(line) : line.code}
+          </p>
+          <p className="truncate text-xs text-zinc-500">
+            {line.status === 'resolving' || line.status === 'pending'
+              ? 'Looking it up…'
+              : line.status === 'unidentified'
+                ? 'Not found — name it in review'
+                : line.name
+                  ? line.code
+                  : ''}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            aria-label={`Decrease quantity of ${line.code}`}
+            onClick={() => onQuantity(line.code, line.quantity - 1)}
+            className="flex h-14 w-14 items-center justify-center rounded-xl border border-zinc-300 bg-white text-zinc-700 active:bg-zinc-100"
+          >
+            <Minus className="h-6 w-6" aria-hidden="true" />
+          </button>
+          <span className="w-12 text-center text-3xl font-black text-ink">{line.quantity}</span>
+          <button
+            type="button"
+            aria-label={`Increase quantity of ${line.code}`}
+            onClick={() => onQuantity(line.code, line.quantity + 1)}
+            className="flex h-14 w-14 items-center justify-center rounded-xl border border-brand bg-brand-tint text-brand active:bg-brand/20"
+          >
+            <Plus className="h-6 w-6" aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
