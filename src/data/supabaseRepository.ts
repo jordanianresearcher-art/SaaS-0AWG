@@ -1096,8 +1096,14 @@ export class SupabaseRepository implements DataRepository {
       //
       // `noCache` is ignored by older deployments, which is fine: a cache hit
       // is reported rather than silently counted as a pass.
+      //
+      // `skipRetailers` keeps this an *AI* health check: newer deployments
+      // answer typed queries from live retailer storefronts first, and a
+      // retailer answering here would report "lookup healthy" over a dead AI
+      // key -- the exact blind spot this test exists to remove. Also ignored
+      // by older deployments.
       const { data, error } = await this.supabase.functions.invoke('resolve-product', {
-        body: { shopId: this.shopId, kind: 'text', query: SELF_TEST_QUERY, noCache: true },
+        body: { shopId: this.shopId, kind: 'text', query: SELF_TEST_QUERY, noCache: true, skipRetailers: true },
       })
       if (error) {
         return failed(await describeFunctionError(error))

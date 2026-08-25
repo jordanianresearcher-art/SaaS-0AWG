@@ -29,6 +29,10 @@ import { barcodeLookupForms, gs1CheckDigit } from './barcodeIdentity'
 import { parseLooseJson } from './aiJson'
 import { pickBestModel } from './modelPreference'
 import fixture from './__fixtures__/shopProducts.json'
+import { centsFromPrice, parseBigCommerceQuickResults, parseShopifySuggest } from './retailerSearch'
+import shopifyFixture from './__fixtures__/retailerShopifySuggest.json'
+import bigcommerceFixture from './__fixtures__/retailerBigCommerceQuick.html?raw'
+import skyHighFixture from './__fixtures__/retailerBigCommerceSkyHigh.html?raw'
 
 /**
  * Loads one MIRROR-BEGIN/MIRROR-END region out of the Edge Function source
@@ -161,5 +165,49 @@ describe('modelPreference mirror', () => {
   it('agrees when a model has already failed and must be skipped', () => {
     const ids = ['models/gemini-2.5-flash', 'models/gemini-3-flash']
     expect(fnPick(ids, ['gemini-3-flash'])).toBe(pickBestModel(ids, ['gemini-3-flash']))
+  })
+})
+
+describe('retailerSearch mirror', () => {
+  const mirror = loadMirror('retailerSearch', [
+    'centsFromPrice',
+    'parseShopifySuggest',
+    'parseBigCommerceQuickResults',
+    'interleaveRetailerHits',
+  ])
+  const fnShopify = mirror.parseShopifySuggest as (
+    payload: unknown,
+    origin: string,
+    retailer: string,
+  ) => unknown[]
+  const fnBigCommerce = mirror.parseBigCommerceQuickResults as (
+    html: string,
+    origin: string,
+    retailer: string,
+  ) => unknown[]
+  const fnCents = mirror.centsFromPrice as (v: string | number | null) => number | null
+
+  it('parses the captured Shopify payload identically', () => {
+    expect(fnShopify(shopifyFixture, 'https://mooncarstereo.com', 'Moon Car Stereo')).toEqual(
+      parseShopifySuggest(shopifyFixture, 'https://mooncarstereo.com', 'Moon Car Stereo'),
+    )
+  })
+
+  it('parses both captured BigCommerce pages identically', () => {
+    // Two different stores, two different theme habits (compare buttons vs
+    // lazyloaded images) — both must agree, or one store's products silently
+    // vanish from server results while every client test stays green.
+    for (const [html, origin] of [
+      [bigcommerceFixture, 'https://www.down4soundshop.com'],
+      [skyHighFixture, 'https://www.skyhighcaraudio.com'],
+    ] as const) {
+      expect(fnBigCommerce(html, origin, 'x')).toEqual(parseBigCommerceQuickResults(html, origin, 'x'))
+    }
+  })
+
+  it('agrees on price parsing at the awkward edges', () => {
+    for (const v of ['329.99', '$1,199.99', '0.00', '', 'Call for price', '120'] as const) {
+      expect(fnCents(v), v).toBe(centsFromPrice(v))
+    }
   })
 })

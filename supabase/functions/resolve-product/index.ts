@@ -87,7 +87,7 @@ function fail(status: number, message: string): Response {
  * the UI, as "no AI provider key is set" — to an owner who had just set one.
  * Reporting the version makes that mismatch visible instead of a guess.
  */
-const FUNCTION_VERSION = 4
+const FUNCTION_VERSION = 5
 
 const ANTHROPIC_VERSION = '2023-06-01'
 
@@ -493,6 +493,305 @@ const RUNG_LABEL: Record<Rung, string> = {
  * loud rather than presenting both as equally trustworthy.
  */
 const RUNG_SEARCHED_WEB: Record<Rung, boolean> = { 1: true, 2: false, 3: false }
+
+// ---------------------------------------------------------------------------
+// Retailer storefront search -- mirrors src/lib/retailerSearch.ts, where the
+// parsers are tested against captured real responses (Deno cannot import from
+// src/; same duplication rule as the email templates, productNaming,
+// barcodeIdentity, aiJson and modelPreference).
+//
+// This is the fast path for typed lookups. The stores this trade buys from
+// run ordinary Shopify/BigCommerce storefronts whose own search boxes answer
+// in a few hundred milliseconds with the name, live price, image and URL --
+// the exact fields a grounded AI search takes ten seconds to approximate.
+// The model is only consulted when these stores don't carry the product.
+// ---------------------------------------------------------------------------
+
+// MIRROR-BEGIN retailerSearch — keep behaviourally identical to src/lib/retailerSearch.ts
+// (src/lib/edgeFunctionMirrors.test.ts runs both copies over the same inputs).
+/** One product listing as a retailer's own search returned it. */
+interface RetailerHit {
+  /** Display name of the store ("Down4Sound"), for evidence lines. */
+  retailer: string
+  /** The listing title, entity-decoded, whitespace-collapsed. */
+  name: string
+  /** The store's vendor/brand field when it has one. */
+  brand: string | null
+  /** Absolute product-page URL, tracking query stripped. */
+  url: string
+  imageUrl: string | null
+  /** The live selling price. Null when sold out or unpriced. */
+  priceCents: number | null
+  /** Manufacturer list price when the store shows one alongside. */
+  msrpCents: number | null
+}
+
+/** The handful of entities storefront HTML actually uses in titles and URLs. */
+function decodeHtmlEntities(raw: string): string {
+  return raw
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+}
+
+/**
+ * "$1,199.99" / "329.99" / 329.99 → cents. Null for absent, unparseable, or
+ * zero — storefronts print "0.00" for sold-out and placeholder prices, and a
+ * free product does not exist in this catalog.
+ */
+function centsFromPrice(value: string | number | null | undefined): number | null {
+  if (value === null || value === undefined) return null
+  const text = String(value).replace(/[^0-9.]/g, '')
+  if (!text) return null
+  const dollars = Number.parseFloat(text)
+  if (!Number.isFinite(dollars) || dollars <= 0) return null
+  return Math.round(dollars * 100)
+}
+
+/** Absolutize a storefront link and drop its search-tracking query string. */
+function cleanUrl(rawHref: string, origin: string): string | null {
+  const href = decodeHtmlEntities(rawHref.trim()).split('?')[0]
+  if (!href) return null
+  if (/^https?:\/\//i.test(href)) return href
+  if (href.startsWith('//')) return `https:${href}`
+  if (href.startsWith('/')) return `${origin}${href}`
+  return null
+}
+
+function cleanImage(raw: string | null | undefined): string | null {
+  if (typeof raw !== 'string' || !raw.trim()) return null
+  const url = raw.trim()
+  if (url.startsWith('//')) return `https:${url}`
+  if (/^https?:\/\//i.test(url)) return url
+  return null
+}
+
+function collapseWhitespace(raw: string): string {
+  return raw.replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * Shopify predictive search: resources.results.products[].
+ *
+ * Deliberately tolerant of everything except the fields it needs — `body`
+ * carries kilobytes of product HTML and `variants` an array of objects, and
+ * both are ignored rather than validated so a Shopify version bump that
+ * reshapes them cannot break parsing of the fields that matter.
+ */
+function parseShopifySuggest(payload: unknown, origin: string, retailer: string, limit = 4): RetailerHit[] {
+  const products = (payload as { resources?: { results?: { products?: unknown[] } } })?.resources?.results
+    ?.products
+  if (!Array.isArray(products)) return []
+
+  const hits: RetailerHit[] = []
+  for (const raw of products) {
+    if (hits.length >= limit) break
+    const p = raw as Record<string, unknown>
+    if (typeof p?.title !== 'string' || typeof p?.url !== 'string') continue
+    const url = cleanUrl(p.url, origin)
+    if (!url) continue
+    const featured = (p.featured_image as { url?: unknown } | null | undefined)?.url
+    const price = centsFromPrice(p.price as string | number | null | undefined)
+    const compareAt = centsFromPrice(p.compare_at_price_min as string | number | null | undefined)
+    hits.push({
+      retailer,
+      name: collapseWhitespace(p.title),
+      brand: typeof p.vendor === 'string' && p.vendor.trim() ? p.vendor.trim() : null,
+      url,
+      imageUrl: cleanImage(typeof p.image === 'string' ? p.image : typeof featured === 'string' ? featured : null),
+      priceCents: price,
+      // Shopify's compare-at is the "was" price; only meaningful above the
+      // live price, and "0.00" has already collapsed to null.
+      msrpCents: compareAt !== null && price !== null && compareAt > price ? compareAt : null,
+    })
+  }
+  return hits
+}
+
+/**
+ * BigCommerce quick-results: a full themed HTML page, mined for its product
+ * cards.
+ *
+ * Association is positional. Titles anchor the cards; each card's price,
+ * MSRP, and brand are the first of their kind AFTER its title and before the
+ * next one, and its image is the last image BEFORE the title (the figure
+ * precedes the card body in Cornerstone markup). Images prefer the
+ * `data-compare-image` attribute, falling back to a lazyloaded card image's
+ * `data-src` — the `src` on those is a loading-spinner placeholder.
+ */
+function parseBigCommerceQuickResults(
+  html: string,
+  origin: string,
+  retailer: string,
+  limit = 5,
+): RetailerHit[] {
+  const titleRe = /<h4 class="card-title">\s*<a href="([^"]+)"[^>]*>\s*([\s\S]*?)\s*<\/a>/g
+  const titles: Array<{ href: string; text: string; start: number; end: number }> = []
+  for (let m = titleRe.exec(html); m; m = titleRe.exec(html)) {
+    titles.push({ href: m[1], text: m[2], start: m.index, end: titleRe.lastIndex })
+  }
+
+  const hits: RetailerHit[] = []
+  const seenUrls = new Set<string>()
+  for (let i = 0; i < titles.length && hits.length < limit; i++) {
+    const t = titles[i]
+    const url = cleanUrl(t.href, origin)
+    const name = collapseWhitespace(decodeHtmlEntities(t.text))
+    if (!url || !name || seenUrls.has(url)) continue
+
+    // The card's own territory: after this title, before the next.
+    const segment = html.slice(t.end, i + 1 < titles.length ? titles[i + 1].start : html.length)
+    const price = segment.match(/data-product-price-without-tax[^>]*>\s*\$?([\d,]+(?:\.\d{1,2})?)\s*</)
+    const msrp = segment.match(/data-product-rrp-price-without-tax[^>]*>\s*\$?([\d,]+(?:\.\d{1,2})?)\s*</)
+    const brand = segment.match(/card-text--brand[^>]*>\s*([^<]+?)\s*</)
+
+    // Backwards for the image: from the previous title (or the top) to here.
+    const before = html.slice(i > 0 ? titles[i - 1].end : 0, t.start)
+    let imageUrl: string | null = null
+    const compareImages = [...before.matchAll(/data-compare-image="([^"]+)"/g)]
+    if (compareImages.length > 0) {
+      imageUrl = cleanImage(decodeHtmlEntities(compareImages[compareImages.length - 1][1]))
+    } else {
+      const cardImages = [...before.matchAll(/<img[^>]*class=['"][^'"]*card-image[^'"]*['"][^>]*>/g)]
+      const last = cardImages[cardImages.length - 1]?.[0]
+      const src = last?.match(/data-src="([^"]+)"/) ?? last?.match(/src="([^"]+)"/)
+      if (src) imageUrl = cleanImage(decodeHtmlEntities(src[1]))
+    }
+
+    seenUrls.add(url)
+    hits.push({
+      retailer,
+      name,
+      brand: brand ? collapseWhitespace(decodeHtmlEntities(brand[1])) : null,
+      url,
+      imageUrl,
+      priceCents: centsFromPrice(price?.[1] ?? null),
+      msrpCents: centsFromPrice(msrp?.[1] ?? null),
+    })
+  }
+  return hits
+}
+
+/**
+ * Merge per-store result lists round-robin — each store's own relevance
+ * ranking is preserved within itself, and no single store's verbosity can
+ * crowd the others off a short list.
+ */
+function interleaveRetailerHits(groups: RetailerHit[][], limit = 6): RetailerHit[] {
+  const out: RetailerHit[] = []
+  const seen = new Set<string>()
+  for (let round = 0; out.length < limit; round++) {
+    let added = false
+    for (const group of groups) {
+      const hit = group[round]
+      if (!hit || out.length >= limit) continue
+      if (seen.has(hit.url)) continue
+      seen.add(hit.url)
+      out.push(hit)
+      added = true
+    }
+    if (!added) break
+  }
+  return out
+}
+// MIRROR-END retailerSearch
+
+/** A store worth asking, and which platform's endpoint/parser it speaks. */
+interface RetailerSource {
+  platform: 'shopify' | 'bigcommerce'
+  origin: string
+  name: string
+}
+
+// Verified live before shipping: each of these four returned parseable
+// results for real queries from this catalog. elitecaraudio.com is on the
+// owner's list too but was unreachable from the build environment, so it is
+// deliberately not here until its platform can be confirmed -- an untested
+// parser that silently returns [] would look exactly like "the store doesn't
+// carry it".
+const RETAILER_SOURCES: RetailerSource[] = [
+  { platform: 'shopify', origin: 'https://mooncarstereo.com', name: 'Moon Car Stereo' },
+  { platform: 'shopify', origin: 'https://sundownaudio.com', name: 'Sundown Audio' },
+  { platform: 'bigcommerce', origin: 'https://www.down4soundshop.com', name: 'Down4Sound' },
+  { platform: 'bigcommerce', origin: 'https://www.skyhighcaraudio.com', name: 'Sky High Car Audio' },
+]
+
+/**
+ * Storefront pages are big (BigCommerce quick-results is a full themed page,
+ * ~500KB) but fast; the budget is per-store and generous for a static fetch
+ * while still small next to a model call. One slow store must not hold the
+ * others hostage -- each fetch fails alone.
+ */
+const RETAILER_TIMEOUT_MS = 3_500
+
+async function fetchRetailerHits(source: RetailerSource, query: string): Promise<RetailerHit[]> {
+  const q = encodeURIComponent(query)
+  const url =
+    source.platform === 'shopify'
+      ? `${source.origin}/search/suggest.json?q=${q}&resources%5Btype%5D=product&resources%5Blimit%5D=4`
+      : `${source.origin}/search.php?search_query=${q}&template=search%2Fquick-results`
+  try {
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(RETAILER_TIMEOUT_MS),
+      headers: {
+        // A plain UA, not a bot string: these are the same requests the
+        // stores' own search boxes make, and some storefront CDNs 403 an
+        // empty or exotic user agent.
+        'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+        accept: source.platform === 'shopify' ? 'application/json' : 'text/html',
+      },
+    })
+    if (!res.ok) {
+      console.error(`resolve-product: retailer ${source.name} returned ${res.status}`)
+      return []
+    }
+    if (source.platform === 'shopify') {
+      return parseShopifySuggest(await res.json(), source.origin, source.name, 3)
+    }
+    return parseBigCommerceQuickResults(await res.text(), source.origin, source.name, 3)
+  } catch (err) {
+    // A down store is a smaller result list, never a failed lookup.
+    console.error(`resolve-product: retailer ${source.name} failed`, err)
+    return []
+  }
+}
+
+function retailerCandidate(hit: RetailerHit, index: number): Candidate {
+  const price = hit.priceCents ?? hit.msrpCents
+  return {
+    id: `retail-${index}`,
+    // It IS a verified web source -- a live listing on a real store, not a
+    // model's recollection of one.
+    source: 'verified_web_source',
+    brand: hit.brand,
+    model: null,
+    name: hit.name,
+    categoryHint: null,
+    upc: null,
+    imageUrl: hit.imageUrl,
+    referencePriceCents: price,
+    priceKind: hit.priceCents !== null ? 'retail' : hit.msrpCents !== null ? 'msrp' : 'unknown',
+    priceSourceUrl: hit.url,
+    priceSourceName: hit.retailer,
+    confidence: 0.85,
+    confidenceLevel: 'probable',
+    evidence: [
+      price !== null
+        ? `Live listing at ${hit.retailer} -- $${(price / 100).toFixed(2)}.`
+        : `Live listing at ${hit.retailer}.`,
+    ],
+    warnings: [],
+  }
+}
+
+/** Every configured store in parallel; a full miss costs one timeout, not four. */
+async function searchRetailers(query: string): Promise<Candidate[]> {
+  const groups = await Promise.all(RETAILER_SOURCES.map((source) => fetchRetailerHits(source, query)))
+  return interleaveRetailerHits(groups, 6).map(retailerCandidate)
+}
 
 /**
  * Where car-audio products actually live on the web, named explicitly.
@@ -1478,6 +1777,9 @@ Deno.serve(async (req: Request) => {
   )
   // Collects the first provider failure of this request, so a key that is set
   // but not working says so instead of looking like an empty result.
+  // Wall-clock for the whole request, reported back as tookMs so "it took
+  // forever" arrives as a number instead of a feeling.
+  const startedAt = Date.now()
   const diag: ProviderDiag = { error: null, provider: null, model: null, rung: null, faults: 0 }
 
   const body = await req.json().catch(() => null)
@@ -1625,7 +1927,7 @@ Deno.serve(async (req: Request) => {
       ...c,
       source: 'resolution_cache' as const,
     }))
-    return json(200, { ok: true, candidates, cached: true, aiConfigured })
+    return json(200, { ok: true, candidates, cached: true, aiConfigured, tookMs: Date.now() - startedAt })
   }
 
   // 2. Resolve fresh.
@@ -1687,7 +1989,26 @@ Deno.serve(async (req: Request) => {
     // that narrowing doesn't survive across the separate if/else on `kind`
     // a few lines up -- the fallback is unreachable in practice.
     const textQuery = query ?? ''
-    candidates = await resolveViaAi(
+
+    // Self-test only. The health check exists to prove the AI provider
+    // works, and a retailer answering for it would report "lookup healthy"
+    // over a dead key. Old deployments ignore the flag, which is the point.
+    const skipRetailers = body?.skipRetailers === true
+
+    // The stores' own search first. For anything they carry -- which for
+    // this trade is most of what gets typed -- this answers in about a
+    // second with a live price, an image and the listing URL, and the AI
+    // is never consulted at all. That is both the speed the owner asked
+    // for and most of the cost of this feature deleted.
+    const retailHits = skipRetailers ? [] : await searchRetailers(textQuery)
+
+    if (retailHits.length >= 2) {
+      // Two independent live listings is a better answer than anything a
+      // model can add behind them; climbing into a ten-second grounded
+      // search to append guesses under real listings helps nobody.
+      candidates = retailHits
+    } else {
+      const aiCandidates = await resolveViaAi(
       `A car-audio shop employee is adding a product to their catalog and typed: "${textQuery}" ` +
         '-- a partial or full SKU, model number, or product name.\n\n' +
         (brandHint
@@ -1700,12 +2021,20 @@ Deno.serve(async (req: Request) => {
         '"TS-400x4". Try the query with and without spaces, hyphens and the brand name before concluding it does not ' +
         'exist. Staff type what is printed on the box, so what they typed is almost always a real product that is ' +
         'listed somewhere -- treat a miss as "search it a different way", not as "no such product".\n\n' +
-        'Return up to 5 real, specific products (amplifiers, subwoofers, speakers, head units, wiring, enclosures, ' +
+        (retailHits.length === 0 && !skipRetailers
+          ? 'The specialist retailers (Down4Sound, Moon Car Stereo, Sky High, Sundown) have already been checked ' +
+            'directly and had no match for this exact text, so look to Amazon, eBay, Crutchfield, and the ' +
+            "manufacturer's own site -- or for the same product under a differently-written model number.\n\n"
+          : '') +
+        'Return up to 3 real, specific products (amplifiers, subwoofers, speakers, head units, wiring, enclosures, ' +
         'radios, DSPs, accessories), most-likely-match first. Prefer the exact model over near-matches from the same ' +
         'line. Only include products you actually found -- return fewer, even zero, rather than inventing one.',
-      null,
-      diag,
-    )
+        null,
+        diag,
+      )
+      // Any retailer hit leads: a live listing outranks a model's answer.
+      candidates = [...retailHits, ...aiCandidates].slice(0, 8)
+    }
   }
 
   // 3. Cache the result (even an empty one, so an obscure/unresolvable
@@ -1718,7 +2047,7 @@ Deno.serve(async (req: Request) => {
   // straight back and never runs the search at all — so leave the cache
   // untouched and let the real lookup decide what gets stored.
   if (fast && candidates.length === 0) {
-    return json(200, { ok: true, candidates, cached: false, fast: true, aiConfigured, aiError: diag.error })
+    return json(200, { ok: true, candidates, cached: false, fast: true, aiConfigured, aiError: diag.error, tookMs: Date.now() - startedAt })
   }
 
   const days = kind === 'barcode' ? BARCODE_CACHE_DAYS : TEXT_CACHE_DAYS
@@ -1730,5 +2059,5 @@ Deno.serve(async (req: Request) => {
       { onConflict: 'shop_id,kind,normalized_key' },
     )
 
-  return json(200, { ok: true, candidates, cached: false, aiConfigured, aiError: diag.error })
+  return json(200, { ok: true, candidates, cached: false, aiConfigured, aiError: diag.error, tookMs: Date.now() - startedAt })
 })
