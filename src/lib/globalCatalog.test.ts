@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { globalMatchKey, shareableBarcode, toGlobalProductDraft } from './globalCatalog'
+import { globalMatchKey, globalToCandidate, shareableBarcode, toGlobalProductDraft } from './globalCatalog'
+import type { GlobalProductMatch } from '../data/repository'
 import type { CatalogItem } from '../types'
 
 /**
@@ -138,5 +139,70 @@ describe('globalMatchKey', () => {
 
   it('has no key for something unidentifiable', () => {
     expect(globalMatchKey({ barcode: null, brand: null, model: null })).toBeNull()
+  })
+})
+
+describe('globalToCandidate', () => {
+  function match(overrides: Partial<GlobalProductMatch> = {}): GlobalProductMatch {
+    return {
+      id: 'g1',
+      barcode: '677478807501',
+      brand: 'Nemesis Audio',
+      model: 'UM-1200X4D',
+      name: '4-channel amplifier',
+      category: 'four_five_channel_amp',
+      specs: null,
+      referencePriceCents: 29900,
+      priceKind: 'msrp',
+      imageUrl: 'https://example.com/amp.jpg',
+      sourceUrl: 'https://example.com/amp',
+      contributionCount: 1,
+      verified: false,
+      ...overrides,
+    }
+  }
+
+  it('is labelled as coming from the shared catalog, not the web', () => {
+    // The distinction is not cosmetic: staff weigh "another shop identified
+    // this" differently from "a model searched for it", and the review badge
+    // reads this field.
+    expect(globalToCandidate(match(), '677478807501').source).toBe('shared_catalog')
+  })
+
+  it('always warns that the price is a reference, never a selling price', () => {
+    // The shared catalog carries no shop pricing by construction, so this
+    // number came from a manufacturer or a retail listing. A staff member who
+    // takes it as "what shops charge" is being misled by our own UI.
+    const candidate = globalToCandidate(match(), '677478807501')
+    expect(candidate.warnings.join(' ')).toMatch(/reference price/i)
+  })
+
+  it('omits the price warning when there is no price to misread', () => {
+    expect(globalToCandidate(match({ referencePriceCents: null }), '1').warnings).toEqual([])
+  })
+
+  it('says how many shops agreed, once more than one has', () => {
+    expect(globalToCandidate(match({ contributionCount: 4 }), '1').evidence.join(' ')).toMatch(/4 shops/)
+    expect(globalToCandidate(match({ contributionCount: 1 }), '1').evidence.join(' ')).not.toMatch(/shops have/)
+  })
+
+  it('rates a verified row above an unverified one', () => {
+    expect(globalToCandidate(match({ verified: true }), '1').confidence).toBeGreaterThan(
+      globalToCandidate(match({ verified: false }), '1').confidence,
+    )
+  })
+
+  it('falls back to the scanned code when the shared row has no barcode', () => {
+    // Matched by brand+model rather than barcode. Losing the scanned code
+    // here would mean the new catalog item is saved with no UPC at all, and
+    // the next scan of the same box would repeat the whole lookup.
+    expect(globalToCandidate(match({ barcode: null }), '677478807501').upc).toBe('677478807501')
+  })
+
+  it('never passes through a price kind the resolver does not define', () => {
+    // priceKind arrives from a database column, so an unexpected value is a
+    // data question, not a type question — it must degrade, not leak.
+    const odd = match({ priceKind: 'wholesale' as GlobalProductMatch['priceKind'] })
+    expect(globalToCandidate(odd, '1').priceKind).toBe('unknown')
   })
 })

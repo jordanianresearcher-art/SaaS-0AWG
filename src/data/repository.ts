@@ -321,7 +321,12 @@ export interface ProductSuggestion {
 // ---------------------------------------------------------------------------
 
 /** Where a resolved candidate's data actually came from — never conflated with "this shop's own catalog," which is checked locally before resolveProduct is ever called. */
-export type ProductResolutionSource = 'resolution_cache' | 'verified_web_source' | 'ai_extracted'
+export type ProductResolutionSource =
+  | 'resolution_cache'
+  | 'verified_web_source'
+  | 'ai_extracted'
+  /** Another shop already identified this exact product — see globalCatalog.ts. */
+  | 'shared_catalog'
 
 /** Whether a reference price is MSRP, a verified retail price, or unclear — distinct from a shop's own selling price/cost, which a candidate never carries (see CatalogItem.defaultPriceCents/costCents for that). */
 export type ProductPriceKind = 'msrp' | 'retail' | 'unknown'

@@ -152,31 +152,13 @@ export default function RapidIntakePage() {
           return
         }
 
-        // 3. The shared catalog — another shop may already have paid to
-        //    identify this exact product.
-        const shared = await repo.searchGlobalProducts(line.code)
-        const hit = shared.find((g) => g.barcode === line.code) ?? shared[0]
-        if (hit) {
-          setBatch((prev) =>
-            applyResolution(
-              prev,
-              line.code,
-              {
-                status: 'resolved',
-                brand: hit.brand,
-                model: hit.model,
-                name: hit.name,
-                imageUrl: hit.imageUrl,
-                referencePriceCents: hit.referencePriceCents,
-                source: 'shared',
-              },
-              startedAtRevision,
-            ),
-          )
-          return
-        }
-
-        // 4. Barcode database, then AI. The slow, paid path — last on purpose.
+        // 3. Everything else — the shared catalog, then the barcode database,
+        //    then AI. All three live behind lookupProductByUpc so this page
+        //    and the scan workspace climb the same ladder in the same order.
+        //    This used to query the shared catalog here as well, which meant
+        //    a second identical RPC on every miss and a looser match than the
+        //    repository's (it accepted the top row of a text search on a
+        //    barcode, which is not the same claim as an exact barcode hit).
         const result = await repo.lookupProductByUpc(line.code)
         if (result.source === 'catalog') {
           setBatch((prev) =>
@@ -224,7 +206,10 @@ export default function RapidIntakePage() {
                 name: top.name,
                 imageUrl: top.imageUrl,
                 referencePriceCents: top.referencePriceCents,
-                source: 'web',
+                // Where it really came from: a shared-catalog hit is another
+                // shop's identification, not a web search, and the review
+                // screen's badge should say so.
+                source: top.source === 'shared_catalog' ? 'shared' : 'web',
               },
               startedAtRevision,
             ),

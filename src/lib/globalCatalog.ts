@@ -29,6 +29,7 @@
 // search" the shared record is meant to carry.
 
 import type { CatalogItem, PriceKind, ProductCategory } from '../types'
+import type { GlobalProductMatch, ProductResolutionCandidate } from '../data/repository'
 import { canonicalizeProductFields } from './productNaming'
 import { classifyBarcode } from './barcodeIdentity'
 
@@ -121,4 +122,42 @@ export function globalMatchKey(draft: Pick<GlobalProductDraft, 'barcode' | 'bran
   const model = draft.model?.toLowerCase().replace(/[^a-z0-9]/g, '') ?? ''
   if (!brand && !model) return null
   return `bm:${brand}:${model}`
+}
+
+/**
+ * A shared-catalog row as a resolver candidate, so a barcode answered from
+ * the shared catalog flows through the same review UI as a web result.
+ *
+ * Confidence is stated rather than modelled: this is an exact barcode match
+ * that at least one other shop stood behind, which is a stronger claim than
+ * anything the resolver infers from a search. The contribution count carries
+ * the real signal into the evidence line, where staff can weigh it.
+ */
+export function globalToCandidate(g: GlobalProductMatch, scannedCode: string): ProductResolutionCandidate {
+  return {
+    id: `shared:${g.id}`,
+    source: 'shared_catalog',
+    brand: g.brand,
+    model: g.model,
+    name: g.name,
+    categoryHint: g.category,
+    upc: g.barcode ?? scannedCode,
+    imageUrl: g.imageUrl,
+    referencePriceCents: g.referencePriceCents,
+    priceKind: g.priceKind === 'msrp' || g.priceKind === 'retail' ? g.priceKind : 'unknown',
+    priceSourceUrl: g.sourceUrl,
+    priceSourceName: null,
+    confidence: g.verified ? 0.97 : 0.9,
+    confidenceLevel: 'high',
+    evidence: [
+      g.contributionCount > 1
+        ? `Exact barcode match — ${g.contributionCount} shops have identified this product.`
+        : 'Exact barcode match in the shared product catalog.',
+    ],
+    // The one thing staff must not assume: the price came from the web or a
+    // manufacturer, never from another shop's books (the shared catalog
+    // carries no shop pricing at all), so it is a starting point and not a
+    // number to sell at.
+    warnings: g.referencePriceCents !== null ? ['Reference price — set your own selling price.'] : [],
+  }
 }

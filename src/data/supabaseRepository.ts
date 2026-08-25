@@ -1,7 +1,8 @@
 import { FunctionsHttpError, type SupabaseClient } from '@supabase/supabase-js'
 import { sanitizeFinancingOffers } from '../lib/financing'
 import { canonicalizeProductFields } from '../lib/productNaming'
-import { globalMatchKey, toGlobalProductDraft } from '../lib/globalCatalog'
+import { globalMatchKey, globalToCandidate, toGlobalProductDraft } from '../lib/globalCatalog'
+import { classifyBarcode } from '../lib/barcodeIdentity'
 import { dedupeSuggestions, searchLocalCatalog } from '../lib/productSearch'
 import type {
   Appointment,
@@ -819,6 +820,48 @@ export class SupabaseRepository implements DataRepository {
   async lookupProductByUpc(code: string, options: { fast?: boolean; brandHint?: string | null } = {}): Promise<UpcLookupResult> {
     const item = await this.findCatalogItemByCode(code)
     if (item) return { source: 'catalog', catalogItem: item }
+
+    // The shared catalog, before anything that costs money or seconds. This
+    // is the entire premise of the shared catalog and the barcode path was
+    // the one route that skipped it — which is backwards, since scanning is
+    // how most products enter a shop.
+    //
+    // Skipped only for store-assigned codes (GS1 prefix 2). Those are printed
+    // by one retailer for its own shelves, so the same digits mean a
+    // different product at a different shop, and a "match" would be actively
+    // wrong rather than merely useless. A manufacturer's alphanumeric part
+    // code is the opposite case: Nemesis Audio's own label is the same label
+    // on every shop's shelf, so it is worth asking about even though no
+    // barcode database will ever hold it.
+    if (!classifyBarcode(code).storeAssigned) {
+      const shared = await this.searchGlobalProducts(code)
+      const exact = shared.find((g) => g.barcode === code.trim())
+      if (exact) {
+        const suggestion = globalToSuggestion(exact)
+        // A platform-verified row is at least as trustworthy as the exact
+        // UPCitemdb hit that already auto-populates, so it fills the form
+        // outright. An unverified one is a shop's contribution: still shown
+        // instantly and for free, but confirmed with a tap rather than
+        // assumed.
+        if (exact.verified) {
+          return {
+            source: 'external',
+            name: suggestion.name,
+            brand: suggestion.brand,
+            unitPriceCents: suggestion.unitPriceCents,
+            imageUrl: suggestion.imageUrl,
+            upc: exact.barcode ?? code,
+          }
+        }
+        return {
+          source: 'candidates',
+          candidates: [globalToCandidate(exact, code)],
+          // Always the scanned code, never blank: if staff reject the shared
+          // match, the fallback path prefills a custom item from this.
+          retainedInput: code,
+        }
+      }
+    }
 
     // Fast, confident path: a single high-confidence verified-source match
     // (today, that's an exact UPCitemdb hit) auto-populates without staff
@@ -1972,3 +2015,4 @@ function globalToSuggestion(g: GlobalProductMatch): ProductSuggestion {
     sourceUrl: g.sourceUrl,
   }
 }
+
