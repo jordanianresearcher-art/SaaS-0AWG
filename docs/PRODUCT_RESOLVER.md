@@ -53,11 +53,33 @@ both call `resolveProduct()` underneath.
    `(shop_id, kind, normalized_key)` hit skips the network entirely.
    Barcode results cache 30 days; text results 7 days (prices drift
    faster on a loose text match than a barcode's identity does).
-3. **Barcode only:** UPCitemdb (free trial tier, no key) — a real
-   barcode-to-product database, classified `verified_web_source`,
-   confidence 0.75.
-4. AI + web search, structured JSON output — for text queries always, for
-   barcodes only once UPCitemdb has already missed. **OpenAI first if
+3. **Barcode only:** the shared cross-shop catalog (exact barcode match,
+   skipped for store-assigned GS1-prefix-2 codes, whose digits mean a
+   different product at every retailer), then UPCitemdb (free trial
+   tier, no key) — a real barcode-to-product database, classified
+   `verified_web_source`, confidence 0.75.
+4. **Text only:** the retailers' own storefront search — Moon Car
+   Stereo and Sundown (Shopify `search/suggest.json`), Down4Sound and
+   Sky High (BigCommerce quick-results HTML) — all queried in parallel
+   with a 3.5s per-store budget, ~1s total in practice. Live listings
+   carry the name, current price, image and product URL; **two or more
+   hits end the resolution with no AI call at all**. The parsers are
+   pure, mirrored, and pinned against captured real responses in
+   `src/lib/__fixtures__/` (`retailerSearch.test.ts`), so a store
+   redesign fails a named test instead of a shop's intake.
+
+   Deliberately NOT used for barcodes: tested live, raw UPC digits get
+   zero hits on the Shopify stores and *false* fuzzy matches on the
+   BigCommerce ones (D4S matched `677478807501` to alternators "for a
+   2004"), which would attach a confident wrong product to a scan.
+   `skipRetailers: true` (sent by the Settings self-test) bypasses this
+   step so the health check still proves the AI key rather than
+   reporting "healthy" over a dead one.
+5. AI + web search, structured JSON output — for text queries only when
+   the retailers returned fewer than two listings (the prompt then says
+   which stores were already checked, steering the model toward Amazon,
+   eBay, Crutchfield and manufacturer sites); for barcodes only once
+   UPCitemdb has already missed. **OpenAI first if
    `OPENAI_API_KEY` is set** (Responses API, the built-in `web_search`
    tool, strict `text.format` json_schema output), **else Claude if
    `ANTHROPIC_API_KEY` is set** (Messages API, the `web_search` tool,
