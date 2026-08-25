@@ -87,7 +87,7 @@ function fail(status: number, message: string): Response {
  * the UI, as "no AI provider key is set" — to an owner who had just set one.
  * Reporting the version makes that mismatch visible instead of a guess.
  */
-const FUNCTION_VERSION = 6
+const FUNCTION_VERSION = 7
 
 const ANTHROPIC_VERSION = '2023-06-01'
 
@@ -478,6 +478,41 @@ function parseLooseJson<T = unknown>(raw: string | null | undefined): T | null {
 // ---------------------------------------------------------------------------
 
 type Rung = 1 | 2 | 3
+/**
+ * How long any one provider call gets before it is abandoned.
+ *
+ * A grounded search that runs long is not free to wait on: staff are standing
+ * at a counter with a box in their hand. Abandoning the call turns a hang
+ * into an ordinary rung failure the ladder can climb down from.
+ */
+const PROVIDER_TIMEOUT_MS = 20_000
+
+/**
+ * How long ALL AI work gets, across every rung and both model passes.
+ *
+ * A per-call timeout is not a latency guarantee, and treating it as one is
+ * how a real lookup took 88 seconds. The ladder tries up to three rungs
+ * against two models -- six calls -- so even a 25s per-call cap still
+ * permits two and a half minutes of spinner.
+ *
+ * This is the number that actually bounds it: each call's timeout shrinks to
+ * whatever is left, so the total holds however many rungs get climbed. 40s
+ * is meant to be survivable rather than pleasant -- with retailers answering
+ * typed searches in about a second, anything that reaches the AI is already
+ * the awkward long tail, and a bounded wait ending in an honest "not found"
+ * beats an unbounded one ending the same way.
+ */
+const AI_BUDGET_MS = 40_000
+
+/**
+ * The abort signal for one provider call: the per-call cap, or whatever is
+ * left of the whole-request budget, whichever is smaller.
+ */
+function providerSignal(diag: ProviderDiag): AbortSignal {
+  const remaining = diag.deadlineAt - Date.now()
+  return AbortSignal.timeout(Math.max(1_000, Math.min(PROVIDER_TIMEOUT_MS, remaining)))
+}
+
 const RUNGS: Rung[] = [1, 2, 3]
 
 const RUNG_LABEL: Record<Rung, string> = {
@@ -907,21 +942,6 @@ async function searchRetailers(query: string, probes?: RetailerProbe[]): Promise
  * Nemesis, Sundown, B2 Audio) are stocked and described properly -- these are
  * frequently the *only* sites that carry a given model at all.
  */
-/**
- * How long any one provider call gets before it is abandoned.
- *
- * A grounded search that runs long is not free to wait on: staff are standing
- * at a counter with a box in their hand, and the Edge Function itself has a
- * wall-clock limit that a hung upstream would otherwise consume entirely,
- * killing the request with no diagnosis at all. Abandoning the call turns a
- * hang into an ordinary rung failure the ladder can climb down from.
- *
- * 25s is deliberately generous — a grounded multi-search answer genuinely
- * takes ten or more — and is a stop for something broken, not a latency
- * target.
- */
-const PROVIDER_TIMEOUT_MS = 25_000
-
 const PRODUCT_SOURCES =
   "the manufacturer's own website, Amazon, eBay, Crutchfield, Sonic Electronix, " +
   'Parts Express, mooncarstereo.com, elitecaraudio.com, down4soundshop.com, ' +
@@ -1009,6 +1029,12 @@ interface ProviderDiag {
   model: string | null
   /** Which rung of the ladder produced the result. Null when none did. */
   rung: Rung | null
+  /**
+   * Wall-clock instant after which no further provider call may be started.
+   * Shared across the whole request so the ladder's total cost is bounded,
+   * not merely each individual step's.
+   */
+  deadlineAt: number
   /**
    * How many calls failed *mechanically* — a non-2xx status, or output that
    * could not be parsed.
@@ -1162,7 +1188,7 @@ async function resolveViaClaude(
   model: string,
 ): Promise<Candidate[]> {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
-    signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+    signal: providerSignal(diag),
     method: 'POST',
     headers: {
       'x-api-key': apiKey,
@@ -1234,7 +1260,7 @@ async function findOfficialPhotoUrlClaude(apiKey: string, name: string, brand: s
   const query = [brand, name].filter(Boolean).join(' ')
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
-      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+      signal: providerSignal(diag),
       method: 'POST',
       headers: {
         'x-api-key': apiKey,
@@ -1271,7 +1297,7 @@ async function findOfficialPhotoUrlOpenAi(apiKey: string, name: string, brand: s
   const query = [brand, name].filter(Boolean).join(' ')
   try {
     const res = await fetch('https://api.openai.com/v1/responses', {
-      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+      signal: providerSignal(diag),
       method: 'POST',
       headers: {
         authorization: `Bearer ${apiKey}`,
@@ -1315,7 +1341,7 @@ async function resolveViaVisionClaude(
   model: string,
 ): Promise<Candidate[]> {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
-    signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+    signal: providerSignal(diag),
     method: 'POST',
     headers: {
       'x-api-key': apiKey,
@@ -1370,7 +1396,7 @@ async function resolveViaVisionOpenAi(
   model: string,
 ): Promise<Candidate[]> {
   const res = await fetch('https://api.openai.com/v1/responses', {
-    signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+    signal: providerSignal(diag),
     method: 'POST',
     headers: {
       authorization: `Bearer ${apiKey}`,
@@ -1474,7 +1500,7 @@ async function resolveViaOpenAi(
   model: string,
 ): Promise<Candidate[]> {
   const res = await fetch('https://api.openai.com/v1/responses', {
-    signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+    signal: providerSignal(diag),
     method: 'POST',
     headers: {
       authorization: `Bearer ${apiKey}`,
@@ -1530,6 +1556,13 @@ async function climbLadder(
     }
 
     for (const rung of RUNGS) {
+      // Out of budget: stop climbing rather than start a call that would be
+      // aborted a second later anyway. Reported as an error so the result
+      // reads as "ran out of time", not as "no such product".
+      if (Date.now() >= diag.deadlineAt - 1_000) {
+        diag.error = diag.error ?? 'Product lookup ran out of time'
+        return []
+      }
       const faultsBefore = diag.faults
       let candidates: Candidate[] = []
       try {
@@ -1651,7 +1684,7 @@ async function resolveViaCompatible(
   if (grounding) body.google = grounding
 
   const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-    signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+    signal: providerSignal(diag),
     method: 'POST',
     headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
     body: JSON.stringify(body),
@@ -1756,7 +1789,7 @@ async function discoverCompatibleModel(
   let picked: string | null = null
   try {
     const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/models`, {
-      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+      signal: providerSignal(diag),
       headers: { authorization: `Bearer ${apiKey}` },
     })
     if (res.ok) {
@@ -1895,7 +1928,14 @@ Deno.serve(async (req: Request) => {
   // Wall-clock for the whole request, reported back as tookMs so "it took
   // forever" arrives as a number instead of a feeling.
   const startedAt = Date.now()
-  const diag: ProviderDiag = { error: null, provider: null, model: null, rung: null, faults: 0 }
+  const diag: ProviderDiag = {
+    error: null,
+    provider: null,
+    model: null,
+    rung: null,
+    faults: 0,
+    deadlineAt: Date.now() + AI_BUDGET_MS,
+  }
   const retailerProbes: RetailerProbe[] = []
 
   const body = await req.json().catch(() => null)

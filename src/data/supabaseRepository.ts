@@ -1084,6 +1084,19 @@ export class SupabaseRepository implements DataRepository {
 
     const started = Date.now()
     try {
+      // A health check that hangs is its own kind of broken. An owner watched
+      // this spin for 88 seconds against a stale deployment and had nothing
+      // to read at the end of it; a check that gives up and says so is more
+      // useful than one that eventually succeeds. Comfortably longer than the
+      // function's own 40s AI budget, so a healthy-but-slow deployment still
+      // reports rather than being cut off by its own client.
+      const CHECK_TIMEOUT_MS = 60_000
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error('The lookup function did not respond within a minute.')),
+          CHECK_TIMEOUT_MS,
+        ),
+      )
       // Deliberately `kind: 'text'` and not a bespoke 'selftest' kind.
       //
       // A health check has to run on the OLDEST contract the deployment might
@@ -1103,9 +1116,12 @@ export class SupabaseRepository implements DataRepository {
       // retailer answering here would report "lookup healthy" over a dead AI
       // key -- the exact blind spot this test exists to remove. Also ignored
       // by older deployments.
-      const { data, error } = await this.supabase.functions.invoke('resolve-product', {
-        body: { shopId: this.shopId, kind: 'text', query: SELF_TEST_QUERY, noCache: true, skipRetailers: true },
-      })
+      const { data, error } = await Promise.race([
+        this.supabase.functions.invoke('resolve-product', {
+          body: { shopId: this.shopId, kind: 'text', query: SELF_TEST_QUERY, noCache: true, skipRetailers: true },
+        }),
+        timeout,
+      ])
       if (error) {
         return failed(await describeFunctionError(error))
       }
