@@ -135,6 +135,33 @@ export default function RapidIntakePage() {
   // list fills top-down in scan order, which reads as progress.
   const resolving = useRef(false)
 
+  /**
+   * A lookup that never comes back must not take the batch with it.
+   *
+   * Lines resolve strictly one at a time, so a single hung request stalls
+   * every line behind it — the operator sees "Still looking…" forever on a
+   * list that has silently stopped working, with nothing to click. Capping
+   * each lookup turns that into one honest "name it yourself" and lets the
+   * queue move on. Generous on purpose: a real grounded search can take
+   * twenty seconds, and cutting off a slow answer that was about to arrive
+   * is its own kind of wrong.
+   */
+  const LOOKUP_TIMEOUT_MS = 30_000
+
+  const withTimeout = useCallback(async <T,>(work: Promise<T>, fallback: T): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      return await Promise.race([
+        work,
+        new Promise<T>((resolve) => {
+          timer = setTimeout(() => resolve(fallback), LOOKUP_TIMEOUT_MS)
+        }),
+      ])
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+  }, [])
+
   useEffect(() => {
     if (resolving.current || catalog === null) return
     const line = nextPending(batch)
@@ -177,7 +204,13 @@ export default function RapidIntakePage() {
           // The resolver's text path: live retailer listings first, the AI
           // only for what no store carries. Shared-catalog rows come back as
           // candidates too, marked with their source.
-          const result = await repo.resolveProduct({ kind: 'text', query: line.code })
+          const result = await withTimeout(repo.resolveProduct({ kind: 'text', query: line.code }), {
+            candidates: [],
+            retainedInput: line.code,
+            aiConfigured: true,
+            aiError: null,
+            unresolvableBarcode: false,
+          })
           const top = result.candidates[0]
           if (top) {
             setBatch((prev) =>
@@ -240,7 +273,7 @@ export default function RapidIntakePage() {
         //    a second identical RPC on every miss and a looser match than the
         //    repository's (it accepted the top row of a text search on a
         //    barcode, which is not the same claim as an exact barcode hit).
-        const result = await repo.lookupProductByUpc(line.code)
+        const result = await withTimeout(repo.lookupProductByUpc(line.code), { source: 'not_found' as const })
         if (result.source === 'catalog') {
           setBatch((prev) =>
             applyResolution(
@@ -308,7 +341,7 @@ export default function RapidIntakePage() {
         setBatch((prev) => [...prev])
       }
     })()
-  }, [batch, catalog, repo])
+  }, [batch, catalog, repo, withTimeout])
 
   const summary = useMemo(() => summarize(batch), [batch])
 

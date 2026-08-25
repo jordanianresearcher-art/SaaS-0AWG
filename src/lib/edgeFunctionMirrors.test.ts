@@ -30,6 +30,7 @@ import { parseLooseJson } from './aiJson'
 import { pickBestModel } from './modelPreference'
 import fixture from './__fixtures__/shopProducts.json'
 import { centsFromPrice, parseBigCommerceQuickResults, parseShopifySuggest } from './retailerSearch'
+import { looksDegenerate } from './degenerateText'
 import shopifyFixture from './__fixtures__/retailerShopifySuggest.json'
 import bigcommerceFixture from './__fixtures__/retailerBigCommerceQuick.html?raw'
 import skyHighFixture from './__fixtures__/retailerBigCommerceSkyHigh.html?raw'
@@ -209,5 +210,27 @@ describe('retailerSearch mirror', () => {
     for (const v of ['329.99', '$1,199.99', '0.00', '', 'Call for price', '120'] as const) {
       expect(fnCents(v), v).toBe(centsFromPrice(v))
     }
+  })
+})
+
+describe('degenerateText mirror', () => {
+  const mirror = loadMirror('degenerateText', ['looksDegenerate', 'candidateLooksDegenerate'])
+  const fnLooks = mirror.looksDegenerate as (raw: string | null) => boolean
+
+  it('agrees on the collapsed output and on every real product', () => {
+    const cases = [
+      'A100-P-P-P-P-P-P-P-P-P-cd-cd-cd-corp',
+      'JBL-A100-P-P-P-P-P-P-P-monolith-monolith',
+      'KickerAAAAAAAAAA',
+      '2-2-2 ohm wiring kit',
+      'EZY-RCA110-GX',
+      'FR-M800.4D',
+      'XD600/6v2',
+      'DOWN4SOUND | BIG 3 - 0 GAUGE CCA ( LIME GREEN /BLACK )',
+      '',
+      ...(fixture as { model: string }[]).slice(0, 40).map((r) => r.model),
+    ]
+    const disagreements = cases.filter((c) => fnLooks(c) !== looksDegenerate(c))
+    expect(disagreements).toEqual([])
   })
 })

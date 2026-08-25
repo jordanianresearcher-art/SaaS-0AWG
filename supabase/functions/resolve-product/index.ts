@@ -87,7 +87,7 @@ function fail(status: number, message: string): Response {
  * the UI, as "no AI provider key is set" — to an owner who had just set one.
  * Reporting the version makes that mismatch visible instead of a guess.
  */
-const FUNCTION_VERSION = 5
+const FUNCTION_VERSION = 6
 
 const ANTHROPIC_VERSION = '2023-06-01'
 
@@ -495,6 +495,82 @@ const RUNG_LABEL: Record<Rung, string> = {
 const RUNG_SEARCHED_WEB: Record<Rung, boolean> = { 1: true, 2: false, 3: false }
 
 // ---------------------------------------------------------------------------
+// Degenerate-output guard -- mirrors src/lib/degenerateText.ts, where it is
+// tested (including against the pilot shop's 123 real products, since the
+// only real risk here is discarding a genuine SKU that looks like line
+// noise). Deno cannot import from src/; same duplication rule as the rest.
+// ---------------------------------------------------------------------------
+
+// MIRROR-BEGIN degenerateText — keep behaviourally identical to src/lib/degenerateText.ts
+// (src/lib/edgeFunctionMirrors.test.ts runs both copies over the same inputs).
+/** Longest run of one immediately-repeated token, e.g. "P-P-P-P" → 4. */
+function longestTokenRun(tokens: string[]): number {
+  let best = 1
+  let run = 1
+  for (let i = 1; i < tokens.length; i++) {
+    if (tokens[i] && tokens[i] === tokens[i - 1]) {
+      run += 1
+      if (run > best) best = run
+    } else {
+      run = 1
+    }
+  }
+  return best
+}
+
+/**
+ * True when a string looks like generation that has degenerated rather than
+ * a real (if ugly) product name.
+ *
+ * Three independent signals, each seen in the wild:
+ *
+ *   1. A short token repeated four or more times in a row — "P-P-P-P-P",
+ *      "cd-cd-cd-cd". Four is the threshold because three is reachable
+ *      legitimately ("2-2-2 ohm") and four essentially is not.
+ *   2. The same character repeated eight or more times — "AAAAAAAA".
+ *   3. Absurd length. No real model number or product name runs past 120
+ *      characters; a loop reaches it easily.
+ */
+function looksDegenerate(raw: string | null | undefined): boolean {
+  if (typeof raw !== 'string') return false
+  const text = raw.trim()
+  if (!text) return false
+
+  if (text.length > 120) return true
+  if (/(.)\1{7,}/.test(text)) return true
+
+  // Split on the separators a loop tends to emit between its repeats.
+  const tokens = text
+    .toLowerCase()
+    .split(/[\s\-_./|,]+/)
+    .filter(Boolean)
+  if (tokens.length < 4) return false
+
+  const shortTokens = tokens.map((t) => (t.length <= 4 ? t : `«${t}»`))
+  return longestTokenRun(shortTokens) >= 4
+}
+
+/**
+ * True when any field a person will read has collapsed.
+ *
+ * Checked across name, model and brand together rather than per field: the
+ * loop usually corrupts one of them first, and a candidate whose model is
+ * garbage is not rescued by having a clean brand.
+ */
+function candidateLooksDegenerate(candidate: {
+  name?: string | null
+  model?: string | null
+  brand?: string | null
+}): boolean {
+  return (
+    looksDegenerate(candidate.name) ||
+    looksDegenerate(candidate.model) ||
+    looksDegenerate(candidate.brand)
+  )
+}
+// MIRROR-END degenerateText
+
+// ---------------------------------------------------------------------------
 // Retailer storefront search -- mirrors src/lib/retailerSearch.ts, where the
 // parsers are tested against captured real responses (Deno cannot import from
 // src/; same duplication rule as the email templates, productNaming,
@@ -787,9 +863,33 @@ function retailerCandidate(hit: RetailerHit, index: number): Candidate {
   }
 }
 
+/** What one store did when asked, for the self-test's per-store readout. */
+interface RetailerProbe {
+  name: string
+  hits: number
+  ms: number
+  error: string | null
+}
+
 /** Every configured store in parallel; a full miss costs one timeout, not four. */
-async function searchRetailers(query: string): Promise<Candidate[]> {
-  const groups = await Promise.all(RETAILER_SOURCES.map((source) => fetchRetailerHits(source, query)))
+async function searchRetailers(query: string, probes?: RetailerProbe[]): Promise<Candidate[]> {
+  const groups = await Promise.all(
+    RETAILER_SOURCES.map(async (source) => {
+      const startedAt = Date.now()
+      const hits = await fetchRetailerHits(source, query)
+      probes?.push({
+        name: source.name,
+        hits: hits.length,
+        ms: Date.now() - startedAt,
+        // fetchRetailerHits swallows its own failures so one bad store can't
+        // fail a lookup. That is right for a shop mid-intake and wrong for a
+        // diagnostic, so zero-hits-in-under-a-blink is reported as a probable
+        // block rather than silently reading like "no such product".
+        error: hits.length === 0 && Date.now() - startedAt < 150 ? 'no response' : null,
+      })
+      return hits
+    }),
+  )
   return interleaveRetailerHits(groups, 6).map(retailerCandidate)
 }
 
@@ -990,6 +1090,21 @@ function parseAiCandidates(
     .map((c): Candidate | null => {
       const name = typeof c.name === 'string' ? c.name.trim() : ''
       if (!name) return null
+      // Generation that came apart -- a repetition loop -- parses and
+      // validates perfectly while meaning nothing, so no other guard here
+      // catches it. Dropped rather than surfaced: an empty result sends
+      // staff to type the name themselves, which is a worse minute but a
+      // correct catalog. See degenerateText.ts.
+      if (
+        candidateLooksDegenerate({
+          name,
+          model: typeof c.model === 'string' ? c.model : null,
+          brand: typeof c.brand === 'string' ? c.brand : null,
+        })
+      ) {
+        console.error(`resolve-product: dropped degenerate ${providerLabel} candidate`, name.slice(0, 120))
+        return null
+      }
       const barcodeConfirmed = c.barcode_confirmed === true
       const selfReported = typeof c.confidence === 'number' && Number.isFinite(c.confidence) ? Math.max(0, Math.min(1, c.confidence)) : 0.3
       // A barcode search where the source didn't explicitly confirm the
@@ -1781,6 +1896,7 @@ Deno.serve(async (req: Request) => {
   // forever" arrives as a number instead of a feeling.
   const startedAt = Date.now()
   const diag: ProviderDiag = { error: null, provider: null, model: null, rung: null, faults: 0 }
+  const retailerProbes: RetailerProbe[] = []
 
   const body = await req.json().catch(() => null)
   const shopId = typeof body?.shopId === 'string' ? body.shopId : ''
@@ -2000,7 +2116,13 @@ Deno.serve(async (req: Request) => {
     // second with a live price, an image and the listing URL, and the AI
     // is never consulted at all. That is both the speed the owner asked
     // for and most of the cost of this feature deleted.
-    const retailHits = skipRetailers ? [] : await searchRetailers(textQuery)
+    //
+    // Under skipRetailers the stores are still *measured*, just not allowed
+    // to answer. That keeps the self-test an honest test of the AI key while
+    // still reporting whether the fast path works -- a green health check
+    // beside a slow app is the worst diagnostic there is.
+    const probed = await searchRetailers(textQuery, retailerProbes)
+    const retailHits = skipRetailers ? [] : probed
 
     if (retailHits.length >= 2) {
       // Two independent live listings is a better answer than anything a
@@ -2059,5 +2181,26 @@ Deno.serve(async (req: Request) => {
       { onConflict: 'shop_id,kind,normalized_key' },
     )
 
-  return json(200, { ok: true, candidates, cached: false, aiConfigured, aiError: diag.error, tookMs: Date.now() - startedAt })
+  return json(200, {
+    ok: true,
+    candidates,
+    cached: false,
+    aiConfigured,
+    aiError: diag.error,
+    tookMs: Date.now() - startedAt,
+    // The self-test runs through this path, not the 'selftest' kind -- a
+    // health check has to speak the oldest contract a deployment might be
+    // running. But this response carried none of the diagnostics the health
+    // UI reads, so every check reported functionVersion: null and told the
+    // owner "the deployed function is older than this app" no matter how
+    // recently they had deployed it. That is the single most misleading
+    // thing this app could say to someone asking "did it deploy?".
+    functionVersion: FUNCTION_VERSION,
+    provider: diag.provider,
+    model: diag.model,
+    rung: diag.rung,
+    rungLabel: diag.rung ? RUNG_LABEL[diag.rung] : null,
+    searchedWeb: diag.rung ? RUNG_SEARCHED_WEB[diag.rung] : null,
+    retailers: retailerProbes,
+  })
 })
