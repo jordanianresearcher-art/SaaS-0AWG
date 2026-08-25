@@ -470,6 +470,7 @@ export class DemoRepository implements DataRepository {
       rung: null,
       rungLabel: null,
       searchedWeb: null,
+      retailers: [],
       candidateCount: 0,
       sample: null,
       elapsedMs: 0,

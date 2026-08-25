@@ -280,6 +280,40 @@ function ProductLookupHealthSection() {
               </code>{' '}
               for the full picture.
             </p>
+          ) : (
+            // Shown as a number, not just an absence. "Has my deploy landed?"
+            // is the question people actually bring to this button, and it
+            // could not be answered by a check that only ever said "old" or
+            // said nothing at all.
+            <p className="mt-1 text-sm text-zinc-600">
+              Deployed function: <span className="font-mono font-semibold">v{result.functionVersion}</span>
+            </p>
+          )}
+
+          {/* The stores are the fast path for typed searches. If they are all
+              silent, lookups still work but crawl — and that reads as "the AI
+              is broken" unless it is stated plainly. */}
+          {result.retailers.length > 0 ? (
+            <div className="mt-3">
+              <p className="text-sm font-semibold text-ink">Retailer search</p>
+              <ul className="mt-1 space-y-0.5 text-sm">
+                {result.retailers.map((store) => (
+                  <li key={store.name} className="flex flex-wrap items-baseline gap-x-2">
+                    <span className="font-medium text-zinc-700">{store.name}</span>
+                    <span className={store.error || store.hits === 0 ? 'text-amber-800' : 'text-green-800'}>
+                      {store.error ? store.error : `${store.hits} result${store.hits === 1 ? '' : 's'}`}
+                    </span>
+                    <span className="text-zinc-500">{(store.ms / 1000).toFixed(1)}s</span>
+                  </li>
+                ))}
+              </ul>
+              {result.retailers.every((s) => s.hits === 0) ? (
+                <p className="mt-1 text-sm text-amber-900">
+                  No store answered. Typed searches will still work through the AI, but slowly — the fast
+                  path is unavailable from the server.
+                </p>
+              ) : null}
+            </div>
           ) : null}
 
           {result.ok ? (

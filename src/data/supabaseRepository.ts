@@ -1073,6 +1073,7 @@ export class SupabaseRepository implements DataRepository {
       rung: null,
       rungLabel: null,
       searchedWeb: null,
+      retailers: [],
       candidateCount: 0,
       sample: null,
       elapsedMs: null,
@@ -1122,6 +1123,14 @@ export class SupabaseRepository implements DataRepository {
         rung: typeof row.rung === 'number' ? row.rung : null,
         rungLabel: typeof row.rungLabel === 'string' ? row.rungLabel : null,
         searchedWeb: typeof row.searchedWeb === 'boolean' ? row.searchedWeb : null,
+        retailers: Array.isArray(row.retailers)
+          ? (row.retailers as Row[]).map((r) => ({
+              name: String(r.name ?? 'store'),
+              hits: typeof r.hits === 'number' ? r.hits : 0,
+              ms: typeof r.ms === 'number' ? r.ms : 0,
+              error: typeof r.error === 'string' ? r.error : null,
+            }))
+          : [],
         candidateCount: candidates.length,
         sample: typeof top?.name === 'string' ? top.name : null,
         elapsedMs: Date.now() - started,

@@ -483,6 +483,18 @@ export interface ProductLookupSelfTest {
    */
   searchedWeb: boolean | null
   candidateCount: number
+  /**
+   * How each retailer storefront responded.
+   *
+   * The AI half of this check deliberately bypasses the retailers so it
+   * genuinely tests the key — which on its own would report "lookup healthy"
+   * while the fast path every typed search actually uses is dead. This is the
+   * other half, per store, so one storefront blocking the server's egress
+   * shows up by name instead of looking like "no such product".
+   *
+   * Empty on deployments older than the retailer path.
+   */
+  retailers: Array<{ name: string; hits: number; ms: number; error: string | null }>
   /** The name of the first product found, as proof it really worked. */
   sample: string | null
   elapsedMs: number | null
