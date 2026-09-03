@@ -1,0 +1,43 @@
+{
+  "$comment": [
+    "Pre-approved commands for this project. Everything here is read-only or",
+    "locally reversible: the verification gate, the dev/preview servers, and",
+    "read-only git inspection.",
+    "",
+    "Deliberately NOT listed, so they always prompt: git push, git commit,",
+    "supabase (deploys and migrations reach a live shop's database), wrangler,",
+    "and rm. The mastermind is the only thing that commits, and a deploy is",
+    "always the owner's decision."
+  ],
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc:*)",
+      "Bash(npx eslint:*)",
+      "Bash(npx vitest:*)",
+      "Bash(npx prettier:*)",
+      "Bash(npm run build:*)",
+      "Bash(npm run lint:*)",
+      "Bash(npm run test:*)",
+      "Bash(npm run typecheck:*)",
+      "Bash(npm run typecheck:functions:*)",
+      "Bash(npm install:*)",
+      "Bash(node scripts/check-edge-functions.mjs:*)",
+      "Bash(node scripts/check-deploy-env.mjs:*)",
+      "Bash(npx vite preview:*)",
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git fetch:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(wc:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)"
+    ],
+    "deny": []
+  }
+}
