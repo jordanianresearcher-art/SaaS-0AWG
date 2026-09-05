@@ -1661,6 +1661,33 @@ export class SupabaseRepository implements DataRepository {
     }
   }
 
+  async updateWonAmount(quoteId: string, wonAmountCents: number): Promise<void> {
+    // Read the old value first so the event can record what actually changed —
+    // "corrected $3,200 to $3,245" is auditable, "corrected to $3,245" is not.
+    const { data: before } = await this.supabase
+      .from('quotes')
+      .select('won_amount_cents, status')
+      .eq('id', quoteId)
+      .maybeSingle()
+    // Guarded on having an amount, not on current status: a quote marked won
+    // and later marked lost keeps its amount, still displays it, and is still
+    // counted in recovered revenue — so it must stay correctable.
+    if (before && before.won_amount_cents === null) {
+      throw new Error('This quote has no recorded sale amount to correct.')
+    }
+
+    const { error } = await this.supabase
+      .from('quotes')
+      .update({ won_amount_cents: wonAmountCents })
+      .eq('id', quoteId)
+    if (error) throw error
+
+    await this.addEvent(quoteId, 'won_amount_edited', {
+      fromCents: typeof before?.won_amount_cents === 'number' ? before.won_amount_cents : null,
+      toCents: wonAmountCents,
+    })
+  }
+
   async rescheduleFollowUp(quoteId: string, nextFollowUpAt: string | null): Promise<void> {
     const { error } = await this.supabase
       .from('quotes')

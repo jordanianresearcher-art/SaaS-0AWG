@@ -500,6 +500,8 @@ function eventLabel(eventType: string, bundle: QuoteBundle): string {
       return 'appointment booked'
     case 'deposit_paid':
       return 'deposit paid'
+    case 'won_amount_edited':
+      return 'sale amount corrected'
     case 'marked_won':
       return `job won${bundle.quote.wonAmountCents ? ` (${formatCurrency(bundle.quote.wonAmountCents)})` : ''}`
     case 'marked_lost':

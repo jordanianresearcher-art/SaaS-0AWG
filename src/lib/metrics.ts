@@ -47,6 +47,13 @@ export function computeMetrics(bundles: QuoteBundle[], from: Date, to: Date): Pi
     for (const e of b.emails) {
       if ((e.status === 'sent' || e.status === 'demo_sent') && within(e.createdAt, from, to)) m.emailsSent += 1
     }
+    // A quote is won once, however many times it was marked won. Correcting a
+    // sale amount used to mean re-running "mark won", which logs a second
+    // 'marked_won' event — and this loop then counted the job twice and added
+    // its revenue twice, inflating the one number the pilot report is sold on.
+    // (updateWonAmount now exists so corrections don't log that event at all,
+    // but quotes re-marked before this fix are still in the data.)
+    let countedWin = false
     for (const ev of b.events) {
       if (!within(ev.createdAt, from, to)) continue
       if (ev.eventType === 'quote_viewed') m.quoteViews += 1
@@ -54,8 +61,11 @@ export function computeMetrics(bundles: QuoteBundle[], from: Date, to: Date): Pi
       if (ev.eventType === 'email_sent' && ev.metadata?.automatic === true) m.autoFollowUpsSent += 1
       if (ev.eventType === 'appointment_booked') m.appointments += 1
       if (ev.eventType === 'deposit_paid') m.deposits += 1
-      if (ev.eventType === 'marked_won') {
+      if (ev.eventType === 'marked_won' && !countedWin) {
+        countedWin = true
         m.wonJobs += 1
+        // The quote's CURRENT amount, not the event's — so correcting a sale
+        // amount is reflected in the report immediately.
         m.recoveredRevenueCents += b.quote.wonAmountCents ?? quoteValueCents(b.options)
       }
     }

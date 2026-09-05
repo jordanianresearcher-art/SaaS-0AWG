@@ -14,6 +14,54 @@ function memoryStorage() {
 }
 
 describe('computeMetrics', () => {
+  it('counts a job won once however many times it was marked won', async () => {
+    // The regression this guards: correcting a sale amount used to mean
+    // re-running "mark won", which logged a second 'marked_won' event. The
+    // report then counted the job twice and doubled its revenue — inflating
+    // the exact number the pilot is sold on. The existing assertions below use
+    // toBeGreaterThanOrEqual, so they never saw it.
+    const repo = new DemoRepository(memoryStorage())
+    const bundles = await repo.listQuoteBundles()
+    const won = bundles.find((b) => b.quote.status === 'won')!
+    const now = new Date()
+    const from = subDays(now, 60)
+
+    const once = computeMetrics(bundles, from, now)
+
+    const twice = bundles.map((b) =>
+      b.quote.id === won.quote.id
+        ? {
+            ...b,
+            events: [
+              ...b.events,
+              { ...b.events.find((e) => e.eventType === 'marked_won')!, id: 'second-mark', createdAt: new Date().toISOString() },
+            ],
+          }
+        : b,
+    )
+    const after = computeMetrics(twice, from, now)
+
+    expect(after.wonJobs).toBe(once.wonJobs)
+    expect(after.recoveredRevenueCents).toBe(once.recoveredRevenueCents)
+  })
+
+  it('reports the corrected sale amount after an edit, not the original', async () => {
+    // Metrics read the quote's current wonAmountCents rather than the event's
+    // metadata, so fixing a mistyped amount fixes the report immediately.
+    const repo = new DemoRepository(memoryStorage())
+    const before = await repo.listQuoteBundles()
+    const won = before.find((b) => b.quote.status === 'won')!
+    const now = new Date()
+    const from = subDays(now, 60)
+    const original = computeMetrics(before, from, now).recoveredRevenueCents
+
+    await repo.updateWonAmount(won.quote.id, (won.quote.wonAmountCents ?? 0) + 10_000)
+    const after = computeMetrics(await repo.listQuoteBundles(), from, now)
+
+    expect(after.recoveredRevenueCents).toBe(original + 10_000)
+    expect(after.wonJobs).toBe(computeMetrics(before, from, now).wonJobs)
+  })
+
   it('computes the 14-day pilot metrics from seeded data', async () => {
     const repo = new DemoRepository(memoryStorage())
     const bundles = await repo.listQuoteBundles()

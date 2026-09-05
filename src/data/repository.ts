@@ -692,6 +692,16 @@ export interface DataRepository {
 
   /** Staff status actions: booked, deposit paid, won (with amount), lost. */
   setQuoteStatus(quoteId: string, status: QuoteStatus, wonAmountCents?: number | null): Promise<void>
+  /**
+   * Correct the final sale amount on a quote that is already won.
+   *
+   * Deliberately separate from setQuoteStatus: that method is about moving a
+   * quote through its lifecycle, and re-running it to fix a typo logs a second
+   * 'marked_won' event — which the pilot report counts as a second won job.
+   * This changes the number and nothing else, logging 'won_amount_edited' so
+   * the correction stays auditable.
+   */
+  updateWonAmount(quoteId: string, wonAmountCents: number): Promise<void>
   rescheduleFollowUp(quoteId: string, nextFollowUpAt: string | null): Promise<void>
   setFollowUpAllowed(quoteId: string, allowed: boolean): Promise<void>
   markContacted(quoteId: string): Promise<void>

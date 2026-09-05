@@ -53,6 +53,7 @@ export default function QuoteDetailPage() {
   const [emailOpen, setEmailOpen] = useState(false)
   const [emailTemplate, setEmailTemplate] = useState<TemplateType>('initial')
   const [wonOpen, setWonOpen] = useState(false)
+  const [wonEditOpen, setWonEditOpen] = useState(false)
   const [rescheduleOpen, setRescheduleOpen] = useState(false)
   const [notesDraft, setNotesDraft] = useState<string | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
@@ -175,7 +176,18 @@ export default function QuoteDetailPage() {
           <p className="text-sm font-semibold tracking-wide text-zinc-500 uppercase">Quote value</p>
           <p className="text-3xl font-black text-ink">{formatCurrency(quoteValueCents(options))}</p>
           {quote.wonAmountCents !== null ? (
-            <p className="text-base font-bold text-green-700">Won at {formatCurrency(quote.wonAmountCents)}</p>
+            <div className="flex items-center justify-end gap-1.5">
+              <p className="text-base font-bold text-green-700">Won at {formatCurrency(quote.wonAmountCents)}</p>
+              <button
+                type="button"
+                onClick={() => setWonEditOpen(true)}
+                aria-label="Correct the sale amount"
+                title="Correct the sale amount"
+                className="no-print rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
+              >
+                <Pencil className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
           ) : null}
         </div>
       </div>
@@ -491,7 +503,8 @@ export default function QuoteDetailPage() {
         onSent={() => void reloadAll()}
       />
 
-      <MarkWonModal
+      <WonAmountModal
+        mode="mark"
         open={wonOpen}
         onClose={() => setWonOpen(false)}
         defaultCents={quoteValueCents(options)}
@@ -500,6 +513,22 @@ export default function QuoteDetailPage() {
           setWonOpen(false)
           await reloadAll()
           toast('success', `Marked won — ${formatCurrency(cents)} recovered.`)
+        }}
+      />
+
+      <WonAmountModal
+        // Keyed on the current amount so reopening always starts from what is
+        // saved now, not from whatever was typed the last time it was open.
+        key={`won-edit-${quote.wonAmountCents ?? 0}`}
+        mode="correct"
+        open={wonEditOpen}
+        onClose={() => setWonEditOpen(false)}
+        defaultCents={quote.wonAmountCents ?? quoteValueCents(options)}
+        onConfirm={async (cents) => {
+          await repo.updateWonAmount(quote.id, cents)
+          setWonEditOpen(false)
+          await reloadAll()
+          toast('success', `Sale amount is now ${formatCurrency(cents)}.`)
         }}
       />
 
@@ -582,6 +611,7 @@ function activityLabel(eventType: string): string {
     appointment_booked: 'Appointment booked',
     deposit_paid: 'Deposit paid',
     marked_won: 'Marked won',
+    won_amount_edited: 'Sale amount corrected',
     marked_lost: 'Marked lost',
     follow_up_rescheduled: 'Follow-up rescheduled',
     follow_up_disabled: 'Follow-up turned off',
@@ -591,28 +621,53 @@ function activityLabel(eventType: string): string {
   return labels[eventType] ?? eventType.replaceAll('_', ' ')
 }
 
-function MarkWonModal({
+/**
+ * Captures a final sale amount — used both to mark a job won and, afterwards,
+ * to correct the number. One component because it is one question ("what did
+ * the customer actually pay"), and because a correction must offer exactly the
+ * same input affordances as the original entry.
+ *
+ * `initialValue` is what a correction pre-fills; marking won leaves the field
+ * blank so the placeholder can offer the quote value as a one-tap default.
+ */
+function WonAmountModal({
   open,
   onClose,
   defaultCents,
   onConfirm,
+  mode,
 }: {
   open: boolean
   onClose: () => void
   defaultCents: number
   onConfirm: (cents: number) => Promise<void>
+  mode: 'mark' | 'correct'
 }) {
-  const [value, setValue] = useState('')
+  const correcting = mode === 'correct'
+  // Pre-fill when correcting so the current number is there to edit rather
+  // than retype; blank when marking won so the placeholder default applies.
+  const [value, setValue] = useState(correcting ? (defaultCents / 100).toFixed(2) : '')
   const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
   const placeholder = (defaultCents / 100).toFixed(0)
 
   return (
-    <Modal open={open} onClose={onClose} title="Mark this job won">
+    <Modal open={open} onClose={onClose} title={correcting ? 'Correct the sale amount' : 'Mark this job won'}>
       <div className="space-y-4">
-        <Field label="Final sale amount" htmlFor="won-amount" error={error ?? undefined} hint="What the customer actually paid, in dollars.">
+        <Field
+          label="Final sale amount"
+          htmlFor="won-amount"
+          error={error ?? undefined}
+          hint={
+            correcting
+              ? 'What the customer actually paid. This updates your recovered-revenue total.'
+              : 'What the customer actually paid, in dollars.'
+          }
+        >
           <Input
             id="won-amount"
             inputMode="decimal"
+            autoFocus
             placeholder={`$${placeholder}`}
             value={value}
             onChange={(e) => setValue(e.target.value)}
@@ -624,17 +679,28 @@ function MarkWonModal({
           </Button>
           <Button
             variant="success"
+            disabled={saving}
             onClick={() => {
-              const cents = value.trim() === '' ? defaultCents : parseDollarsToCents(value)
+              // A correction must be deliberate: blank falls back to the quote
+              // value when marking won, but silently rewriting a real sale
+              // amount because someone cleared the field would be wrong.
+              const raw = value.trim()
+              if (correcting && raw === '') {
+                setError('Enter the sale amount.')
+                return
+              }
+              const cents = raw === '' ? defaultCents : parseDollarsToCents(raw)
               if (cents === null) {
                 setError('Enter a valid dollar amount.')
                 return
               }
               setError(null)
-              void onConfirm(cents)
+              setSaving(true)
+              void onConfirm(cents).finally(() => setSaving(false))
             }}
           >
-            <Trophy className="h-5 w-5" aria-hidden="true" /> Mark won
+            <Trophy className="h-5 w-5" aria-hidden="true" />
+            {correcting ? (saving ? 'Saving…' : 'Save amount') : 'Mark won'}
           </Button>
         </div>
       </div>

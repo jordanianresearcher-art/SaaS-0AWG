@@ -820,6 +820,20 @@ export class DemoRepository implements DataRepository {
     this.persist()
   }
 
+  async updateWonAmount(quoteId: string, wonAmountCents: number): Promise<void> {
+    const quote = this.quoteById(quoteId)
+    // See SupabaseRepository.updateWonAmount: guarded on having an amount
+    // rather than on current status.
+    if (quote.wonAmountCents === null) {
+      throw new Error('This quote has no recorded sale amount to correct.')
+    }
+    const fromCents = quote.wonAmountCents
+    quote.wonAmountCents = wonAmountCents
+    this.touch(quote)
+    this.addEvent(quoteId, 'won_amount_edited', { fromCents, toCents: wonAmountCents })
+    this.persist()
+  }
+
   async rescheduleFollowUp(quoteId: string, nextFollowUpAt: string | null): Promise<void> {
     const quote = this.quoteById(quoteId)
     quote.nextFollowUpAt = nextFollowUpAt

@@ -615,4 +615,48 @@ describe('DemoRepository', () => {
     expect(after!.quote.nextFollowUpAt).toBeNull()
     expect(after!.events[0].eventType).toBe('marked_won')
   })
+
+  it('corrects a sale amount without logging a second marked_won', async () => {
+    // The whole reason this method exists rather than re-running setQuoteStatus:
+    // a second 'marked_won' event makes the pilot report count the job twice.
+    const bundles = await repo.listQuoteBundles()
+    const target = bundles.find((b) => b.quote.status === 'responded')!
+    await repo.setQuoteStatus(target.quote.id, 'won', 250000)
+    await repo.updateWonAmount(target.quote.id, 324500)
+
+    const after = await repo.getQuoteBundle(target.quote.id)
+    expect(after!.quote.wonAmountCents).toBe(324500)
+    expect(after!.quote.status).toBe('won')
+    expect(after!.events.filter((e) => e.eventType === 'marked_won')).toHaveLength(1)
+  })
+
+  it('records what the amount changed from, so a correction stays auditable', async () => {
+    const bundles = await repo.listQuoteBundles()
+    const target = bundles.find((b) => b.quote.status === 'responded')!
+    await repo.setQuoteStatus(target.quote.id, 'won', 250000)
+    await repo.updateWonAmount(target.quote.id, 324500)
+
+    const after = await repo.getQuoteBundle(target.quote.id)
+    const edit = after!.events.find((e) => e.eventType === 'won_amount_edited')!
+    expect(edit.metadata).toMatchObject({ fromCents: 250000, toCents: 324500 })
+  })
+
+  it('refuses to correct a quote that never recorded a sale amount', async () => {
+    const bundles = await repo.listQuoteBundles()
+    const target = bundles.find((b) => b.quote.wonAmountCents === null)!
+    await expect(repo.updateWonAmount(target.quote.id, 100000)).rejects.toThrow(/no recorded sale amount/i)
+  })
+
+  it('still corrects a quote that was won and later marked lost', async () => {
+    // Its amount is still displayed and still counted, so it must stay
+    // correctable — the guard is "has an amount", not "is currently won".
+    const bundles = await repo.listQuoteBundles()
+    const target = bundles.find((b) => b.quote.status === 'responded')!
+    await repo.setQuoteStatus(target.quote.id, 'won', 250000)
+    await repo.setQuoteStatus(target.quote.id, 'lost')
+    await repo.updateWonAmount(target.quote.id, 199900)
+
+    const after = await repo.getQuoteBundle(target.quote.id)
+    expect(after!.quote.wonAmountCents).toBe(199900)
+  })
 })

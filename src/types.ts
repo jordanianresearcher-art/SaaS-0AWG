@@ -56,6 +56,8 @@ export type QuoteEventType =
   | 'follow_up_disabled'
   | 'email_opt_out'
   | 'marked_contacted'
+  /** Staff corrected the final sale amount on an already-won quote. Metadata carries fromCents/toCents. */
+  | 'won_amount_edited'
 
 /**
  * 'inventory' is a low-privilege, shared-device role: a phone/tablet/PC
