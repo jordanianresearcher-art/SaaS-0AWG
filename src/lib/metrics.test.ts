@@ -34,7 +34,12 @@ describe('computeMetrics', () => {
             ...b,
             events: [
               ...b.events,
-              { ...b.events.find((e) => e.eventType === 'marked_won')!, id: 'second-mark', createdAt: new Date().toISOString() },
+              // Keep the copied event's own createdAt. Stamping it with
+              // new Date() put it a millisecond past `now`, the window's
+              // inclusive upper bound — so within() skipped it and the test
+              // only caught the regression when those two lines happened to
+              // land in the same millisecond. It failed 2 runs in 6.
+              { ...b.events.find((e) => e.eventType === 'marked_won')!, id: 'second-mark' },
             ],
           }
         : b,

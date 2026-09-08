@@ -45,6 +45,15 @@ covering a fix:
    which one and what mutation it survived.
 4. Restore from the copy and confirm the suite is green again.
 
+**Run the mutation check several times, not once.** A test that touches
+`new Date()`, timers, or a date window can catch a regression on one run and
+sail past it on the next. A single failing run proves nothing about the other
+nine. This is not hypothetical: a metrics test here was reported as
+mutation-verified on the strength of one run, and actually caught its
+regression only 2 times in 6 — the injected event landed a millisecond past an
+inclusive window bound. Report the ratio (`caught 7/10`), not a verdict;
+anything short of 10/10 is a flaky test and should be reported as a finding.
+
 This has caught real decoration here: a mirror suite once passed against a
 broken check digit, a dropped fence handler, and a reversed tie-break.
 
