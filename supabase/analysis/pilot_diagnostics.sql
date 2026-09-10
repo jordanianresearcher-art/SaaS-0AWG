@@ -154,14 +154,86 @@ where q.shop_id = (select id from public.shops where active order by created_at 
   and r.created_at >= now() - interval '60 days'
 group by 1 order by 2 desc;
 
+-- NOTE ON THE COLUMN NAME: this is NOT an email open rate. There is no
+-- tracking pixel in this app. first_viewed_at is stamped by
+-- record_quote_delivery_view() when someone LOADS THE QUOTE PAGE carrying that
+-- email's delivery_token — so this measures click-through to the quote, a
+-- strictly harder action than opening. Comparing it to published "open rate"
+-- benchmarks would be comparing two different things.
 select
   em.template_type,
   count(*) as sent,
-  count(*) filter (where em.first_viewed_at is not null) as opened,
-  round(100.0 * count(*) filter (where em.first_viewed_at is not null) / nullif(count(*),0), 1) as open_pct
+  count(*) filter (where em.first_viewed_at is not null) as clicked_to_quote,
+  round(100.0 * count(*) filter (where em.first_viewed_at is not null) / nullif(count(*),0), 1) as click_pct
 from public.email_messages em
 join public.quotes q on q.id = em.quote_id
 where q.shop_id = (select id from public.shops where active order by created_at limit 1)
   and em.status in ('sent','demo_sent')
   and em.created_at >= now() - interval '60 days'
 group by 1 order by sent desc;
+
+-- ---------------------------------------------------------------------------
+-- BLOCK 5 — THE WON JOBS, one row each.
+--
+-- The highest-value question in this pilot: what do the jobs we won have in
+-- common, and how do they differ from the ones still sitting open? Eight rows
+-- is small enough to read every one.
+--
+-- `last_template_before_win` is the attribution column — the last email that
+-- went out before the job was marked won. It is correlation, not proof: a
+-- customer who called the shop the same morning shows the same row as one who
+-- clicked the link. Read it alongside clicked_quote and responded.
+-- ---------------------------------------------------------------------------
+with shop as (select id from public.shops where active order by created_at limit 1),
+q as (
+  select qt.id, qt.status, qt.created_at, qt.won_amount_cents, qt.customer_id,
+    coalesce((select o.price_cents from public.quote_options o
+      where o.quote_id = qt.id and o.option_kind='main' order by o.position limit 1),
+      (select o.price_cents from public.quote_options o where o.quote_id = qt.id order by o.position limit 1), 0) as main_value_cents,
+    (select min(em.sent_at) from public.email_messages em where em.quote_id=qt.id and em.status in ('sent','demo_sent')) as first_email_at,
+    (select count(*) from public.email_messages em where em.quote_id=qt.id and em.status in ('sent','demo_sent')) as emails_sent,
+    (select count(*) from public.email_messages em where em.quote_id=qt.id and em.first_viewed_at is not null) as emails_clicked,
+    (select min(ev.created_at) from public.quote_events ev where ev.quote_id=qt.id and ev.event_type='marked_won') as won_at,
+    (select string_agg(distinct r.response_type::text, ', ') from public.quote_responses r where r.quote_id=qt.id) as responses,
+    (select count(*) from public.appointments a where a.source_quote_id=qt.id) as appointments
+  from public.quotes qt where qt.shop_id=(select id from shop)
+)
+select
+  c.first_name,
+  to_char(q.created_at,'Mon DD') as quoted_on,
+  to_char(q.main_value_cents/100.0,'FM999,990') as quote_value,
+  to_char(q.won_amount_cents/100.0,'FM999,990') as won_for,
+  case when q.main_value_cents > 0
+    then to_char(100.0*(q.won_amount_cents - q.main_value_cents)/q.main_value_cents,'FM990.0') || '%'
+    end as vs_quote,
+  round(extract(epoch from (q.won_at - q.created_at))/86400.0)::int as days_to_win,
+  q.emails_sent, q.emails_clicked,
+  coalesce(q.responses,'—') as responded,
+  q.appointments as appts,
+  coalesce((select em.template_type::text from public.email_messages em
+     where em.quote_id=q.id and em.status in ('sent','demo_sent')
+       and em.sent_at < q.won_at order by em.sent_at desc limit 1),'(none)') as last_template_before_win
+from q join public.customers c on c.id=q.customer_id
+where q.status='won' order by q.won_at desc nulls last;
+
+-- Won vs still-open, on the dimensions that could explain the difference.
+with shop as (select id from public.shops where active order by created_at limit 1),
+q as (
+  select qt.id, qt.status,
+    coalesce((select o.price_cents from public.quote_options o
+      where o.quote_id=qt.id and o.option_kind='main' order by o.position limit 1),
+      (select o.price_cents from public.quote_options o where o.quote_id=qt.id order by o.position limit 1),0) as main_value_cents,
+    (select count(*) from public.email_messages em where em.quote_id=qt.id and em.status in ('sent','demo_sent')) as emails_sent,
+    (select count(*) from public.email_messages em where em.quote_id=qt.id and em.first_viewed_at is not null) as emails_clicked,
+    (select count(*) from public.quote_responses r where r.quote_id=qt.id) as responses
+  from public.quotes qt where qt.shop_id=(select id from shop)
+)
+select
+  case when status='won' then 'WON' else 'still open' end as bucket,
+  count(*) as quotes,
+  to_char(avg(main_value_cents)/100.0,'FM999,990') as avg_quote_value,
+  to_char(avg(emails_sent),'FM990.0') as avg_emails,
+  round(100.0*count(*) filter (where emails_clicked>0)/nullif(count(*),0),1) as pct_clicked_quote,
+  round(100.0*count(*) filter (where responses>0)/nullif(count(*),0),1) as pct_responded
+from q where status='won' or status not in ('lost','expired')
+group by 1 order by 1;
