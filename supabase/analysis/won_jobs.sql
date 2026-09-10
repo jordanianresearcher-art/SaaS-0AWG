@@ -20,6 +20,13 @@
 -- The question this answers: how many of these eight had zero clicks and zero
 -- replies? Those are jobs the shop closed on its own and recorded afterwards,
 -- and they are the ones that will be challenged at day 30.
+--
+-- This query still infers that from behaviour, because the eight wins already
+-- recorded predate the app ever asking. Migration 0027 adds quotes.win_source
+-- so every win from now on carries the answer staff gave at the moment of the
+-- sale. Once 0027 is applied, add `q.win_source` to the select list below —
+-- inference stops being necessary, and the two can be compared against each
+-- other on the same rows.
 
 select
   c.first_name                                   as who,

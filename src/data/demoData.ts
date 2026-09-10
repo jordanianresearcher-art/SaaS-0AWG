@@ -19,6 +19,7 @@ import type {
   Shop,
   StockMovement,
   WindowTintConfig,
+  WinSource,
 } from '../types'
 import { computeDefaultDepositCents } from '../lib/paymentMethods'
 import { createDefaultWindowTintFormValues, windowTintFormValuesToConfig } from '../lib/windowTint'
@@ -81,6 +82,7 @@ interface QuoteSeed {
     lastEmailedDaysAgo: number | null
     nextFollowUpInDays: number | null
     windowTints?: WindowTintConfig[]
+    winSource?: WinSource
   }
   /** First entry is always the main package; any further entries are add-ons priced as the incremental cost on top of it (see OptionKind in types.ts). */
   options: Array<{
@@ -193,6 +195,10 @@ const SEEDS: QuoteSeed[] = [
       status: 'won', internalNotes: 'Came back after the check-in email. Booked Saturday install.',
       emailFollowUpAllowed: true, wonAmountCents: 319900,
       createdDaysAgo: 12, expirationDaysAhead: 18, lastEmailedDaysAgo: 9, nextFollowUpInDays: null,
+      // Matches the note above and the email history: the check-in email is
+      // what brought Luis back, so the demo's recovered revenue is a win the
+      // app can actually claim.
+      winSource: 'follow_up',
     },
     options: [
       {
@@ -217,7 +223,7 @@ const SEEDS: QuoteSeed[] = [
       { type: 'customer_responded', daysAgo: 8, meta: { responseType: 'ready_to_book' } },
       { type: 'appointment_booked', daysAgo: 7 },
       { type: 'deposit_paid', daysAgo: 7 },
-      { type: 'marked_won', daysAgo: 5, meta: { wonAmountCents: 319900 } },
+      { type: 'marked_won', daysAgo: 5, meta: { wonAmountCents: 319900, winSource: 'follow_up' } },
     ],
     responses: [{ type: 'ready_to_book', daysAgo: 8, message: 'Saturday work for the install?', optionIndex: 0 }],
   },
@@ -499,6 +505,7 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
       wonAmountCents: seed.quote.wonAmountCents,
       windowTints: seed.quote.windowTints ?? [],
       showFullAddonTotal: false,
+      winSource: seed.quote.winSource ?? null,
       createdAt: created,
       updatedAt: created,
     })

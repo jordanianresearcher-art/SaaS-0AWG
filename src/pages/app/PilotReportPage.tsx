@@ -85,6 +85,24 @@ export default function PilotReportPage() {
       : []),
     { label: 'Jobs won', value: String(metrics.wonJobs), highlight: true },
     { label: 'Recovered revenue', value: formatCurrency(metrics.recoveredRevenueCents), highlight: true },
+    // Only printed once somebody has actually answered the question. A row
+    // reading "0 of 8" on a report handed to a prospect would be worse than
+    // no row: it invites the objection instead of answering it. Once wins are
+    // attributed, this is the strongest line on the page — and it prints the
+    // honest split, including the ones the shop closed itself.
+    ...(metrics.appAttributedWins + metrics.shopAttributedWins > 0
+      ? [
+          {
+            label: 'Wins the app brought back',
+            value: `${metrics.appAttributedWins} of ${metrics.wonJobs} · ${formatCurrency(metrics.appAttributedRevenueCents)}`,
+            highlight: true,
+          },
+          { label: 'Wins the shop closed itself', value: String(metrics.shopAttributedWins) },
+          ...(metrics.unattributedWins > 0
+            ? [{ label: 'Wins with no source recorded', value: String(metrics.unattributedWins) }]
+            : []),
+        ]
+      : []),
   ]
 
   const exportCsv = () => {

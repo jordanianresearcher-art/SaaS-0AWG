@@ -1,5 +1,6 @@
 import type { Appointment, QuoteBundle } from '../types'
 import { quoteValueCents } from './format'
+import { winSourceAttribution } from './winSource'
 
 // Metrics shared by the dashboard and the printable pilot reports.
 
@@ -17,6 +18,19 @@ export interface PilotMetrics {
   deposits: number
   wonJobs: number
   recoveredRevenueCents: number
+  /**
+   * The won jobs split by who brought the customer back, from what staff
+   * tapped at Mark won (src/lib/winSource.ts).
+   *
+   * This is the number that has to survive "no, I closed those on the phone."
+   * `unattributedWins` covers both "not sure" and never asked, so it starts
+   * at 100% for any shop whose wins predate the question — which is exactly
+   * what it should show rather than a flattering guess.
+   */
+  appAttributedWins: number
+  appAttributedRevenueCents: number
+  shopAttributedWins: number
+  unattributedWins: number
 }
 
 function within(iso: string, from: Date, to: Date): boolean {
@@ -38,6 +52,10 @@ export function computeMetrics(bundles: QuoteBundle[], from: Date, to: Date): Pi
     deposits: 0,
     wonJobs: 0,
     recoveredRevenueCents: 0,
+    appAttributedWins: 0,
+    appAttributedRevenueCents: 0,
+    shopAttributedWins: 0,
+    unattributedWins: 0,
   }
   for (const b of bundles) {
     if (within(b.quote.createdAt, from, to)) {
@@ -66,7 +84,17 @@ export function computeMetrics(bundles: QuoteBundle[], from: Date, to: Date): Pi
         m.wonJobs += 1
         // The quote's CURRENT amount, not the event's — so correcting a sale
         // amount is reflected in the report immediately.
-        m.recoveredRevenueCents += b.quote.wonAmountCents ?? quoteValueCents(b.options)
+        const cents = b.quote.wonAmountCents ?? quoteValueCents(b.options)
+        m.recoveredRevenueCents += cents
+        const attribution = winSourceAttribution(b.quote.winSource)
+        if (attribution === 'app') {
+          m.appAttributedWins += 1
+          m.appAttributedRevenueCents += cents
+        } else if (attribution === 'shop') {
+          m.shopAttributedWins += 1
+        } else {
+          m.unattributedWins += 1
+        }
       }
     }
     for (const r of b.responses) {

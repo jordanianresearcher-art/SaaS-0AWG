@@ -659,4 +659,50 @@ describe('DemoRepository', () => {
     const after = await repo.getQuoteBundle(target.quote.id)
     expect(after!.quote.wonAmountCents).toBe(199900)
   })
+
+  it('records what brought the job back alongside the amount', async () => {
+    const bundles = await repo.listQuoteBundles()
+    const target = bundles.find((b) => b.quote.status === 'responded')!
+    await repo.setQuoteStatus(target.quote.id, 'won', 250000, 'quote_reply')
+
+    const after = await repo.getQuoteBundle(target.quote.id)
+    expect(after!.quote.winSource).toBe('quote_reply')
+    expect(after!.events[0].metadata).toMatchObject({ winSource: 'quote_reply' })
+  })
+
+  it('still records the win when staff skip the question', async () => {
+    // No required fields anywhere: a win with no answer is a win.
+    const bundles = await repo.listQuoteBundles()
+    const target = bundles.find((b) => b.quote.status === 'responded')!
+    await repo.setQuoteStatus(target.quote.id, 'won', 250000)
+
+    const after = await repo.getQuoteBundle(target.quote.id)
+    expect(after!.quote.status).toBe('won')
+    expect(after!.quote.winSource).toBeNull()
+  })
+
+  it('corrects the source without logging a second marked_won', async () => {
+    const bundles = await repo.listQuoteBundles()
+    const target = bundles.find((b) => b.quote.status === 'responded')!
+    await repo.setQuoteStatus(target.quote.id, 'won', 250000, 'we_reached_out')
+    await repo.updateWinSource(target.quote.id, 'quote_reply')
+
+    const after = await repo.getQuoteBundle(target.quote.id)
+    expect(after!.quote.winSource).toBe('quote_reply')
+    expect(after!.events.filter((e) => e.eventType === 'marked_won')).toHaveLength(1)
+    const edit = after!.events.find((e) => e.eventType === 'win_source_edited')!
+    expect(edit.metadata).toMatchObject({ from: 'we_reached_out', to: 'quote_reply' })
+  })
+
+  it('answers the question on a win recorded before the app ever asked it', async () => {
+    // Unlike the amount, this is not guarded on already having a value —
+    // every win from the first five weeks of the pilot has none.
+    const bundles = await repo.listQuoteBundles()
+    const target = bundles.find((b) => b.quote.status === 'won' && b.quote.winSource !== null)!
+    await repo.updateWinSource(target.quote.id, null)
+    expect((await repo.getQuoteBundle(target.quote.id))!.quote.winSource).toBeNull()
+
+    await repo.updateWinSource(target.quote.id, 'walked_in')
+    expect((await repo.getQuoteBundle(target.quote.id))!.quote.winSource).toBe('walked_in')
+  })
 })

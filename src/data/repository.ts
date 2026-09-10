@@ -39,6 +39,7 @@ import type {
   TintBodyStyle,
   VehicleType,
   WindowTintConfig,
+  WinSource,
 } from '../types'
 
 // Single abstraction both modes implement. Demo mode persists to localStorage;
@@ -690,8 +691,21 @@ export interface DataRepository {
   /** Permanently deletes a quote. Options/items/events/responses/emails go with it via on-delete-cascade. */
   deleteQuote(quoteId: string): Promise<void>
 
-  /** Staff status actions: booked, deposit paid, won (with amount), lost. */
-  setQuoteStatus(quoteId: string, status: QuoteStatus, wonAmountCents?: number | null): Promise<void>
+  /**
+   * Staff status actions: booked, deposit paid, won (with amount), lost.
+   *
+   * `winSource` is only meaningful alongside status 'won' and is optional
+   * everywhere — skipping the question still records the win (no required
+   * fields anywhere). Passing it here rather than in a second call keeps the
+   * win and its reason in one write, so a dropped connection can never leave
+   * a won job whose source silently reads "never asked".
+   */
+  setQuoteStatus(
+    quoteId: string,
+    status: QuoteStatus,
+    wonAmountCents?: number | null,
+    winSource?: WinSource | null,
+  ): Promise<void>
   /**
    * Correct the final sale amount on a quote that is already won.
    *
@@ -702,6 +716,16 @@ export interface DataRepository {
    * the correction stays auditable.
    */
   updateWonAmount(quoteId: string, wonAmountCents: number): Promise<void>
+  /**
+   * Correct what brought an already-won job back.
+   *
+   * Same reasoning as updateWonAmount: re-running setQuoteStatus to fix the
+   * answer would log a second 'marked_won' and double-count the job. Logs
+   * 'win_source_edited' with from/to. Pass null to clear it back to "never
+   * asked" — staff who tapped the wrong chip must be able to undo, not just
+   * overwrite with a different wrong answer.
+   */
+  updateWinSource(quoteId: string, winSource: WinSource | null): Promise<void>
   rescheduleFollowUp(quoteId: string, nextFollowUpAt: string | null): Promise<void>
   setFollowUpAllowed(quoteId: string, allowed: boolean): Promise<void>
   markContacted(quoteId: string): Promise<void>

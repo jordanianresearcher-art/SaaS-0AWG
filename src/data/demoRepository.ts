@@ -23,6 +23,7 @@ import type {
   Shop,
   StockMovement,
   TemplateType,
+  WinSource,
 } from '../types'
 import type {
   DataRepository,
@@ -709,6 +710,7 @@ export class DemoRepository implements DataRepository {
       wonAmountCents: null,
       windowTints: input.quote.windowTints,
       showFullAddonTotal: input.quote.showFullAddonTotal ?? false,
+      winSource: null,
       createdAt: now,
       updatedAt: now,
     }
@@ -801,13 +803,21 @@ export class DemoRepository implements DataRepository {
     quote.updatedAt = new Date().toISOString()
   }
 
-  async setQuoteStatus(quoteId: string, status: QuoteStatus, wonAmountCents?: number | null): Promise<void> {
+  async setQuoteStatus(
+    quoteId: string,
+    status: QuoteStatus,
+    wonAmountCents?: number | null,
+    winSource?: WinSource | null,
+  ): Promise<void> {
     const quote = this.quoteById(quoteId)
     quote.status = applyStaffStatus(quote.status, status)
     if (status === 'won') {
       quote.wonAmountCents = wonAmountCents ?? null
+      // Mirrors SupabaseRepository: only touched when staff answered, so NULL
+      // keeps meaning "never asked".
+      if (winSource !== undefined) quote.winSource = winSource
       quote.nextFollowUpAt = null
-      this.addEvent(quoteId, 'marked_won', { wonAmountCents: wonAmountCents ?? null })
+      this.addEvent(quoteId, 'marked_won', { wonAmountCents: wonAmountCents ?? null, winSource: winSource ?? null })
     } else if (status === 'lost') {
       quote.nextFollowUpAt = null
       this.addEvent(quoteId, 'marked_lost')
@@ -831,6 +841,18 @@ export class DemoRepository implements DataRepository {
     quote.wonAmountCents = wonAmountCents
     this.touch(quote)
     this.addEvent(quoteId, 'won_amount_edited', { fromCents, toCents: wonAmountCents })
+    this.persist()
+  }
+
+  async updateWinSource(quoteId: string, winSource: WinSource | null): Promise<void> {
+    const quote = this.quoteById(quoteId)
+    // Unlike the amount, this is not guarded on already having a value: the
+    // whole point is to be able to answer the question on a win recorded
+    // before the app ever asked it.
+    const from = quote.winSource
+    quote.winSource = winSource
+    this.touch(quote)
+    this.addEvent(quoteId, 'win_source_edited', { from, to: winSource })
     this.persist()
   }
 

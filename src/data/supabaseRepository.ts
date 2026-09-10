@@ -5,6 +5,7 @@ import { globalMatchKey, globalToCandidate, toGlobalProductDraft } from '../lib/
 import { classifyBarcode } from '../lib/barcodeIdentity'
 import { dedupeSuggestions, searchLocalCatalog } from '../lib/productSearch'
 import { parseFitmentList, type FitmentRange } from '../lib/fitment'
+import { isWinSource } from '../lib/winSource'
 import type {
   Appointment,
   Bay,
@@ -34,6 +35,7 @@ import type {
   Shop,
   StockMovement,
   TemplateType,
+  WinSource,
 } from '../types'
 import type {
   DataRepository,
@@ -198,6 +200,7 @@ function mapQuote(r: Row): Quote {
     wonAmountCents: r.won_amount_cents,
     windowTints: Array.isArray(r.window_tints) ? r.window_tints : [],
     showFullAddonTotal: r.show_full_addon_total ?? false,
+    winSource: isWinSource(r.win_source) ? r.win_source : null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }
@@ -1637,10 +1640,19 @@ export class SupabaseRepository implements DataRepository {
     })
   }
 
-  async setQuoteStatus(quoteId: string, status: QuoteStatus, wonAmountCents?: number | null): Promise<void> {
+  async setQuoteStatus(
+    quoteId: string,
+    status: QuoteStatus,
+    wonAmountCents?: number | null,
+    winSource?: WinSource | null,
+  ): Promise<void> {
     const patch: Row = { status }
     if (status === 'won') {
       patch.won_amount_cents = wonAmountCents ?? null
+      // Only written on a win, and only when staff actually answered. Leaving
+      // the column untouched otherwise is what keeps NULL meaning "never
+      // asked" rather than "asked and cleared".
+      if (winSource !== undefined) patch.win_source = winSource
       patch.next_follow_up_at = null
     }
     if (status === 'lost') patch.next_follow_up_at = null
@@ -1657,7 +1669,11 @@ export class SupabaseRepository implements DataRepository {
               ? 'deposit_paid'
               : null
     if (eventType) {
-      await this.addEvent(quoteId, eventType, status === 'won' ? { wonAmountCents: wonAmountCents ?? null } : {})
+      await this.addEvent(
+        quoteId,
+        eventType,
+        status === 'won' ? { wonAmountCents: wonAmountCents ?? null, winSource: winSource ?? null } : {},
+      )
     }
   }
 
@@ -1685,6 +1701,25 @@ export class SupabaseRepository implements DataRepository {
     await this.addEvent(quoteId, 'won_amount_edited', {
       fromCents: typeof before?.won_amount_cents === 'number' ? before.won_amount_cents : null,
       toCents: wonAmountCents,
+    })
+  }
+
+  async updateWinSource(quoteId: string, winSource: WinSource | null): Promise<void> {
+    // Read the old answer first so the event says what changed. "Changed from
+    // 'we called them' to 'they replied'" is the difference between an
+    // auditable correction and a number that quietly moved.
+    const { data: before } = await this.supabase
+      .from('quotes')
+      .select('win_source')
+      .eq('id', quoteId)
+      .maybeSingle()
+
+    const { error } = await this.supabase.from('quotes').update({ win_source: winSource }).eq('id', quoteId)
+    if (error) throw error
+
+    await this.addEvent(quoteId, 'win_source_edited', {
+      from: isWinSource(before?.win_source) ? before.win_source : null,
+      to: winSource,
     })
   }
 

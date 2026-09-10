@@ -38,8 +38,10 @@ import {
 import { errorMessage } from '../../lib/errors'
 import { summarizeWindowTint } from '../../lib/windowTint'
 import { addonOptions, computeAddonBreakdown, fullTotalCents, mainOption } from '../../lib/quotePricing'
-import type { QuoteBundle, TemplateType } from '../../types'
+import type { QuoteBundle, TemplateType, WinSource } from '../../types'
 import { formatItemDisplayName } from '../../lib/productNaming'
+import { winSourceLabel } from '../../lib/winSource'
+import { WinSourcePicker } from '../../components/WinSourcePicker'
 
 export default function QuoteDetailPage() {
   const { quoteId } = useParams<{ quoteId: string }>()
@@ -54,6 +56,7 @@ export default function QuoteDetailPage() {
   const [emailTemplate, setEmailTemplate] = useState<TemplateType>('initial')
   const [wonOpen, setWonOpen] = useState(false)
   const [wonEditOpen, setWonEditOpen] = useState(false)
+  const [winSourceOpen, setWinSourceOpen] = useState(false)
   const [rescheduleOpen, setRescheduleOpen] = useState(false)
   const [notesDraft, setNotesDraft] = useState<string | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
@@ -176,18 +179,30 @@ export default function QuoteDetailPage() {
           <p className="text-sm font-semibold tracking-wide text-zinc-500 uppercase">Quote value</p>
           <p className="text-3xl font-black text-ink">{formatCurrency(quoteValueCents(options))}</p>
           {quote.wonAmountCents !== null ? (
-            <div className="flex items-center justify-end gap-1.5">
-              <p className="text-base font-bold text-green-700">Won at {formatCurrency(quote.wonAmountCents)}</p>
+            <>
+              <div className="flex items-center justify-end gap-1.5">
+                <p className="text-base font-bold text-green-700">Won at {formatCurrency(quote.wonAmountCents)}</p>
+                <button
+                  type="button"
+                  onClick={() => setWonEditOpen(true)}
+                  aria-label="Correct the sale amount"
+                  title="Correct the sale amount"
+                  className="no-print rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
+                >
+                  <Pencil className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
+              {/* Unanswered reads as a prompt, not as a blank: every win from
+                  before this question existed can still be answered, and the
+                  people who closed them are the ones who remember. */}
               <button
                 type="button"
-                onClick={() => setWonEditOpen(true)}
-                aria-label="Correct the sale amount"
-                title="Correct the sale amount"
-                className="no-print rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
+                onClick={() => setWinSourceOpen(true)}
+                className="no-print text-sm font-semibold text-zinc-500 underline decoration-dotted underline-offset-2 hover:text-ink"
               >
-                <Pencil className="h-4 w-4" aria-hidden="true" />
+                {winSourceLabel(quote.winSource) ?? 'What brought them back?'}
               </button>
-            </div>
+            </>
           ) : null}
         </div>
       </div>
@@ -508,8 +523,8 @@ export default function QuoteDetailPage() {
         open={wonOpen}
         onClose={() => setWonOpen(false)}
         defaultCents={quoteValueCents(options)}
-        onConfirm={async (cents) => {
-          await repo.setQuoteStatus(quote.id, 'won', cents)
+        onConfirm={async (cents, winSource) => {
+          await repo.setQuoteStatus(quote.id, 'won', cents, winSource)
           setWonOpen(false)
           await reloadAll()
           toast('success', `Marked won — ${formatCurrency(cents)} recovered.`)
@@ -529,6 +544,21 @@ export default function QuoteDetailPage() {
           setWonEditOpen(false)
           await reloadAll()
           toast('success', `Sale amount is now ${formatCurrency(cents)}.`)
+        }}
+      />
+
+      <WinSourceModal
+        // Keyed on the saved value so reopening always starts from what is
+        // stored now, not from whatever was tapped last time.
+        key={`win-source-${quote.winSource ?? 'none'}`}
+        open={winSourceOpen}
+        initial={quote.winSource}
+        onClose={() => setWinSourceOpen(false)}
+        onConfirm={async (winSource) => {
+          await repo.updateWinSource(quote.id, winSource)
+          setWinSourceOpen(false)
+          await reloadAll()
+          toast('success', winSourceLabel(winSource) ? 'Saved.' : 'Cleared.')
         }}
       />
 
@@ -612,6 +642,7 @@ function activityLabel(eventType: string): string {
     deposit_paid: 'Deposit paid',
     marked_won: 'Marked won',
     won_amount_edited: 'Sale amount corrected',
+    win_source_edited: 'Win source updated',
     marked_lost: 'Marked lost',
     follow_up_rescheduled: 'Follow-up rescheduled',
     follow_up_disabled: 'Follow-up turned off',
@@ -640,13 +671,14 @@ function WonAmountModal({
   open: boolean
   onClose: () => void
   defaultCents: number
-  onConfirm: (cents: number) => Promise<void>
+  onConfirm: (cents: number, winSource: WinSource | null) => Promise<void>
   mode: 'mark' | 'correct'
 }) {
   const correcting = mode === 'correct'
   // Pre-fill when correcting so the current number is there to edit rather
   // than retype; blank when marking won so the placeholder default applies.
   const [value, setValue] = useState(correcting ? (defaultCents / 100).toFixed(2) : '')
+  const [winSource, setWinSource] = useState<WinSource | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const placeholder = (defaultCents / 100).toFixed(0)
@@ -673,6 +705,22 @@ function WonAmountModal({
             onChange={(e) => setValue(e.target.value)}
           />
         </Field>
+        {/* Only asked at the moment of the win. Correcting an amount later is
+            a typo fix; asking "what brought them back?" a week afterwards
+            gets a guess, and a guessed attribution is worse than none. */}
+        {correcting ? null : (
+          // Deliberately not a <Field>: its <label htmlFor> would attach to the
+          // first chip, and a <label> on a <button> replaces that button's
+          // accessible name — a screen reader would read the first option as
+          // "What brought them back?". The picker carries its own group label.
+          <div>
+            <p className="mb-1.5 text-base font-semibold text-ink">What brought them back?</p>
+            <WinSourcePicker value={winSource} onChange={setWinSource} idPrefix="won-source" />
+            <p className="mt-1.5 text-sm text-zinc-500">
+              Optional, and worth the tap — this is what shows whether the app earned the sale or you did.
+            </p>
+          </div>
+        )}
         <div className="flex justify-end gap-3">
           <Button variant="secondary" onClick={onClose}>
             Cancel
@@ -696,11 +744,59 @@ function WonAmountModal({
               }
               setError(null)
               setSaving(true)
-              void onConfirm(cents).finally(() => setSaving(false))
+              void onConfirm(cents, winSource).finally(() => setSaving(false))
             }}
           >
             <Trophy className="h-5 w-5" aria-hidden="true" />
             {correcting ? (saving ? 'Saving…' : 'Save amount') : 'Mark won'}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+/**
+ * Correcting the recorded source on an already-won job — including answering
+ * it for the first time on a win from before the question existed.
+ *
+ * Separate from WonAmountModal because re-running Mark won to change the
+ * answer would log a second 'marked_won' event and count the job twice.
+ */
+function WinSourceModal({
+  open,
+  onClose,
+  initial,
+  onConfirm,
+}: {
+  open: boolean
+  onClose: () => void
+  initial: WinSource | null
+  onConfirm: (winSource: WinSource | null) => Promise<void>
+}) {
+  const [value, setValue] = useState<WinSource | null>(initial)
+  const [saving, setSaving] = useState(false)
+
+  return (
+    <Modal open={open} onClose={onClose} title="What brought them back?">
+      <div className="space-y-4">
+        <p className="text-base text-zinc-600">
+          Tap the one that fits. Tap it again to clear it. This is what separates the sales this app brought back
+          from the ones you would have closed anyway.
+        </p>
+        <WinSourcePicker value={value} onChange={setValue} idPrefix="win-source-edit" />
+        <div className="flex justify-end gap-3">
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            disabled={saving}
+            onClick={() => {
+              setSaving(true)
+              void onConfirm(value).finally(() => setSaving(false))
+            }}
+          >
+            {saving ? 'Saving…' : 'Save'}
           </Button>
         </div>
       </div>

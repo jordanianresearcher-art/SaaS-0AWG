@@ -12,6 +12,25 @@ export type QuoteStatus =
   | 'expired'
 
 /**
+ * What brought a won job back, as staff reported it at Mark won.
+ *
+ * NULL on a quote means the question was never asked — every win recorded
+ * before 2026-09, plus anyone who skips it. That is deliberately distinct
+ * from 'unsure', which means the app asked and nobody knew.
+ *
+ * The labels and the app/shop attribution split live in src/lib/winSource.ts,
+ * and the same six values are enforced by a check constraint in migration
+ * 0027. All three lists have to move together.
+ */
+export type WinSource =
+  | 'quote_reply'
+  | 'follow_up'
+  | 'financing'
+  | 'we_reached_out'
+  | 'walked_in'
+  | 'unsure'
+
+/**
  * Replaces the old good/better/insane tier system: a quote has exactly one
  * 'main' package (the base price) and any number of 'addon' options, each
  * priced as the *incremental* cost to add that upsell on top of the main
@@ -58,6 +77,8 @@ export type QuoteEventType =
   | 'marked_contacted'
   /** Staff corrected the final sale amount on an already-won quote. Metadata carries fromCents/toCents. */
   | 'won_amount_edited'
+  /** Staff changed what they said brought a won job back. Metadata carries from/to as WinSource | null. */
+  | 'win_source_edited'
 
 /**
  * 'inventory' is a low-privilege, shared-device role: a phone/tablet/PC
@@ -508,6 +529,8 @@ export interface Quote {
   windowTints: WindowTintConfig[]
   /** Staff opt-in: show one extra "everything included" total line (main + every add-on) alongside the per-add-on incremental pricing. Off by default. */
   showFullAddonTotal: boolean
+  /** What brought this job back. null = never asked; see WinSource. */
+  winSource: WinSource | null
   createdAt: string
   updatedAt: string
 }

@@ -143,7 +143,14 @@ never happens.
   list_due_follow_ups). **Applied? No.**
 - `0024` → `0024_invoice_financed_payment.sql` — a single `ALTER TYPE`; must be
   run on its own, see the file header. **Applied? No.**
-- `0025`+ → reserved, unassigned. Stripe Connect deposits will take the next
+- `0025` → `0025_seed_new_shop_booking.sql` (booking defaults for a brand-new
+  shop, so signup lands on a usable calendar). **Applied? No.**
+- `0026` → `0026_global_product_catalog.sql` (the shared cross-shop product
+  catalog the lookup ladder checks before it touches the web). **Applied? No.**
+- `0027` → `0027_quote_win_source.sql` (quotes.win_source — what brought a won
+  job back, asked once at Mark won). One `ALTER TABLE ... ADD COLUMN` plus a
+  partial index; safe to run alongside others. **Applied? No.**
+- `0028`+ → reserved, unassigned. Stripe Connect deposits will take the next
   number when that work starts.
 - Stream C needs no migration.
 - Never write a migration number you haven't been assigned.

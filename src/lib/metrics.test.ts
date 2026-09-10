@@ -152,6 +152,47 @@ describe('activeQuoteValueCents', () => {
   })
 })
 
+
+describe('who gets credit for a win', () => {
+  it('counts every win from before the question existed as unattributed', async () => {
+    // The pilot's first five weeks recorded eight wins and never asked why.
+    // Reporting those as app wins would be the exact dishonesty this field
+    // exists to prevent.
+    const repo = new DemoRepository(memoryStorage())
+    const bundles = await repo.listQuoteBundles()
+    const stripped = bundles.map((b) => ({ ...b, quote: { ...b.quote, winSource: null } }))
+    const m = computeMetrics(stripped, subDays(new Date(), 60), new Date())
+    expect(m.wonJobs).toBeGreaterThan(0)
+    expect(m.unattributedWins).toBe(m.wonJobs)
+    expect(m.appAttributedWins).toBe(0)
+    expect(m.appAttributedRevenueCents).toBe(0)
+  })
+
+  it('keeps a staff-closed win out of the app total', async () => {
+    const repo = new DemoRepository(memoryStorage())
+    const bundles = await repo.listQuoteBundles()
+    const won = bundles.find((b) => b.quote.status === 'won')!
+    const asShopWin = bundles.map((b) =>
+      b.quote.id === won.quote.id ? { ...b, quote: { ...b.quote, winSource: 'we_reached_out' as const } } : b,
+    )
+    const m = computeMetrics(asShopWin, subDays(new Date(), 60), new Date())
+    expect(m.shopAttributedWins).toBe(1)
+    expect(m.appAttributedWins).toBe(0)
+    // Recovered revenue still counts it — the shop did make the sale. Only
+    // the attribution changes.
+    expect(m.recoveredRevenueCents).toBeGreaterThan(0)
+    expect(m.appAttributedRevenueCents).toBe(0)
+  })
+
+  it('splits without losing a win', async () => {
+    const repo = new DemoRepository(memoryStorage())
+    const bundles = await repo.listQuoteBundles()
+    const m = computeMetrics(bundles, subDays(new Date(), 60), new Date())
+    expect(m.appAttributedWins + m.shopAttributedWins + m.unattributedWins).toBe(m.wonJobs)
+    expect(m.appAttributedRevenueCents).toBeLessThanOrEqual(m.recoveredRevenueCents)
+  })
+})
+
 describe('computeRecoveryScore', () => {
   it('returns a score in [0, 100] with a tier for the seeded 14-day window', async () => {
     const repo = new DemoRepository(memoryStorage())
@@ -188,6 +229,10 @@ describe('computeRecoveryScore', () => {
       deposits: 0,
       wonJobs: 1,
       recoveredRevenueCents: 500000,
+      appAttributedWins: 1,
+      appAttributedRevenueCents: 500000,
+      shopAttributedWins: 0,
+      unattributedWins: 0,
     })
     expect(result.components.revenueRate).toBe(1)
     expect(result.components.winRate).toBe(1)

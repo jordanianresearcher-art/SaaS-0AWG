@@ -23,6 +23,7 @@ import {
   computeMilestones,
   computeRecoveryScore,
   statusFunnel,
+  type PilotMetrics,
   type RecoveryTier,
 } from '../../lib/metrics'
 import { formatCurrency, customerDisplayName, formatVehicle, formatDateTime, formatTime } from '../../lib/format'
@@ -60,6 +61,48 @@ function Figure({
       <p className="text-sm font-semibold tracking-wide text-zinc-500 uppercase">{label}</p>
       <p className={`text-3xl font-black ${accent ? 'text-green-700' : 'text-ink'}`}>{value}</p>
       {note ? <p className="text-xs text-zinc-500">{note}</p> : null}
+    </div>
+  )
+}
+
+/**
+ * Who actually brought the won jobs back.
+ *
+ * "Recovered revenue" is the claim this whole app makes, and until now it was
+ * a number with nothing behind it — which is why it could not survive the
+ * first question a shop owner asks: "I closed those on the phone anyway."
+ * This line answers that in the shop's own words, and answers it honestly:
+ * a win nobody attributed is shown as unrecorded, never quietly credited.
+ */
+function WinCredit({ metrics }: { metrics: PilotMetrics }) {
+  if (metrics.wonJobs === 0) return null
+  const { appAttributedWins, shopAttributedWins, unattributedWins, wonJobs } = metrics
+
+  if (appAttributedWins === 0 && shopAttributedWins === 0) {
+    return (
+      <p className="mt-4 border-t border-zinc-200 pt-3 text-sm text-zinc-500">
+        None of these {wonJobs === 1 ? 'wins says' : `${wonJobs} wins say`} what brought the customer back. Open a won
+        quote and tap the answer — it takes a second, and it is what shows whether this app earned the sale or you did.
+      </p>
+    )
+  }
+
+  const parts = [
+    appAttributedWins > 0 ? `${appAttributedWins} came back through the app` : null,
+    shopAttributedWins > 0 ? `${shopAttributedWins} you closed yourself` : null,
+    unattributedWins > 0 ? `${unattributedWins} not recorded` : null,
+  ].filter((part): part is string => part !== null)
+
+  return (
+    <div className="mt-4 border-t border-zinc-200 pt-3">
+      <p className="text-sm text-zinc-600">
+        Of {wonJobs} {wonJobs === 1 ? 'job' : 'jobs'} won: {parts.join(' · ')}.
+      </p>
+      {appAttributedWins > 0 ? (
+        <p className="text-sm font-semibold text-green-700">
+          {formatCurrency(metrics.appAttributedRevenueCents)} of that is revenue this app brought back.
+        </p>
+      ) : null}
     </div>
   )
 }
@@ -295,6 +338,7 @@ export default function DashboardPage() {
             <Figure label="Jobs won" value={String(metrics.wonJobs)} note={windowNote} accent />
             <Figure label="Quoted" value={formatCurrency(metrics.totalQuotedCents)} note={windowNote} />
           </div>
+          <WinCredit metrics={metrics} />
         </Card>
 
         <Card>
@@ -502,6 +546,8 @@ function eventLabel(eventType: string, bundle: QuoteBundle): string {
       return 'deposit paid'
     case 'won_amount_edited':
       return 'sale amount corrected'
+    case 'win_source_edited':
+      return 'win source updated'
     case 'marked_won':
       return `job won${bundle.quote.wonAmountCents ? ` (${formatCurrency(bundle.quote.wonAmountCents)})` : ''}`
     case 'marked_lost':
