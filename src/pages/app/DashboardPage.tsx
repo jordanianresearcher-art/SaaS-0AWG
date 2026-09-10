@@ -107,17 +107,28 @@ function WinCredit({ metrics }: { metrics: PilotMetrics }) {
   )
 }
 
-/** A "today" row: icon, count, what it is, and where to go about it. */
+/**
+ * One standing count: icon, number, what it is, the window it covers, and
+ * where to go about it.
+ *
+ * `note` is not decoration. This card used to be headed "Today" while its
+ * three rows measured three different spans — appointments today, follow-ups
+ * due now, responses over the whole selected period — and an analysis of the
+ * pilot read "0 appointments" as sixty days of nothing when it meant nobody
+ * was booked in that day. Every row states its own window now.
+ */
 function TodayRow({
   icon: Icon,
   count,
   label,
+  note,
   to,
   urgent = false,
 }: {
   icon: typeof CalendarDays
   count: number
   label: string
+  note: string
   to: string
   urgent?: boolean
 }) {
@@ -132,7 +143,10 @@ function TodayRow({
           <Icon className="h-5 w-5" aria-hidden="true" />
         </span>
         <span className={`text-2xl font-black ${count === 0 ? 'text-zinc-400' : 'text-ink'}`}>{count}</span>
-        <span className="min-w-0 flex-1 text-base font-semibold text-charcoal">{label}</span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-base font-semibold text-charcoal">{label}</span>
+          <span className="block text-xs text-zinc-500">{note}</span>
+        </span>
         <ArrowRight className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden="true" />
       </Link>
     </li>
@@ -342,25 +356,29 @@ export default function DashboardPage() {
         </Card>
 
         <Card>
-          <SectionHeader title="Today" />
+          {/* Not "Today": only the first row is today. See TodayRow. */}
+          <SectionHeader title="Where things stand" />
           <ul className="mt-2 -mx-2">
             <TodayRow
               icon={CalendarDays}
               count={todaysAppointments.length}
               label={todaysAppointments.length === 1 ? 'appointment' : 'appointments'}
+              note="Booked for today"
               to="/app/calendar"
             />
             <TodayRow
               icon={BellRing}
               count={dueToday.length}
               label="follow-ups due"
+              note="Due now"
               to="/app/follow-ups"
               urgent
             />
             <TodayRow
               icon={MessageSquare}
               count={metrics.responses}
-              label={`customer responses · ${windowNote.toLowerCase()}`}
+              label="customer responses"
+              note={windowNote}
               to="/app/quotes"
             />
           </ul>
