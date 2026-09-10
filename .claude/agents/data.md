@@ -33,6 +33,12 @@ a success (email reports "Demo email sent", never "delivered").
   enum label be used in the same transaction that adds it.
 - Supabase installs pgcrypto into the `extensions` schema — set `search_path`
   accordingly or `gen_salt` will not resolve.
+- **Prove it locally first.** `scripts/local-db.sh` replays every migration
+  into a throwaway Postgres in about ten seconds; `--seed` loads seed data and
+  `-f FILE.sql` runs a file against it. Your migration should apply cleanly
+  there before the owner ever sees it. It stubs Supabase (roles, `auth`,
+  `storage`) rather than being Supabase, so a policy compiling there proves
+  syntax, never protection.
 - **A migration applying cleanly is not evidence its functions run.** Exercise
   every `SECURITY DEFINER` function against a real project, not just the DDL.
 - The owner applies these by hand in the SQL editor. Your report must state

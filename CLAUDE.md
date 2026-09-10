@@ -71,7 +71,11 @@ Each of these has already been violated once and cost something.
    claimed before writing (`docs/MVP_PLAN.md` §4 holds the ledger). A single
    `ALTER TYPE` must be alone in its file. *A migration applying cleanly is not
    evidence its functions run* — exercise every `SECURITY DEFINER` function
-   against a real project.
+   against a real project. **`scripts/local-db.sh` replays the whole ledger
+   into a throwaway Postgres in ~10s**, so a migration or analysis query can be
+   proven here before the owner pastes it into production. It stubs Supabase
+   rather than reproducing it: policies compile, but RLS behaviour there proves
+   nothing about protection.
 5. **Shared files are append-only.** `src/types.ts`, `src/data/repository.ts`,
    both repositories, `src/data/demoData.ts`, `src/App.tsx`, the layout. Add at
    the end of the relevant section; never reorder, reformat, or tidy. Demo seed
@@ -129,6 +133,7 @@ say reaches the user except through this session.
 | `interface` | building screens and flows | `src/pages/**`, `src/components/**` except `ui.tsx` |
 | `design` | how it looks and feels; visual critique | `src/index.css`, `src/components/ui.tsx` |
 | `verify` | running the gate and hunting drift (read-only) | nothing |
+| `analyst` | reading the live database: pilot health, funnel, attribution (read-only, SELECT only) | nothing |
 | `dashboard` | the founder's private platform-admin view | `src/pages/AdminPage.tsx`, `src/data/adminRepository.ts` |
 | `business` | pricing, positioning, strategy (read-only, no files) | nothing |
 | `marketing` | pitch, demo script, landing copy (read-only, no files) | nothing |
