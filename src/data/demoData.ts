@@ -421,6 +421,54 @@ const SEEDS: QuoteSeed[] = [
     ],
     responses: [{ type: 'after_payday', daysAgo: 4, message: 'Get paid on the 1st, hit me up after.' }],
   },
+  // Appended last on purpose — demo seeds are positional and inserting one
+  // earlier renumbers ids that seeded stock movements already reference.
+  //
+  // This is the quote that has run out of emails: all three automatic
+  // follow-ups have gone out, nothing is scheduled, and nobody has said what
+  // happened. In the real pilot twenty-seven quotes looked exactly like this
+  // and the win rate was being computed against them. It seeds the "Out of
+  // emails — what happened?" bucket so the demo shows the close-out, which is
+  // the only thing that keeps that number honest.
+  {
+    key: 'tundra-omar',
+    customer: {
+      firstName: 'Omar', lastName: 'Haddad', phone: '469-555-0142', email: 'omar.haddad@example.com',
+      vehicleYear: 2021, vehicleMake: 'Toyota', vehicleModel: 'Tundra', vehicleTrim: 'SR5',
+      source: 'Walk-in', emailContactPermissionConfirmed: true, emailOptOutAt: null,
+    },
+    quote: {
+      status: 'viewed', internalNotes: 'Opened it twice. Went quiet after the last email.',
+      emailFollowUpAllowed: true, wonAmountCents: null,
+      createdDaysAgo: 16, expirationDaysAhead: 14, lastEmailedDaysAgo: 3, nextFollowUpInDays: null,
+    },
+    options: [
+      {
+        optionKind: 'main', name: 'Rear bass package', description: 'Single 12 under the back seat with a compact amp.',
+        priceCents: 149900,
+        items: [
+          { brand: 'Kicker', model: 'CompR 12', name: '12" subwoofer', quantity: 1 },
+          { brand: 'Kicker', model: 'CXA800.1', name: 'Mono amplifier', quantity: 1 },
+        ],
+      },
+    ],
+    emails: [
+      { templateType: 'initial', daysAgo: 15, status: 'demo_sent' },
+      { templateType: 'check_in', daysAgo: 12, status: 'demo_sent' },
+      { templateType: 'financing_option', daysAgo: 8, status: 'demo_sent' },
+      { templateType: 'final_check_in', daysAgo: 3, status: 'demo_sent' },
+    ],
+    events: [
+      { type: 'created', daysAgo: 16 },
+      { type: 'email_demo_sent', daysAgo: 15, meta: { templateType: 'initial' } },
+      { type: 'quote_viewed', daysAgo: 14 },
+      { type: 'email_demo_sent', daysAgo: 12, meta: { templateType: 'check_in' } },
+      { type: 'email_demo_sent', daysAgo: 8, meta: { templateType: 'financing_option' } },
+      { type: 'quote_viewed', daysAgo: 7 },
+      { type: 'email_demo_sent', daysAgo: 3, meta: { templateType: 'final_check_in' } },
+    ],
+    responses: [],
+  },
 ]
 
 export function buildDemoData(now: Date = new Date()): DemoDB {

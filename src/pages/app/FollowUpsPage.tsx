@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { format } from 'date-fns'
-import { CalendarClock, CheckCheck, ExternalLink, Mail, Ban, MessageSquare, Bot } from 'lucide-react'
+import { CalendarClock, CheckCheck, ExternalLink, Mail, Ban, MessageSquare, Bot, Trophy, XCircle } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
 import { Badge, Button, Card, EmptyState, Field, Input, LoadingBlock, Modal, PageHeader } from '../../components/ui'
 import { EmailPreviewModal } from '../../components/EmailPreviewModal'
+import { WonAmountModal } from '../../components/WonAmountModal'
 import { BUCKET_CONFIG, BUCKET_ORDER, followUpBucket, suggestNextTemplate, type FollowUpBucket } from '../../lib/followUp'
 import { describeAutoFollowUp } from '../../lib/autoFollowUp'
 import { buildQuoteSmsBody, buildSmsLink, type QuoteSmsTemplate } from '../../lib/sms'
@@ -22,11 +23,17 @@ export default function FollowUpsPage() {
   const [emailTemplate, setEmailTemplate] = useState<TemplateType>('check_in')
   const [rescheduleBundle, setRescheduleBundle] = useState<QuoteBundle | null>(null)
   const [rescheduleDate, setRescheduleDate] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [wonBundle, setWonBundle] = useState<QuoteBundle | null>(null)
 
   const grouped = useMemo(() => {
     const groups = new Map<FollowUpBucket, QuoteBundle[]>()
     for (const b of bundles) {
-      const bucket = followUpBucket(b.quote, b.customer.emailOptOutAt !== null)
+      const bucket = followUpBucket(
+        b.quote,
+        b.customer.emailOptOutAt !== null,
+        new Date(),
+        b.emails.filter((e) => e.status === 'sent' || e.status === 'demo_sent').map((e) => e.templateType),
+      )
       if (!bucket) continue
       if (bucket === 'none' && b.quote.status === 'draft') continue // drafts live on the quotes page
       const list = groups.get(bucket) ?? []
@@ -74,6 +81,7 @@ export default function FollowUpsPage() {
                   const suggested = suggestNextTemplate(b.emails, b.responses[0]?.responseType ?? null)
                   const lastEmail = b.emails[0] ?? null
                   const disabled = bucket === 'disabled'
+                  const finished = bucket === 'finished'
                   // What the scheduled sender will do with this quote — the
                   // same rules the Edge Function applies, so the queue never
                   // promises a send that won't happen.
@@ -139,8 +147,29 @@ export default function FollowUpsPage() {
                           </p>
                         )}
                         <div className="flex flex-wrap gap-2">
+                          {/* A quote the machine has finished with needs a
+                             verdict, not another nudge — so Won and Lost lead
+                             the row here and the send button steps back. */}
+                          {finished ? (
+                            <>
+                              <Button variant="success" onClick={() => setWonBundle(b)}>
+                                <Trophy className="h-5 w-5" aria-hidden="true" /> Won
+                              </Button>
+                              <Button
+                                variant="secondary"
+                                onClick={async () => {
+                                  await repo.setQuoteStatus(b.quote.id, 'lost')
+                                  await refresh()
+                                  toast('success', `Marked lost — ${customerDisplayName(b.customer)}.`)
+                                }}
+                              >
+                                <XCircle className="h-5 w-5" aria-hidden="true" /> Lost
+                              </Button>
+                            </>
+                          ) : null}
                           {!disabled ? (
                             <Button
+                              variant={finished ? 'secondary' : 'primary'}
                               onClick={() => {
                                 setEmailTemplate(suggested)
                                 setEmailBundle(b)
@@ -217,6 +246,21 @@ export default function FollowUpsPage() {
           open
           onClose={() => setEmailBundle(null)}
           onSent={() => void refresh()}
+        />
+      ) : null}
+
+      {wonBundle ? (
+        <WonAmountModal
+          mode="mark"
+          open
+          onClose={() => setWonBundle(null)}
+          defaultCents={quoteValueCents(wonBundle.options)}
+          onConfirm={async (cents, winSource) => {
+            await repo.setQuoteStatus(wonBundle.quote.id, 'won', cents, winSource)
+            setWonBundle(null)
+            await refresh()
+            toast('success', `Marked won — ${formatCurrency(cents)} recovered.`)
+          }}
         />
       ) : null}
 

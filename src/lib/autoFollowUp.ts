@@ -68,6 +68,19 @@ export const SKIP_REASON_LABEL: Record<AutoFollowUpSkipReason, string> = {
 const AUTO_SEQUENCE: TemplateType[] = ['check_in', 'financing_option', 'final_check_in']
 
 /**
+ * Has this quote run out of automatic emails?
+ *
+ * True means the machine has said everything it is going to say. It is not a
+ * failure state and it is not "no follow-up scheduled" — the quote finished
+ * the sequence, and the only thing left is a human deciding whether it turned
+ * into money. See the 'finished' bucket in src/lib/followUp.ts.
+ */
+export function isSequenceComplete(sentTemplates: TemplateType[]): boolean {
+  const sent = new Set(sentTemplates)
+  return AUTO_SEQUENCE.every((t) => sent.has(t))
+}
+
+/**
  * The only statuses an automatic follow-up may be sent for.
  *
  * An allowlist rather than a "not terminal" check, for two reasons. First,

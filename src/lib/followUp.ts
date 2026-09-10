@@ -1,15 +1,21 @@
 import { differenceInCalendarDays, startOfDay } from 'date-fns'
 import type { Quote, TemplateType, EmailMessage } from '../types'
 import { isTerminal } from './status'
+import { isSequenceComplete } from './autoFollowUp'
 
 // Follow-up queue buckets and the suggested manual email sequence.
-// Nothing is ever sent automatically — staff press Send for every email.
+//
+// The first email is always a human decision. The three that follow send
+// themselves once a shop has automation on (see autoFollowUp.ts), and then
+// stop — which is what the 'finished' bucket exists to catch.
 
 export type FollowUpBucket =
   | 'overdue'
   | 'due_today'
   | 'due_soon'
   | 'waiting'
+  /** Every automatic email has gone out. Nothing left to send; needs a verdict. */
+  | 'finished'
   | 'none'
   | 'disabled'
 
@@ -18,20 +24,31 @@ export const BUCKET_CONFIG: Record<FollowUpBucket, { label: string; hint: string
   due_today: { label: 'Due today', hint: 'Scheduled for today' },
   due_soon: { label: 'Due soon', hint: 'Coming up in the next 3 days' },
   waiting: { label: 'Waiting on customer', hint: 'Customer responded — reply or call them' },
+  finished: {
+    label: 'Out of emails — what happened?',
+    hint: 'Every follow-up has gone out. Say whether it turned into work.',
+  },
   none: { label: 'No follow-up scheduled', hint: 'Pick a date so these do not slip' },
   disabled: { label: 'Follow-up off', hint: 'Customer opted out or follow-up was turned off' },
 }
 
-export const BUCKET_ORDER: FollowUpBucket[] = ['overdue', 'due_today', 'waiting', 'due_soon', 'none', 'disabled']
+export const BUCKET_ORDER: FollowUpBucket[] = ['overdue', 'due_today', 'waiting', 'finished', 'due_soon', 'none', 'disabled']
 
 export function followUpBucket(
   quote: Pick<Quote, 'status' | 'nextFollowUpAt' | 'emailFollowUpAllowed'>,
   optedOut: boolean,
   now: Date = new Date(),
+  /** Templates already delivered. Omit only where the caller genuinely has no email history. */
+  sentTemplates: TemplateType[] = [],
 ): FollowUpBucket | null {
   if (isTerminal(quote.status)) return null
   if (optedOut || !quote.emailFollowUpAllowed) return 'disabled'
   if (quote.status === 'responded') return 'waiting'
+  // A quote that has run out of emails has not slipped through a crack — it
+  // finished. Telling staff to "pick a date so these do not slip" is the wrong
+  // instruction and it is why 27 of this pilot's quotes sat with no verdict
+  // while its win rate was computed against a denominator nobody had closed.
+  if (!quote.nextFollowUpAt && isSequenceComplete(sentTemplates)) return 'finished'
   if (!quote.nextFollowUpAt) return 'none'
   const diff = differenceInCalendarDays(startOfDay(new Date(quote.nextFollowUpAt)), startOfDay(now))
   if (diff < 0) return 'overdue'
