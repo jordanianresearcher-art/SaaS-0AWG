@@ -126,7 +126,9 @@ describe('renderEmail', () => {
     const email = renderEmail('initial', ctx)
     expect(email.html).toContain('Ceramic tint upgrade')
     expect(email.html).toContain('+$300')
-    expect(email.html).toContain(`total ${formatCurrency(main.priceCents + 30000)}`)
+    // The running total with just this add-on, so an upsell never reads as a
+    // rival package price.
+    expect(email.html).toContain(`Brings it to ${formatCurrency(main.priceCents + 30000)}`)
   })
 
   it('shows an "everything included" total only when the shop opted in', () => {
@@ -179,13 +181,14 @@ describe('renderEmail', () => {
       expect(body).toContain('https://snapfinance.com/apply')
       expect(body).toContain('Acima')
     }
-    expect(email.html).toContain('Need to split this up? We offer financing.')
+    expect(email.html).toContain('Don&rsquo;t want to pay it all at once?')
   })
 
   it('says nothing about financing when the shop has not set any up', () => {
     const ctx = makeContext()
     const email = renderEmail('initial', { ...ctx, shop: { ...ctx.shop, financingOffers: [] } })
-    expect(email.html).not.toContain('We offer financing')
+    expect(email.html).not.toContain('Apply with')
+    expect(email.html).not.toContain('pay it all at once')
     expect(email.text).not.toContain('We offer financing')
   })
 

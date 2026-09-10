@@ -25,6 +25,7 @@ import { transformSync } from 'esbuild'
 // app's tsconfig (which has no node types) and makes the dependency on the
 // Edge Function source explicit to the bundler.
 import functionSource from '../../supabase/functions/resolve-product/index.ts?raw'
+import emailFunctionSource from '../../supabase/functions/send-quote-email/index.ts?raw'
 import { barcodeLookupForms, gs1CheckDigit } from './barcodeIdentity'
 import { parseLooseJson } from './aiJson'
 import { pickBestModel } from './modelPreference'
@@ -32,6 +33,7 @@ import fixture from './__fixtures__/shopProducts.json'
 import { centsFromPrice, parseBigCommerceQuickResults, parseShopifySuggest } from './retailerSearch'
 import { looksDegenerate } from './degenerateText'
 import { parseFitmentList } from './fitment'
+import { renderEmailHtml, type EmailView } from './emailLayout'
 import shopifyFixture from './__fixtures__/retailerShopifySuggest.json'
 import bigcommerceFixture from './__fixtures__/retailerBigCommerceQuick.html?raw'
 import skyHighFixture from './__fixtures__/retailerBigCommerceSkyHigh.html?raw'
@@ -52,8 +54,11 @@ import skyHighFixture from './__fixtures__/retailerBigCommerceSkyHigh.html?raw'
  * The markers also put the duplication rule in the one place someone editing
  * this code will actually be looking.
  */
-function loadMirror(tag: string, exports: string[]): Record<string, (...args: never[]) => unknown> {
-  const src = functionSource
+function loadMirror(
+  tag: string,
+  exports: string[],
+  src: string = functionSource,
+): Record<string, (...args: never[]) => unknown> {
   // The trailing space matters: indexOf('MIRROR-BEGIN aiJson') also matches
   // 'MIRROR-BEGIN aiJsonSomethingElse', so a renamed marker would silently
   // keep resolving to the old region and this test would pass on nothing.
@@ -252,6 +257,78 @@ describe('fitment mirror', () => {
     ]
     for (const c of cases) {
       expect(JSON.stringify(fnParse(c))).toBe(JSON.stringify(parseFitmentList(c)))
+    }
+  })
+})
+
+describe('emailLayout mirror', () => {
+  // This is the one mirror that renders something a customer sees. A drift
+  // here is not a wrong barcode — it is the shop's own email looking one way
+  // in the preview they approved and another way in the inbox it lands in.
+  const mirror = loadMirror('emailLayout', ['renderEmailHtml'], emailFunctionSource)
+  const fnRender = mirror.renderEmailHtml as (v: EmailView) => string
+
+  const base: EmailView = {
+    shopName: 'Super Car Audio',
+    shopLogoUrl: 'https://cdn.example.com/logo.png',
+    shopColor: '#b91c1c',
+    shopPhone: '214-555-0100',
+    shopAddress: '1200 Main St, Dallas, TX',
+    firstName: 'Marcus',
+    vehicle: '2023 RAM 1500',
+    publicUrl: 'https://app.example.com/q/tok',
+    optOutUrl: 'https://app.example.com/q/tok/stop',
+    preheader: 'Your build is ready to look at.',
+    intro: 'Here is the quote you asked for.',
+    cta: 'View My Quote',
+    packageName: 'Complete system',
+    priceCents: 319900,
+    heroImageUrl: 'https://cdn.example.com/sub.jpg',
+    items: [
+      { label: '2× Rockford Fosgate T1650', imageUrl: 'https://cdn.example.com/t1650.jpg' },
+      { label: 'Rockford Fosgate P3-1X12', imageUrl: null },
+      { label: 'Install kit', imageUrl: 'https://cdn.example.com/kit.jpg' },
+    ],
+    addons: [{ name: 'Ceramic tint upgrade', addonPriceCents: 30000, totalWithAddonCents: 349900 }],
+    fullTotalCents: 349900,
+    tints: [
+      { name: 'Full vehicle', typeLabel: 'Ceramic', coverage: 'All windows at 20%', extras: 'sunroof 5%', totalCents: 49900 },
+    ],
+    moreTints: 1,
+    financing: [{ name: 'Snap Finance', url: 'https://snapfinance.com/apply' }],
+    expiration: 'This quote is good through Oct 1, 2026.',
+    showFullSummary: true,
+  }
+
+  // Every branch the layout actually has: the full first email, a stripped
+  // follow-up, a quote with no photos at all, a free/zero-price quote, an odd
+  // item count (the gallery has to pad the last row), and hostile text.
+  const cases: [string, EmailView][] = [
+    ['the full first email', base],
+    ['a follow-up with the summary stripped', { ...base, showFullSummary: false }],
+    ['no photography anywhere', { ...base, heroImageUrl: null, items: base.items.map((i) => ({ ...i, imageUrl: null })) }],
+    ['no logo', { ...base, shopLogoUrl: null }],
+    ['no price yet', { ...base, priceCents: 0 }],
+    ['no vehicle on file', { ...base, vehicle: null }],
+    ['an even number of items', { ...base, items: base.items.slice(0, 2) }],
+    ['nothing optional at all', { ...base, addons: [], tints: [], moreTints: 0, financing: [], fullTotalCents: null, expiration: '' }],
+    ['a blank shop colour', { ...base, shopColor: '' }],
+    [
+      'text that must be escaped',
+      { ...base, shopName: '<script>alert(1)</script>', firstName: 'A&B', packageName: '"Loud"' },
+    ],
+  ]
+
+  it('renders every case byte-for-byte the same as the Edge Function', () => {
+    const disagreements = cases.filter(([, view]) => renderEmailHtml(view) !== fnRender(view)).map(([label]) => label)
+    expect(disagreements).toEqual([])
+  })
+
+  it('escapes shop-controlled text in both copies', () => {
+    const [, hostile] = cases[cases.length - 1]
+    for (const html of [renderEmailHtml(hostile), fnRender(hostile)]) {
+      expect(html).not.toContain('<script>alert(1)</script>')
+      expect(html).toContain('&lt;script&gt;')
     }
   })
 })
