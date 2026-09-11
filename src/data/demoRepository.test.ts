@@ -706,3 +706,115 @@ describe('DemoRepository', () => {
     expect((await repo.getQuoteBundle(target.quote.id))!.quote.winSource).toBe('walked_in')
   })
 })
+
+describe('the conversation on a quote', () => {
+  let repo: DemoRepository
+
+  beforeEach(() => {
+    repo = new DemoRepository(memoryStorage())
+  })
+
+  // The one seed that carries a conversation. Pinned by token because two
+  // seeds are 'responded' and the list is not ordered by the seed array.
+  const seeded = async () => {
+    const bundles = await repo.listQuoteBundles()
+    return bundles.find((b) => b.quote.publicToken === 'demo-token-mustang-april')!
+  }
+
+  it('seeds a two-sided thread so the demo has something to show', async () => {
+    const target = await seeded()
+    const thread = await repo.listQuoteMessages(target.quote.id)
+    expect(thread.length).toBeGreaterThan(1)
+    expect(new Set(thread.map((m) => m.sender))).toEqual(new Set(['customer', 'shop']))
+  })
+
+  it('returns the thread oldest first', async () => {
+    const target = await seeded()
+    const thread = await repo.listQuoteMessages(target.quote.id)
+    const times = thread.map((m) => m.createdAt)
+    expect([...times].sort()).toEqual(times)
+  })
+
+  it("logs the shop's reply to the activity feed, not only the thread", async () => {
+    const target = await seeded()
+    await repo.sendQuoteMessage(target.quote.id, 'Morning it is. See you at 9.')
+    const after = await repo.getQuoteBundle(target.quote.id)
+    const event = after!.events.find((e) => e.eventType === 'shop_message')
+    expect(event).toBeTruthy()
+    expect(event!.metadata).toMatchObject({ preview: 'Morning it is. See you at 9.' })
+  })
+
+  it('refuses to send an empty message', async () => {
+    const target = await seeded()
+    await expect(repo.sendQuoteMessage(target.quote.id, '   ')).rejects.toThrow(/type something/i)
+  })
+
+  it('counts unread customer messages, and stops counting once staff open the quote', async () => {
+    const target = await seeded()
+    expect((await repo.countUnreadQuoteMessages())[target.quote.id]).toBeGreaterThan(0)
+
+    await repo.markQuoteMessagesRead(target.quote.id)
+    expect((await repo.countUnreadQuoteMessages())[target.quote.id]).toBeUndefined()
+  })
+
+  it("never counts the shop's own messages as unread", async () => {
+    const target = await seeded()
+    await repo.markQuoteMessagesRead(target.quote.id)
+    await repo.sendQuoteMessage(target.quote.id, 'Anything else?')
+    expect((await repo.countUnreadQuoteMessages())[target.quote.id]).toBeUndefined()
+  })
+
+  it('marks the shop replies seen when the customer loads their page', async () => {
+    const target = await seeded()
+    await repo.sendQuoteMessage(target.quote.id, 'Still holding that slot for you.')
+    expect((await repo.listQuoteMessages(target.quote.id)).some((m) => m.sender === 'shop' && m.readAt === null)).toBe(true)
+
+    await repo.getPublicQuoteThread(target.quote.publicToken)
+    // The read receipt is the only real delivery signal in this product —
+    // there is no tracking pixel anywhere — so it has to actually land.
+    expect((await repo.listQuoteMessages(target.quote.id)).some((m) => m.sender === 'shop' && m.readAt === null)).toBe(false)
+  })
+
+  it('leaves the customer messages unread when the customer loads their own page', async () => {
+    const target = await seeded()
+    await repo.getPublicQuoteThread(target.quote.publicToken)
+    expect((await repo.countUnreadQuoteMessages())[target.quote.id]).toBeGreaterThan(0)
+  })
+
+  it('lets the customer write back, and logs it where staff will see it', async () => {
+    const target = await seeded()
+    const sent = await repo.postPublicQuoteMessage(target.quote.publicToken, 'Can I pay the deposit on Friday?')
+    expect(sent.sender).toBe('customer')
+    expect(sent.readAt).toBeNull()
+
+    const after = await repo.getQuoteBundle(target.quote.id)
+    expect(after!.events.some((e) => e.eventType === 'customer_message')).toBe(true)
+  })
+
+  it('refuses an unknown token rather than silently dropping the message', async () => {
+    await expect(repo.postPublicQuoteMessage('not-a-real-token', 'hello?')).rejects.toThrow(/not found/i)
+    expect(await repo.getPublicQuoteThread('not-a-real-token')).toEqual([])
+  })
+
+  it('refuses an empty message from the customer too', async () => {
+    const target = await seeded()
+    await expect(repo.postPublicQuoteMessage(target.quote.publicToken, '  ')).rejects.toThrow(/empty/i)
+  })
+
+  it('truncates a very long message instead of losing it', async () => {
+    const target = await seeded()
+    const sent = await repo.postPublicQuoteMessage(target.quote.publicToken, 'x'.repeat(3000))
+    expect(sent.body).toHaveLength(2000)
+  })
+
+  it('stops a flood at the same 20 an hour the database enforces', async () => {
+    // Demo mode has no attacker. It mirrors the limit anyway, because a demo
+    // that behaves differently from production is how a limit gets found by a
+    // real customer instead of by us.
+    const target = await seeded()
+    for (let i = 0; i < 20; i += 1) {
+      await repo.postPublicQuoteMessage(target.quote.publicToken, `message ${i}`)
+    }
+    await expect(repo.postPublicQuoteMessage(target.quote.publicToken, 'one too many')).rejects.toThrow(/too many/i)
+  })
+})

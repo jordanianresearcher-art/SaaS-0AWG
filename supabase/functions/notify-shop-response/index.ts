@@ -57,7 +57,12 @@ Deno.serve(async (req: Request) => {
   const body = await req.json().catch(() => null)
   const publicToken = typeof body?.publicToken === 'string' ? body.publicToken : ''
   const responseType = typeof body?.responseType === 'string' ? body.responseType : ''
-  if (!publicToken || !HIGH_INTENT_TYPES.has(responseType)) {
+  // Two callers now: a high-intent canned response, and a typed message on
+  // the quote thread. A message is ALWAYS worth the interruption — somebody
+  // wrote words to this shop and is waiting, and unlike the canned responses
+  // there is no version of it the app can answer on its own.
+  const isMessage = body?.kind === 'message'
+  if (!publicToken || (!isMessage && !HIGH_INTENT_TYPES.has(responseType))) {
     return noop('missing token or not a high-intent response type')
   }
 
@@ -86,11 +91,12 @@ Deno.serve(async (req: Request) => {
     .from('quote_events')
     .select('created_at, metadata')
     .eq('quote_id', quote.id)
-    .eq('event_type', 'customer_responded')
+    .eq('event_type', isMessage ? 'customer_message' : 'customer_responded')
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
-  const matchesType = recentEvent?.metadata && (recentEvent.metadata as { responseType?: string }).responseType === responseType
+  const matchesType =
+    isMessage || (recentEvent?.metadata && (recentEvent.metadata as { responseType?: string }).responseType === responseType)
   const isRecent = recentEvent?.created_at && Date.now() - new Date(recentEvent.created_at).getTime() < 30_000
   if (!matchesType || !isRecent) return noop('no matching recent response event')
 
@@ -100,14 +106,18 @@ Deno.serve(async (req: Request) => {
 
   const appUrl = (Deno.env.get('APP_URL') ?? '').replace(/\/$/, '')
   const customerName = customer ? `${customer.first_name}${customer.last_name ? ` ${customer.last_name}` : ''}` : 'A customer'
-  const label = RESPONSE_LABELS[responseType] ?? 'responded to their quote'
+  const preview = isMessage
+    ? String((recentEvent?.metadata as { preview?: string } | null)?.preview ?? '').trim()
+    : ''
+  const label = isMessage ? 'sent you a message' : (RESPONSE_LABELS[responseType] ?? 'responded to their quote')
   const detailUrl = `${appUrl}/app/quotes/${quote.id}`
 
-  const subject = `${customerName} ${label} — follow up`
+  const subject = isMessage ? `${customerName} messaged you about their quote` : `${customerName} ${label} — follow up`
   const text = [
     `${customerName} ${label} on their quote.`,
+    ...(preview ? ['', `"${preview}"`] : []),
     '',
-    `Follow up here: ${detailUrl}`,
+    `Reply here: ${detailUrl}`,
   ].join('\n')
   const html = `
 <div style="margin:0;padding:24px 12px;background:#f4f4f5;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
@@ -115,8 +125,13 @@ Deno.serve(async (req: Request) => {
     <p style="margin:0 0 16px;font-size:16px;color:#27272a;">
       <strong>${escapeHtml(customerName)}</strong> ${escapeHtml(label)} on their quote.
     </p>
+    ${
+      preview
+        ? `<p style="margin:0 0 16px;padding:12px 14px;background:#f4f4f5;border-radius:10px;font-size:15px;line-height:1.5;color:#3f3f46;">&ldquo;${escapeHtml(preview)}&rdquo;</p>`
+        : ''
+    }
     <p style="margin:0;text-align:center;">
-      <a href="${escapeHtml(detailUrl)}" style="display:inline-block;background:${escapeHtml(shop.primary_color || '#1d4ed8')};color:#ffffff;text-decoration:none;font-weight:700;font-size:16px;padding:12px 28px;border-radius:10px;">Follow up now</a>
+      <a href="${escapeHtml(detailUrl)}" style="display:inline-block;background:${escapeHtml(shop.primary_color || '#1d4ed8')};color:#ffffff;text-decoration:none;font-weight:700;font-size:16px;padding:12px 28px;border-radius:10px;">${isMessage ? 'Reply now' : 'Follow up now'}</a>
     </p>
   </div>
 </div>`.trim()

@@ -150,7 +150,10 @@ never happens.
 - `0027` → `0027_quote_win_source.sql` (quotes.win_source — what brought a won
   job back, asked once at Mark won). One `ALTER TABLE ... ADD COLUMN` plus a
   partial index; safe to run alongside others. **Applied? No.**
-- `0028`+ → reserved, unassigned. Stripe Connect deposits will take the next
+- `0028` → `0028_quote_messages.sql` (the two-way thread on a quote, plus the
+  two public-token RPCs the customer reaches it through). One table, two
+  functions; no ALTER TYPE. **Applied? No.**
+- `0029`+ → reserved, unassigned. Stripe Connect deposits will take the next
   number when that work starts.
 - Stream C needs no migration.
 - Never write a migration number you haven't been assigned.

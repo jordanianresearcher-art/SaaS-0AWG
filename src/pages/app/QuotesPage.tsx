@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { CreditCard, Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import { CreditCard, MessageSquare, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
 import { Badge, Button, Card, EmptyState, Input, LinkButton, LoadingBlock, Modal, PageHeader, Select } from '../../components/ui'
@@ -24,6 +24,14 @@ export default function QuotesPage() {
   /** The quote awaiting delete confirmation, or null. Holds the whole bundle so the dialog can name the customer. */
   const [deleteTarget, setDeleteTarget] = useState<QuoteBundle | null>(null)
   const [deleting, setDeleting] = useState(false)
+  /** Unread customer messages per quote id. Empty until it loads, so the list never waits on it. */
+  const [unread, setUnread] = useState<Record<string, number>>({})
+
+  useEffect(() => {
+    // A quote with someone waiting on an answer has to be visible from the
+    // list. Staff open this screen, not the thread.
+    void repo.countUnreadQuoteMessages().then(setUnread).catch(() => {})
+  }, [repo, bundles])
 
   const doDelete = async () => {
     if (!deleteTarget) return
@@ -127,6 +135,12 @@ export default function QuotesPage() {
                   <div className="flex shrink-0 flex-col items-end gap-1.5">
                     <span className="text-lg font-black text-ink">{formatCurrency(quoteValueCents(b.options))}</span>
                     <Badge className={STATUS_CONFIG[b.quote.status].badgeClass}>{STATUS_CONFIG[b.quote.status].label}</Badge>
+                    {unread[b.quote.id] ? (
+                      <Badge className="bg-green-100 text-green-800">
+                        <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />
+                        {unread[b.quote.id] === 1 ? 'New message' : `${unread[b.quote.id]} new messages`}
+                      </Badge>
+                    ) : null}
                     {needsFinancingFollowUp(b) ? (
                       <Badge className="bg-amber-100 text-amber-800">
                         <CreditCard className="h-3.5 w-3.5" aria-hidden="true" /> Needs financing

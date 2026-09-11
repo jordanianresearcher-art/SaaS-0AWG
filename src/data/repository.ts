@@ -25,6 +25,7 @@ import type {
   Quote,
   QuoteBundle,
   QuoteEvent,
+  QuoteMessage,
   QuoteOption,
   QuoteResponse,
   QuoteStatus,
@@ -726,6 +727,21 @@ export interface DataRepository {
    * overwrite with a different wrong answer.
    */
   updateWinSource(quoteId: string, winSource: WinSource | null): Promise<void>
+
+  /**
+   * The conversation on a quote, oldest first.
+   *
+   * Loaded per quote rather than carried on QuoteBundle: the quotes list
+   * fetches every bundle a shop has, and a thread on each of them would make
+   * the list pay for a feature only the detail screen uses.
+   */
+  listQuoteMessages(quoteId: string): Promise<QuoteMessage[]>
+  /** The shop answers. Returns the stored message so the thread can append without a refetch. */
+  sendQuoteMessage(quoteId: string, body: string): Promise<QuoteMessage>
+  /** Stamps the customer's messages as seen. Called when staff open the quote — the customer's side of the read receipt. */
+  markQuoteMessagesRead(quoteId: string): Promise<void>
+  /** Unread customer messages per quote id, for the badge on the list. Only quotes with at least one appear. */
+  countUnreadQuoteMessages(): Promise<Record<string, number>>
   rescheduleFollowUp(quoteId: string, nextFollowUpAt: string | null): Promise<void>
   setFollowUpAllowed(quoteId: string, allowed: boolean): Promise<void>
   markContacted(quoteId: string): Promise<void>
@@ -753,6 +769,10 @@ export interface DataRepository {
     message: string | null,
   ): Promise<void>
   optOutPublicQuote(publicToken: string): Promise<void>
+  /** The customer's view of the thread. Reading it marks the shop's messages as seen. */
+  getPublicQuoteThread(publicToken: string): Promise<QuoteMessage[]>
+  /** The customer writes back. Rate-limited server-side; the token is in a forwardable email. */
+  postPublicQuoteMessage(publicToken: string, body: string): Promise<QuoteMessage>
 
   // ---------------------------------------------------------------------
   // Shared-device inventory access (migration 0017). Joining a shop by

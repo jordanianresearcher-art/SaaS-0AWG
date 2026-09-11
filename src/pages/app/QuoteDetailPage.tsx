@@ -37,9 +37,10 @@ import {
 import { errorMessage } from '../../lib/errors'
 import { summarizeWindowTint } from '../../lib/windowTint'
 import { addonOptions, computeAddonBreakdown, fullTotalCents, mainOption } from '../../lib/quotePricing'
-import type { QuoteBundle, TemplateType, WinSource } from '../../types'
+import type { QuoteBundle, QuoteMessage, TemplateType, WinSource } from '../../types'
 import { formatItemDisplayName } from '../../lib/productNaming'
 import { winSourceLabel } from '../../lib/winSource'
+import { QuoteChat } from '../../components/QuoteChat'
 import { WinSourcePicker } from '../../components/WinSourcePicker'
 import { WonAmountModal } from '../../components/WonAmountModal'
 
@@ -57,6 +58,7 @@ export default function QuoteDetailPage() {
   const [wonOpen, setWonOpen] = useState(false)
   const [wonEditOpen, setWonEditOpen] = useState(false)
   const [winSourceOpen, setWinSourceOpen] = useState(false)
+  const [messages, setMessages] = useState<QuoteMessage[] | null>(null)
   const [rescheduleOpen, setRescheduleOpen] = useState(false)
   const [notesDraft, setNotesDraft] = useState<string | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
@@ -72,6 +74,19 @@ export default function QuoteDetailPage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  const loadMessages = useCallback(async () => {
+    if (!quoteId) return
+    setMessages(await repo.listQuoteMessages(quoteId))
+  }, [quoteId, repo])
+
+  useEffect(() => {
+    void loadMessages()
+    // Opening the quote IS reading the customer's messages — there is no
+    // separate "mark read" tap, because staff would never find it and the
+    // unread badge would stay lit forever.
+    if (quoteId) void repo.markQuoteMessagesRead(quoteId)
+  }, [loadMessages, quoteId, repo])
 
   // "Save & review email" from the create-quote form lands here with a flag
   // to open the preview immediately — still requires an explicit Send tap.
@@ -495,6 +510,23 @@ export default function QuoteDetailPage() {
             </Card>
           )}
 
+          <h2 className="pt-2 text-xl font-bold text-ink">Messages</h2>
+          <Card>
+            {/* The thread sits above Activity because "what did they say?" is
+                a question staff ask far more often than "what happened?". */}
+            <QuoteChat
+              messages={messages ?? []}
+              me="shop"
+              emptyHint={`Nothing yet. Anything you send here shows up on ${customerDisplayName(customer)}'s quote page — no app for them to install.`}
+              placeholder="Answer them here…"
+              onSend={async (body) => {
+                await repo.sendQuoteMessage(quote.id, body)
+                await loadMessages()
+                await reloadAll()
+              }}
+            />
+          </Card>
+
           <h2 className="pt-2 text-xl font-bold text-ink">Activity</h2>
           <Card>
             <ul className="space-y-2">
@@ -643,6 +675,8 @@ function activityLabel(eventType: string): string {
     marked_won: 'Marked won',
     won_amount_edited: 'Sale amount corrected',
     win_source_edited: 'Win source updated',
+    customer_message: 'Customer sent a message',
+    shop_message: 'You replied',
     marked_lost: 'Marked lost',
     follow_up_rescheduled: 'Follow-up rescheduled',
     follow_up_disabled: 'Follow-up turned off',

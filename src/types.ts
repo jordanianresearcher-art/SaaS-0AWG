@@ -79,6 +79,10 @@ export type QuoteEventType =
   | 'won_amount_edited'
   /** Staff changed what they said brought a won job back. Metadata carries from/to as WinSource | null. */
   | 'win_source_edited'
+  /** The customer wrote on their quote. Metadata carries a short preview. */
+  | 'customer_message'
+  /** The shop answered in the quote thread. */
+  | 'shop_message'
 
 /**
  * 'inventory' is a low-privilege, shared-device role: a phone/tablet/PC
@@ -521,6 +525,25 @@ export interface PackageTemplate {
   createdAt: string
   updatedAt: string
   items: PackageTemplateItem[]
+}
+
+/**
+ * One line of the conversation attached to a quote.
+ *
+ * `sender` is 'customer' or 'shop' rather than a user id, because the
+ * customer has no account and "the shop" has to keep meaning the shop after
+ * the staff member who typed it leaves.
+ *
+ * `readAt` is when the OTHER side saw it — the only delivery signal in this
+ * product that is real. There is no tracking pixel anywhere here.
+ */
+export interface QuoteMessage {
+  id: string
+  quoteId: string
+  sender: 'customer' | 'shop'
+  body: string
+  createdAt: string
+  readAt: string | null
 }
 
 export interface Quote {

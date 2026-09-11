@@ -12,6 +12,7 @@ import type {
   PackageTemplateItem,
   Quote,
   QuoteEvent,
+  QuoteMessage,
   QuoteOption,
   QuoteResponse,
   ScheduleException,
@@ -48,11 +49,12 @@ export interface DemoDB {
   businessHours: BusinessHoursDay[]
   scheduleExceptions: ScheduleException[]
   appointments: Appointment[]
+  quoteMessages: QuoteMessage[]
   /** Bumped when the seed shape changes so stale localStorage is discarded. */
   seedVersion: number
 }
 
-export const DEMO_SEED_VERSION = 17
+export const DEMO_SEED_VERSION = 18
 
 const SHOP_ID = 'demo-shop'
 
@@ -1246,6 +1248,43 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
     businessHours,
     scheduleExceptions,
     appointments,
+    // A live conversation on the quote whose customer asked to be contacted
+    // after payday. The demo needs the thread to already have two sides to
+    // it — an empty chat box demonstrates nothing.
+    quoteMessages: (() => {
+      // Pinned to one seed by token, not by status. Two seeds are
+      // 'responded', and "whichever comes first" is how a demo ends up with
+      // its conversation attached to a different customer than the one the
+      // script talks about.
+      const target = quotes.find((q) => q.publicToken === 'demo-token-mustang-april')
+      if (!target) return []
+      return [
+        {
+          id: 'demo-msg-1',
+          quoteId: target.id,
+          sender: 'customer' as const,
+          body: 'Get paid on the 1st. Can you still do that price then?',
+          createdAt: daysAgo(now, 2),
+          readAt: daysAgo(now, 2),
+        },
+        {
+          id: 'demo-msg-2',
+          quoteId: target.id,
+          sender: 'shop' as const,
+          body: "Yes — that price is good through the end of the month. Want me to pencil you in for the 2nd?",
+          createdAt: daysAgo(now, 2),
+          readAt: daysAgo(now, 1),
+        },
+        {
+          id: 'demo-msg-3',
+          quoteId: target.id,
+          sender: 'customer' as const,
+          body: 'Perfect. Morning works better for me if you have it.',
+          createdAt: daysAgo(now, 1),
+          readAt: null,
+        },
+      ]
+    })(),
     seedVersion: DEMO_SEED_VERSION,
   }
 }

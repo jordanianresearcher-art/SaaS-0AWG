@@ -1,4 +1,4 @@
-import type { PublicQuote, ResponseType } from '../types'
+import type { PublicQuote, QuoteMessage, ResponseType } from '../types'
 import { DemoRepository } from './demoRepository'
 import { getSupabase } from './supabaseClient'
 import { env, supabaseConfigured } from '../lib/env'
@@ -20,6 +20,10 @@ export interface PublicQuoteApi {
    * Demo mode never makes a real call.
    */
   notifyHighIntent(responseType: ResponseType): Promise<void>
+  /** The conversation on this quote. Loading it marks the shop's replies as seen. */
+  thread(): Promise<QuoteMessage[]>
+  /** The customer writes to the shop. Rate-limited server-side. */
+  postMessage(body: string): Promise<QuoteMessage>
 }
 
 const DEMO_DB_KEY = '0gauge-demo-db'
@@ -42,6 +46,8 @@ export async function resolvePublicQuoteApi(token: string): Promise<PublicQuoteA
         // Demo mode must never make a real external call — the shop staff
         // notification is a real email in production only.
         notifyHighIntent: async () => {},
+        thread: () => demo.getPublicQuoteThread(token),
+        postMessage: (body) => demo.postPublicQuoteMessage(token, body),
       }
     }
   }
@@ -79,6 +85,24 @@ export async function resolvePublicQuoteApi(token: string): Promise<PublicQuoteA
         } catch (err) {
           console.error('notify-shop-response failed', err)
         }
+      },
+      thread: async () => {
+        const { data, error } = await supabase.rpc('get_public_quote_thread', { p_public_token: token })
+        if (error) throw error
+        return Array.isArray(data) ? (data as QuoteMessage[]) : []
+      },
+      postMessage: async (body) => {
+        const { data, error } = await supabase.rpc('post_public_quote_message', { p_public_token: token, p_body: body })
+        if (error) throw error
+        // Best-effort staff ping, same stance as notifyHighIntent: a customer
+        // who just typed a question must never see this fail, but a shop that
+        // never hears about the question is the feature not working.
+        try {
+          await supabase.functions.invoke('notify-shop-response', { body: { publicToken: token, kind: 'message' } })
+        } catch (err) {
+          console.error('notify-shop-response (message) failed', err)
+        }
+        return data as QuoteMessage
       },
     }
   }

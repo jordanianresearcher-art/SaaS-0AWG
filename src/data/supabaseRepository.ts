@@ -26,6 +26,7 @@ import type {
   QuoteBundle,
   QuoteEvent,
   QuoteItem,
+  QuoteMessage,
   QuoteOption,
   QuoteResponse,
   QuoteStatus,
@@ -203,6 +204,32 @@ function mapQuote(r: Row): Quote {
     winSource: isWinSource(r.win_source) ? r.win_source : null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+  }
+}
+
+function mapQuoteMessage(r: Row): QuoteMessage {
+  return {
+    id: r.id,
+    quoteId: r.quote_id,
+    sender: r.sender === 'shop' ? 'shop' : 'customer',
+    body: r.body ?? '',
+    createdAt: r.created_at,
+    readAt: r.read_at ?? null,
+  }
+}
+
+/**
+ * The RPC shape, which has no quote_id — the customer holds a token, not an
+ * id, and the function deliberately does not hand one back.
+ */
+function mapPublicQuoteMessage(r: Row, publicToken: string): QuoteMessage {
+  return {
+    id: r.id ?? publicToken,
+    quoteId: '',
+    sender: r.sender === 'shop' ? 'shop' : 'customer',
+    body: r.body ?? '',
+    createdAt: r.createdAt ?? new Date().toISOString(),
+    readAt: r.readAt ?? null,
   }
 }
 
@@ -1721,6 +1748,76 @@ export class SupabaseRepository implements DataRepository {
       from: isWinSource(before?.win_source) ? before.win_source : null,
       to: winSource,
     })
+  }
+
+  async listQuoteMessages(quoteId: string): Promise<QuoteMessage[]> {
+    const { data, error } = await this.supabase
+      .from('quote_messages')
+      .select('*')
+      .eq('quote_id', quoteId)
+      .order('created_at', { ascending: true })
+    if (error) throw error
+    return (data ?? []).map(mapQuoteMessage)
+  }
+
+  async sendQuoteMessage(quoteId: string, body: string): Promise<QuoteMessage> {
+    const text = body.trim().slice(0, 2000)
+    if (!text) throw new Error('Type something to send.')
+    const { data: user } = await this.supabase.auth.getUser()
+    const { data, error } = await this.supabase
+      .from('quote_messages')
+      .insert({ quote_id: quoteId, sender: 'shop', body: text, created_by: user.user?.id ?? null })
+      .select('*')
+      .single()
+    if (error) throw error
+    // Mirrors post_public_quote_message: the activity feed is where staff look
+    // for "what happened on this quote", so both sides of the conversation
+    // have to show up there and not only in the thread.
+    await this.addEvent(quoteId, 'shop_message', { preview: text.slice(0, 140) })
+    return mapQuoteMessage(data)
+  }
+
+  async markQuoteMessagesRead(quoteId: string): Promise<void> {
+    const { error } = await this.supabase
+      .from('quote_messages')
+      .update({ read_at: new Date().toISOString() })
+      .eq('quote_id', quoteId)
+      .eq('sender', 'customer')
+      .is('read_at', null)
+    if (error) throw error
+  }
+
+  async countUnreadQuoteMessages(): Promise<Record<string, number>> {
+    // Rows rather than a grouped count: PostgREST has no group-by, and the
+    // partial index on (quote_id) where unread keeps this cheap. A shop with
+    // a hundred unread messages still returns a hundred small rows.
+    const { data, error } = await this.supabase
+      .from('quote_messages')
+      .select('quote_id')
+      .eq('sender', 'customer')
+      .is('read_at', null)
+    if (error) throw error
+    const counts: Record<string, number> = {}
+    for (const row of data ?? []) {
+      const id = (row as Row).quote_id as string
+      counts[id] = (counts[id] ?? 0) + 1
+    }
+    return counts
+  }
+
+  async getPublicQuoteThread(publicToken: string): Promise<QuoteMessage[]> {
+    const { data, error } = await this.supabase.rpc('get_public_quote_thread', { p_public_token: publicToken })
+    if (error) throw error
+    return Array.isArray(data) ? (data as Row[]).map((r) => mapPublicQuoteMessage(r, publicToken)) : []
+  }
+
+  async postPublicQuoteMessage(publicToken: string, body: string): Promise<QuoteMessage> {
+    const { data, error } = await this.supabase.rpc('post_public_quote_message', {
+      p_public_token: publicToken,
+      p_body: body,
+    })
+    if (error) throw error
+    return mapPublicQuoteMessage((data ?? {}) as Row, publicToken)
   }
 
   async rescheduleFollowUp(quoteId: string, nextFollowUpAt: string | null): Promise<void> {

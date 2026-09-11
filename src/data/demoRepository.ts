@@ -15,6 +15,7 @@ import type {
   QuoteBundle,
   QuoteEvent,
   QuoteEventType,
+  QuoteMessage,
   QuoteOption,
   QuoteStatus,
   ResponseType,
@@ -949,6 +950,96 @@ export class DemoRepository implements DataRepository {
 
   private quoteByToken(publicToken: string): Quote | null {
     return this.db.quotes.find((q) => q.publicToken === publicToken) ?? null
+  }
+
+  async listQuoteMessages(quoteId: string): Promise<QuoteMessage[]> {
+    return this.db.quoteMessages
+      .filter((m) => m.quoteId === quoteId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .map((m) => ({ ...m }))
+  }
+
+  async sendQuoteMessage(quoteId: string, body: string): Promise<QuoteMessage> {
+    const text = body.trim().slice(0, 2000)
+    if (!text) throw new Error('Type something to send.')
+    const message: QuoteMessage = {
+      id: newId(),
+      quoteId,
+      sender: 'shop',
+      body: text,
+      createdAt: new Date().toISOString(),
+      readAt: null,
+    }
+    this.db.quoteMessages.push(message)
+    this.addEvent(quoteId, 'shop_message', { preview: text.slice(0, 140) })
+    this.persist()
+    return { ...message }
+  }
+
+  async markQuoteMessagesRead(quoteId: string): Promise<void> {
+    const now = new Date().toISOString()
+    let changed = false
+    for (const m of this.db.quoteMessages) {
+      if (m.quoteId === quoteId && m.sender === 'customer' && m.readAt === null) {
+        m.readAt = now
+        changed = true
+      }
+    }
+    if (changed) this.persist()
+  }
+
+  async countUnreadQuoteMessages(): Promise<Record<string, number>> {
+    const counts: Record<string, number> = {}
+    for (const m of this.db.quoteMessages) {
+      if (m.sender !== 'customer' || m.readAt !== null) continue
+      counts[m.quoteId] = (counts[m.quoteId] ?? 0) + 1
+    }
+    return counts
+  }
+
+  async getPublicQuoteThread(publicToken: string): Promise<QuoteMessage[]> {
+    const quote = this.db.quotes.find((q) => q.publicToken === publicToken && q.status !== 'draft')
+    if (!quote) return []
+    // Mirrors get_public_quote_thread: loading the page is what marks the
+    // shop's messages as seen. It is the only real read receipt in this app.
+    const now = new Date().toISOString()
+    let changed = false
+    for (const m of this.db.quoteMessages) {
+      if (m.quoteId === quote.id && m.sender === 'shop' && m.readAt === null) {
+        m.readAt = now
+        changed = true
+      }
+    }
+    if (changed) this.persist()
+    return this.listQuoteMessages(quote.id)
+  }
+
+  async postPublicQuoteMessage(publicToken: string, body: string): Promise<QuoteMessage> {
+    const quote = this.db.quotes.find((q) => q.publicToken === publicToken && q.status !== 'draft')
+    if (!quote) throw new Error('Quote not found')
+    const text = body.trim().slice(0, 2000)
+    if (!text) throw new Error('Message is empty')
+    // Same 20-per-hour ceiling the RPC enforces. Demo mode has no attacker,
+    // but a demo that behaves differently from production is how a limit gets
+    // discovered by a real customer instead of by us.
+    const hourAgo = Date.now() - 60 * 60 * 1000
+    const recent = this.db.quoteMessages.filter(
+      (m) => m.quoteId === quote.id && m.sender === 'customer' && new Date(m.createdAt).getTime() > hourAgo,
+    ).length
+    if (recent >= 20) throw new Error('Too many messages — please call the shop')
+
+    const message: QuoteMessage = {
+      id: newId(),
+      quoteId: quote.id,
+      sender: 'customer',
+      body: text,
+      createdAt: new Date().toISOString(),
+      readAt: null,
+    }
+    this.db.quoteMessages.push(message)
+    this.addEvent(quote.id, 'customer_message', { preview: text.slice(0, 140) })
+    this.persist()
+    return { ...message }
   }
 
   async getPublicQuote(publicToken: string): Promise<PublicQuote | null> {

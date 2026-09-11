@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { MapPin, Phone, Mail, CreditCard, Check } from 'lucide-react'
-import type { PublicQuote, ResponseType } from '../types'
+import type { PublicQuote, QuoteMessage, ResponseType } from '../types'
 import { resolvePublicQuoteApi, type PublicQuoteApi } from '../data/publicQuote'
 import { RESPONSE_CONFIG } from '../lib/status'
 import { formatCurrency, formatDate } from '../lib/format'
@@ -9,6 +9,7 @@ import { formatItemDisplayName } from '../lib/productNaming'
 import { summarizeWindowTint } from '../lib/windowTint'
 import { addonOptions, computeAddonBreakdown, fullTotalCents, mainOption } from '../lib/quotePricing'
 import { Button, LoadingBlock } from '../components/ui'
+import { QuoteChat } from '../components/QuoteChat'
 
 /** A row of small product thumbnails/names — no per-item price (see docs/QUOTE_TRACKING.md's email section: the shop wants the customer to see pictures of what they're getting without a line-by-line price breakdown, just the option total). */
 function ItemPreviewList({ items }: { items: PublicQuote['options'][number]['items'] }) {
@@ -54,6 +55,7 @@ export default function PublicQuotePage() {
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState<ResponseType | null>(null)
   const [optedOut, setOptedOut] = useState(false)
+  const [thread, setThread] = useState<QuoteMessage[]>([])
   const wantsStop = searchParams.get('stop') === '1'
   // Only present on a real emailed link (embedded server-side in
   // send-quote-email) — the bare link staff use for "Open quote"/"Copy
@@ -82,6 +84,14 @@ export default function PublicQuotePage() {
         }
         setApi(resolved)
         setQuote(data)
+        // Best-effort: a thread that fails to load must never stop someone
+        // seeing their quote and their price.
+        void resolved
+          .thread()
+          .then((rows) => {
+            if (!cancelled) setThread(rows)
+          })
+          .catch(() => {})
         setOptedOut(data.optedOut)
         setState('ready')
         // Record only the first meaningful view per browser session — the
@@ -372,6 +382,29 @@ export default function PublicQuotePage() {
                  they need financing shouldn't have to tap through a response
                  first to reach the application. */}
               <FinancingLinks offers={quote.financingOffers} color={color} />
+
+              {/* Below the six canned responses on purpose. Those are one tap
+                 and answer most of what people want to say; typing is the
+                 fallback for the question nobody anticipated, not the first
+                 thing asked of someone reading a price. */}
+              <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+                <p className="text-base font-bold text-ink">Message {quote.shopName}</p>
+                <p className="mt-1 mb-3 text-sm text-zinc-600">
+                  Goes straight to the shop. Their answer shows up right here — nothing to install.
+                </p>
+                <QuoteChat
+                  messages={thread}
+                  me="customer"
+                  accentColor={color}
+                  emptyHint="Ask us anything about this quote."
+                  placeholder="Example: does that price include tint too?"
+                  onSend={async (body) => {
+                    if (!api) throw new Error('Still loading — try again in a second.')
+                    const sent = await api.postMessage(body)
+                    setThread((prev) => [...prev, sent])
+                  }}
+                />
+              </div>
 
               {/* 3 — everything else, visually quieter. */}
               <div className="rounded-2xl border border-zinc-200 bg-white p-4">
