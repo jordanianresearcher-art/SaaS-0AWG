@@ -45,6 +45,32 @@ const PROVIDER_NAMES_BY_HOST: Record<string, string> = {
   'okinus.com': 'Okinus',
 }
 
+/**
+ * The cash-payoff window each provider is generally known to offer.
+ *
+ * Only ever used to PREFILL the Settings field as a placeholder a human has
+ * to accept — never stored on the shop's behalf, and never rendered from
+ * here. These are lease-to-own agreements whose terms change and vary by
+ * program, and this number goes out as a promise in a customer's inbox. The
+ * shop's own contract is the authority; the app's job is to save them typing,
+ * not to make the claim for them.
+ */
+export const SUGGESTED_PAYOFF_DAYS: Record<string, number> = {
+  'Snap Finance': 100,
+  Acima: 90,
+  'Progressive Leasing': 90,
+  Katapult: 90,
+}
+
+/** Nobody's payoff window is a decade, and a stray 0 must not print as "0 days". */
+export function sanitizePayoffDays(value: unknown): number | null {
+  const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value.trim()) : NaN
+  if (!Number.isFinite(n)) return null
+  const days = Math.round(n)
+  if (days < 1 || days > 730) return null
+  return days
+}
+
 /** Providers offered as one-tap starting points in Settings, in rough order of how often auto shops use them. */
 export const COMMON_FINANCING_PROVIDERS = [
   'Snap Finance',
@@ -138,6 +164,7 @@ export function sanitizeFinancingOffers(value: unknown): FinancingOffer[] {
       id: typeof row.id === 'string' && row.id ? row.id : newId(),
       name,
       applicationUrl: url,
+      payoffDays: sanitizePayoffDays(row.payoffDays),
     })
     if (offers.length >= MAX_FINANCING_OFFERS) break
   }
@@ -145,9 +172,19 @@ export function sanitizeFinancingOffers(value: unknown): FinancingOffer[] {
 }
 
 /** Build a storable offer from raw form input, or null if either field is unusable. */
-export function makeFinancingOffer(name: string, applicationUrl: string, id?: string): FinancingOffer | null {
+export function makeFinancingOffer(
+  name: string,
+  applicationUrl: string,
+  id?: string,
+  payoffDays?: unknown,
+): FinancingOffer | null {
   const cleanName = name.trim()
   const cleanUrl = normalizeFinancingUrl(applicationUrl)
   if (!cleanName || !cleanUrl) return null
-  return { id: id ?? newId(), name: cleanName, applicationUrl: cleanUrl }
+  return {
+    id: id ?? newId(),
+    name: cleanName,
+    applicationUrl: cleanUrl,
+    payoffDays: sanitizePayoffDays(payoffDays),
+  }
 }

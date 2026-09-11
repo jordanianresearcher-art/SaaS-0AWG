@@ -295,7 +295,7 @@ describe('emailLayout mirror', () => {
       { name: 'Full vehicle', typeLabel: 'Ceramic', coverage: 'All windows at 20%', extras: 'sunroof 5%', totalCents: 49900 },
     ],
     moreTints: 1,
-    financing: [{ name: 'Snap Finance', url: 'https://snapfinance.com/apply' }],
+    financing: [{ name: 'Snap Finance', url: 'https://snapfinance.com/apply', payoffDays: 100 }],
     expiration: 'This quote is good through Oct 1, 2026.',
     showFullSummary: true,
   }
@@ -313,6 +313,20 @@ describe('emailLayout mirror', () => {
     ['an even number of items', { ...base, items: base.items.slice(0, 2) }],
     ['nothing optional at all', { ...base, addons: [], tints: [], moreTints: 0, financing: [], fullTotalCents: null, expiration: '' }],
     ['a blank shop colour', { ...base, shopColor: '' }],
+    [
+      'financing with no payoff window entered',
+      { ...base, financing: [{ name: 'Acima', url: 'https://acima.com/apply', payoffDays: null }] },
+    ],
+    [
+      'two providers with different payoff windows',
+      {
+        ...base,
+        financing: [
+          { name: 'Snap Finance', url: 'https://snapfinance.com/apply', payoffDays: 100 },
+          { name: 'Acima', url: 'https://acima.com/apply', payoffDays: 90 },
+        ],
+      },
+    ],
     [
       'text that must be escaped',
       { ...base, shopName: '<script>alert(1)</script>', firstName: 'A&B', packageName: '"Loud"' },

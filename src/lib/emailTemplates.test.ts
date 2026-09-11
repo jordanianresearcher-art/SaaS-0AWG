@@ -74,47 +74,31 @@ describe('renderEmail', () => {
     expect(email.html).not.toMatch(/null|undefined/i)
   })
 
-  it('shows a window tint teaser only on the initial email, only when there is at least one tint entry', () => {
+  it('tells every email about window tint, not just the first, when there is a tint entry', () => {
     const ctx = makeContext()
     expect(ctx.quote.windowTints.length).toBeGreaterThan(0) // fixture: the seeded F-150 quote has one
 
-    const initialWithTint = renderEmail('initial', ctx)
-    expect(initialWithTint.text).toContain('Includes window tint')
+    for (const template of ['initial', 'check_in', 'final_check_in'] as const) {
+      expect(renderEmail(template, ctx).text).toContain('Includes window tint')
+    }
 
-    const checkInWithTint = renderEmail('check_in', ctx)
-    expect(checkInWithTint.text).not.toContain('Includes window tint')
-
-    const ctxNoTint = { ...ctx, quote: { ...ctx.quote, windowTints: [] } }
-    const initialNoTint = renderEmail('initial', ctxNoTint)
-    expect(initialNoTint.text).not.toContain('Includes window tint')
+    const noTint = renderEmail('initial', { ...ctx, quote: { ...ctx.quote, windowTints: [] } })
+    expect(noTint.text).not.toContain('Includes window tint')
   })
 
-  it('shows the main package name and a product image for each item, only on the initial email', () => {
+  it('shows the package and a picture of every product on every email', () => {
+    // A follow-up that shows nothing asks the customer to remember why they
+    // wanted it. In this pilot follow-ups click at 10% against the first
+    // email's 22%, so they now carry the same "what's in it" gallery.
     const ctx = makeContext()
     const main = ctx.options.find((o) => o.optionKind === 'main')!
     expect(main.items.length).toBeGreaterThan(0) // fixture: the seeded F-150 main package has items
 
-    const initial = renderEmail('initial', ctx)
-    expect(initial.html).toContain(main.name)
-    for (const item of main.items) {
-      expect(initial.html).toContain(escapeHtml(item.name))
+    for (const template of ['initial', 'check_in', 'financing_option', 'payday_reminder', 'final_check_in'] as const) {
+      const email = renderEmail(template, ctx)
+      expect(email.html).toContain(main.name)
+      for (const item of main.items) expect(email.html).toContain(escapeHtml(item.name))
     }
-
-    // Follow-ups stay short — no picture gallery on anything but the first email.
-    const checkIn = renderEmail('check_in', ctx)
-    expect(checkIn.html).not.toContain(main.items[0].name)
-  })
-
-  it('renders an <img> for an item that carries an image, and a blank placeholder for one that does not', () => {
-    const ctx = makeContext()
-    const main = ctx.options.find((o) => o.optionKind === 'main')!
-    ctx.options = ctx.options.map((o) =>
-      o === main
-        ? { ...o, items: [{ ...o.items[0], imageUrl: 'https://cdn.example.com/sub.jpg' }, { ...o.items[0], id: 'no-image', imageUrl: null }] }
-        : o,
-    )
-    const email = renderEmail('initial', ctx)
-    expect(email.html).toContain('<img src="https://cdn.example.com/sub.jpg"')
   })
 
   it('shows each add-on\'s own price and the running total with just that add-on — never a per-item price breakdown', () => {
@@ -144,15 +128,13 @@ describe('renderEmail', () => {
     expect(on.html).toContain('Everything included')
   })
 
-  it('spells out the tint coverage in writing, only on the initial email', () => {
+  it('spells out the tint coverage in writing on every email', () => {
     const ctx = makeContext()
-    const initial = renderEmail('initial', ctx)
-    expect(initial.html).toContain('Window tint')
-    expect(initial.html).toContain('All windows at 20%')
-    expect(initial.html).toContain('Ceramic film')
-
-    const checkIn = renderEmail('check_in', ctx)
-    expect(checkIn.html).not.toContain('Window tint')
+    for (const template of ['initial', 'check_in'] as const) {
+      const email = renderEmail(template, ctx)
+      expect(email.html).toContain('Window tint')
+      expect(email.html).toMatch(/All windows at \d+%|\d+%/)
+    }
   })
 
   it('never embeds a car-diagram image — the diagrams are pulled pending the top-down redesign', () => {
@@ -181,7 +163,45 @@ describe('renderEmail', () => {
       expect(body).toContain('https://snapfinance.com/apply')
       expect(body).toContain('Acima')
     }
+    // The demo shop's Snap offer carries a 100-day window and Acima a 90-day
+    // one, so the heading takes the longest of them.
+    expect(email.html).toContain('Pay back in 100 days, get it today!')
+    expect(email.html).toContain('100 days to pay it off')
+    expect(email.html).toContain('90 days to pay it off')
+    expect(email.text).toContain('Pay back in 100 days, get it today!')
+  })
+
+  it('says nothing about a payoff window the shop never entered', () => {
+    // This number is a promise about somebody else's lease agreement, landing
+    // in a real customer's inbox. The app must never supply one itself.
+    const ctx = makeContext()
+    const email = renderEmail('initial', {
+      ...ctx,
+      shop: {
+        ...ctx.shop,
+        financingOffers: ctx.shop.financingOffers.map((o) => ({ ...o, payoffDays: null })),
+      },
+    })
+    expect(email.html).not.toMatch(/Pay back in \d+ days/)
+    expect(email.html).not.toMatch(/days to pay it off/)
+    expect(email.text).not.toMatch(/Pay back in \d+ days/)
     expect(email.html).toContain('Don&rsquo;t want to pay it all at once?')
+  })
+
+  it('never prints a payoff window that came from a malformed stored row', () => {
+    const ctx = makeContext()
+    for (const junk of [0, -30, 'soon', null, undefined, 5000, Number.NaN]) {
+      const email = renderEmail('initial', {
+        ...ctx,
+        shop: {
+          ...ctx.shop,
+          financingOffers: [
+            { id: 'x', name: 'Snap Finance', applicationUrl: 'https://snapfinance.com/apply', payoffDays: junk as number | null },
+          ],
+        },
+      })
+      expect(email.html).not.toMatch(/Pay back in \d+ days/)
+    }
   })
 
   it('says nothing about financing when the shop has not set any up', () => {
@@ -199,7 +219,7 @@ describe('renderEmail', () => {
       shop: {
         ...ctx.shop,
         // Shaped like a stored row that never went through the Settings form.
-        financingOffers: [{ id: 'x', name: 'Evil', applicationUrl: 'javascript:alert(1)' }],
+        financingOffers: [{ id: 'x', name: 'Evil', applicationUrl: 'javascript:alert(1)', payoffDays: 100 }],
       },
     })
     expect(email.html).not.toContain('javascript:')

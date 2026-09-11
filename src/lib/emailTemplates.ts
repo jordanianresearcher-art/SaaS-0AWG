@@ -133,7 +133,16 @@ function tintViews(windowTints: Quote['windowTints']): EmailView['tints'] {
 function financingText(rawOffers: FinancingOffer[]): string | null {
   const offers = sanitizeFinancingOffers(rawOffers)
   if (offers.length === 0) return null
-  return ['', 'Need to split this up? We offer financing:', ...offers.map((o) => `- ${o.name}: ${o.applicationUrl}`)].join('\n')
+  const windows = offers.map((o) => o.payoffDays).filter((d): d is number => typeof d === 'number' && d > 0)
+  const longest = windows.length > 0 ? Math.max(...windows) : null
+  const heading = longest
+    ? `Pay back in ${longest} days, get it today! Clear the balance within ${longest} days and there's no interest.`
+    : 'Need to split this up? We offer financing:'
+  return [
+    '',
+    heading,
+    ...offers.map((o) => `- ${o.name}${o.payoffDays ? ` (${o.payoffDays} days to pay it off)` : ''}: ${o.applicationUrl}`),
+  ].join('\n')
 }
 
 export function renderEmail(templateType: TemplateType, ctx: EmailContext): RenderedEmail {
@@ -157,10 +166,11 @@ export function renderEmail(templateType: TemplateType, ctx: EmailContext): Rend
   const vehicle = formatVehicle(customer)
   const valueLine =
     value > 0 ? (vehicle ? `Quoted from ${formatCurrency(value)} for your ${vehicle}.` : `Quoted from ${formatCurrency(value)}.`) : ''
-  // The full "what's included" picture gallery + tint diagrams only ride
-  // along on the very first email — follow-ups stay short reminders that
-  // point back to the quote page, same as the old text-only tint teaser did.
-  const showFullSummary = templateType === 'initial' && ctx.options.length > 0
+  // Every email shows what the customer is actually buying, not just the
+  // first. Follow-ups used to be a paragraph and a link, and in this pilot
+  // they click at 10% against the first email's 22% — a reminder that shows
+  // nothing is asking someone to remember why they wanted it.
+  const showFullSummary = ctx.options.length > 0
   const expiration = quote.expirationDate
     ? `This quote is good through ${formatDate(quote.expirationDate)}.`
     : ''
@@ -226,7 +236,11 @@ export function renderEmail(templateType: TemplateType, ctx: EmailContext): Rend
     // Sanitized here rather than trusting the caller: not every write path
     // runs through the Settings form, and this is the last step before a URL
     // reaches a real inbox.
-    financing: sanitizeFinancingOffers(shop.financingOffers).map((o) => ({ name: o.name, url: o.applicationUrl })),
+    financing: sanitizeFinancingOffers(shop.financingOffers).map((o) => ({
+      name: o.name,
+      url: o.applicationUrl,
+      payoffDays: o.payoffDays,
+    })),
     expiration,
     showFullSummary,
   }

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   MAX_FINANCING_OFFERS,
+  sanitizePayoffDays,
   guessProviderName,
   makeFinancingOffer,
   normalizeFinancingUrl,
@@ -87,7 +88,7 @@ describe('sanitizeFinancingOffers', () => {
 
   it('keeps well-formed offers and normalizes their URLs', () => {
     const offers = sanitizeFinancingOffers([{ id: 'a', name: 'Snap Finance', applicationUrl: 'snapfinance.com/apply' }])
-    expect(offers).toEqual([{ id: 'a', name: 'Snap Finance', applicationUrl: 'https://snapfinance.com/apply' }])
+    expect(offers).toEqual([{ id: 'a', name: 'Snap Finance', applicationUrl: 'https://snapfinance.com/apply', payoffDays: null }])
   })
 
   it('drops malformed rows instead of throwing, so one bad row cannot blank the email block', () => {
@@ -99,7 +100,7 @@ describe('sanitizeFinancingOffers', () => {
       'nope',
       { id: 'ok', name: 'Acima', applicationUrl: 'https://acima.com/apply' },
     ])
-    expect(offers).toEqual([{ id: 'ok', name: 'Acima', applicationUrl: 'https://acima.com/apply' }])
+    expect(offers).toEqual([{ id: 'ok', name: 'Acima', applicationUrl: 'https://acima.com/apply', payoffDays: null }])
   })
 
   it('backfills a missing id', () => {
@@ -121,12 +122,49 @@ describe('sanitizeFinancingOffers', () => {
 describe('makeFinancingOffer', () => {
   it('builds an offer from raw form input', () => {
     const offer = makeFinancingOffer('  Snap Finance ', 'snapfinance.com/apply', 'keep-me')
-    expect(offer).toEqual({ id: 'keep-me', name: 'Snap Finance', applicationUrl: 'https://snapfinance.com/apply' })
+    expect(offer).toEqual({ id: 'keep-me', name: 'Snap Finance', applicationUrl: 'https://snapfinance.com/apply', payoffDays: null })
   })
 
   it('returns null when either field is unusable', () => {
     expect(makeFinancingOffer('', 'https://acima.com')).toBeNull()
     expect(makeFinancingOffer('Acima', '')).toBeNull()
     expect(makeFinancingOffer('Acima', 'javascript:alert(1)')).toBeNull()
+  })
+})
+
+describe('sanitizePayoffDays', () => {
+  // This number leaves the building as "Pay back in 100 days" in a real
+  // customer's inbox, so every junk value has to become null rather than
+  // something that prints.
+  it('keeps a real window', () => {
+    expect(sanitizePayoffDays(100)).toBe(100)
+    expect(sanitizePayoffDays(90)).toBe(90)
+    expect(sanitizePayoffDays('100')).toBe(100)
+    expect(sanitizePayoffDays(' 90 ')).toBe(90)
+    expect(sanitizePayoffDays(1)).toBe(1)
+    expect(sanitizePayoffDays(730)).toBe(730)
+  })
+
+  it('rounds a fractional window rather than printing "90.5 days"', () => {
+    expect(sanitizePayoffDays(90.4)).toBe(90)
+    expect(sanitizePayoffDays(90.6)).toBe(91)
+  })
+
+  it('refuses zero, which would print as "0 days to pay it off"', () => {
+    expect(sanitizePayoffDays(0)).toBeNull()
+    expect(sanitizePayoffDays('0')).toBeNull()
+    expect(sanitizePayoffDays(0.4)).toBeNull()
+  })
+
+  it('refuses negatives and absurd windows', () => {
+    expect(sanitizePayoffDays(-30)).toBeNull()
+    expect(sanitizePayoffDays(731)).toBeNull()
+    expect(sanitizePayoffDays(100000)).toBeNull()
+  })
+
+  it('refuses anything that is not a number at all', () => {
+    for (const junk of ['soon', '', null, undefined, {}, [], true, Number.NaN, Infinity]) {
+      expect(sanitizePayoffDays(junk)).toBeNull()
+    }
   })
 })

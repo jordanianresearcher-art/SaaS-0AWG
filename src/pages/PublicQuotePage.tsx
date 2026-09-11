@@ -488,10 +488,26 @@ export default function PublicQuotePage() {
  */
 function FinancingLinks({ offers, color }: { offers: PublicQuote['financingOffers']; color: string }) {
   if (offers.length === 0) return null
+  // The longest window any of this shop's providers actually gives, from what
+  // the shop entered against that provider. Nothing is claimed when nobody
+  // entered one — the page must say the same thing the email says.
+  const windows = offers.map((o) => o.payoffDays).filter((d): d is number => typeof d === 'number' && d > 0)
+  const longest = windows.length > 0 ? Math.max(...windows) : null
   return (
     <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-      <p className="text-base font-bold text-ink">Apply for financing</p>
-      <p className="mt-1 text-sm text-zinc-600">Most decisions come back in a few minutes.</p>
+      {longest ? (
+        <>
+          <p className="text-lg font-black text-ink">Pay back in {longest} days, get it today!</p>
+          <p className="mt-1 text-sm text-zinc-600">
+            Take it home now and clear the balance within {longest} days — no interest, nothing added on top.
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="text-base font-bold text-ink">Apply for financing</p>
+          <p className="mt-1 text-sm text-zinc-600">Most decisions come back in a few minutes.</p>
+        </>
+      )}
       <div className="mt-3 space-y-2">
         {offers.map((offer) => (
           <a
@@ -499,13 +515,23 @@ function FinancingLinks({ offers, color }: { offers: PublicQuote['financingOffer
             href={offer.applicationUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex min-h-14 w-full items-center justify-center gap-2 rounded-xl border-2 bg-white text-base font-bold"
+            className="flex min-h-14 w-full flex-col items-center justify-center gap-0.5 rounded-xl border-2 bg-white text-base font-bold"
             style={{ borderColor: color, color }}
           >
-            <CreditCard className="h-5 w-5" aria-hidden="true" /> Apply with {offer.name}
+            <span className="flex items-center gap-2">
+              <CreditCard className="h-5 w-5" aria-hidden="true" /> Apply with {offer.name}
+            </span>
+            {offer.payoffDays ? (
+              <span className="text-xs font-semibold text-zinc-500">{offer.payoffDays} days to pay it off</span>
+            ) : null}
           </a>
         ))}
       </div>
+      {longest ? (
+        <p className="mt-3 text-xs text-zinc-500">
+          Terms come from the finance company, not from the shop — their agreement is the one that counts.
+        </p>
+      ) : null}
     </div>
   )
 }

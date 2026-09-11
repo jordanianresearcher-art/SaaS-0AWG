@@ -17,6 +17,7 @@ import {
   MAX_FINANCING_OFFERS,
   guessProviderName,
   makeFinancingOffer,
+  SUGGESTED_PAYOFF_DAYS,
   parseScannedFinancingCode,
 } from '../../lib/financing'
 import { PRODUCT_CATEGORIES, PRODUCT_CATEGORY_INFO } from '../../lib/audioConfigs'
@@ -742,6 +743,7 @@ function FinancingOfferForm({
 }) {
   const [name, setName] = useState(offer?.name ?? '')
   const [url, setUrl] = useState(offer?.applicationUrl ?? '')
+  const [days, setDays] = useState(offer?.payoffDays != null ? String(offer.payoffDays) : '')
   const [scanning, setScanning] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -761,7 +763,7 @@ function FinancingOfferForm({
   }
 
   const handleSubmit = () => {
-    const built = makeFinancingOffer(name, url, offer?.id)
+    const built = makeFinancingOffer(name, url, offer?.id, days.trim() === '' ? null : days)
     if (!built) {
       setError(
         !name.trim() ? 'Give this a name customers will recognize.' : 'Enter a valid application link (https://…).',
@@ -771,6 +773,8 @@ function FinancingOfferForm({
     setError(null)
     onSubmit(built)
   }
+
+  const suggestedDays = SUGGESTED_PAYOFF_DAYS[name.trim()] ?? null
 
   // The scanner replaces the form rather than opening a second modal on top of
   // this one — nested dialogs fight over focus and the Escape key.
@@ -821,6 +825,28 @@ function FinancingOfferForm({
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           placeholder="snapfinance.com/apply/your-shop"
+        />
+      </Field>
+
+      {/* Suggested as a placeholder, never as a stored value. This number goes
+          out as "pay back in 100 days" in a real customer's inbox, and it is a
+          promise about the finance company's agreement, not ours — so a person
+          has to type it, even when we know the usual answer. */}
+      <Field
+        label="Days to pay it off"
+        htmlFor="fin-days"
+        hint={
+          suggestedDays
+            ? `${name.trim()} usually gives ${suggestedDays} days. Check your agreement, then type it in — we won't fill it for you.`
+            : 'Optional. If your agreement gives customers a window to clear the balance at the cash price, put it here and the emails will say so.'
+        }
+      >
+        <Input
+          id="fin-days"
+          inputMode="numeric"
+          value={days}
+          onChange={(e) => setDays(e.target.value)}
+          placeholder={suggestedDays ? String(suggestedDays) : '100'}
         />
       </Field>
 

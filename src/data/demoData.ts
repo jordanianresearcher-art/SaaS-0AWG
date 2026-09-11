@@ -487,8 +487,8 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
     defaultPaymentMethod: 'cashapp',
     defaultPaymentHandle: '$BigTexAudio',
     financingOffers: [
-      { id: 'demo-financing-snap', name: 'Snap Finance', applicationUrl: 'https://snapfinance.com/apply' },
-      { id: 'demo-financing-acima', name: 'Acima', applicationUrl: 'https://acima.com/apply' },
+      { id: 'demo-financing-snap', name: 'Snap Finance', applicationUrl: 'https://snapfinance.com/apply', payoffDays: 100 },
+      { id: 'demo-financing-acima', name: 'Acima', applicationUrl: 'https://acima.com/apply', payoffDays: 90 },
     ],
     quoteExpirationDays: 30,
     followUpScheduleDays: [2, 3, 5],

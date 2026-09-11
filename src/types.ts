@@ -226,6 +226,16 @@ export interface FinancingOffer {
   id: string
   name: string
   applicationUrl: string
+  /**
+   * Days the customer has to clear the balance at the cash price, per this
+   * provider's own agreement. Snap's is 100, Acima's and Progressive's are 90.
+   *
+   * Null means the shop has not entered one, and the emails then say nothing
+   * about a payoff window. That is the point: the number goes in a real
+   * customer's inbox as a promise about someone else's contract, so it is
+   * entered per provider by the shop rather than assumed by the app.
+   */
+  payoffDays: number | null
 }
 
 export interface Shop {

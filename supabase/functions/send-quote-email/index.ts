@@ -182,6 +182,8 @@ function tintCoverageLine(windows: EmailTintWindow[]): string {
 interface EmailFinancingOffer {
   name: string
   applicationUrl: string
+  /** Days to clear the balance at the cash price, per the provider's own agreement. Null when the shop never entered one. */
+  payoffDays: number | null
 }
 
 interface EmailContext {
@@ -291,7 +293,7 @@ interface EmailView {
   fullTotalCents: number | null
   tints: { name: string; typeLabel: string; coverage: string; extras: string; totalCents: number }[]
   moreTints: number
-  financing: { name: string; url: string }[]
+  financing: { name: string; url: string; payoffDays: number | null }[]
   expiration: string
   /** The gallery, add-ons and tint detail ride on the first email only. */
   showFullSummary: boolean
@@ -519,20 +521,41 @@ function tintHtml(v: EmailView): string {
  */
 function financingHtml(v: EmailView): string {
   if (v.financing.length === 0) return ''
+  // The longest window any of this shop's providers actually offers, taken
+  // from what the shop entered per provider. Null everywhere means nobody has
+  // entered one, and then the block says nothing about a payoff window at
+  // all — the alternative is the app inventing a term in someone else's
+  // lease agreement, in a real customer's inbox.
+  const windows = v.financing.map((o) => o.payoffDays).filter((d): d is number => typeof d === 'number' && d > 0)
+  const longest = windows.length > 0 ? Math.max(...windows) : null
+
   const rows = v.financing
     .map(
       (o) =>
         `<tr><td align="center" style="padding:0 0 8px;">` +
-        `<a href="${esc(o.url)}" style="display:block;padding:14px 18px;background:#ffffff;border:2px solid ${esc(v.shopColor)};border-radius:11px;color:${esc(v.shopColor)};text-decoration:none;font-weight:700;font-size:15px;">Apply with ${esc(o.name)}</a>` +
-        `</td></tr>`,
+        `<a href="${esc(o.url)}" style="display:block;padding:14px 18px;background:#ffffff;border:2px solid ${esc(v.shopColor)};border-radius:11px;color:${esc(v.shopColor)};text-decoration:none;font-weight:700;font-size:15px;">` +
+        `Apply with ${esc(o.name)}` +
+        (o.payoffDays
+          ? `<span style="display:block;margin-top:2px;font-size:12px;font-weight:600;color:#71717a;">${o.payoffDays} days to pay it off</span>`
+          : '') +
+        `</a></td></tr>`,
     )
     .join('')
+
+  const heading = longest
+    ? `<p style="margin:0 0 4px;font-size:19px;line-height:1.3;font-weight:800;color:#0b0b0c;">Pay back in ${longest} days, get it today!</p>` +
+      `<p style="margin:0 0 14px;font-size:14px;line-height:1.5;color:#71717a;">Take it home now and clear the balance within ${longest} days &mdash; no interest, nothing added on top.</p>`
+    : `<p style="margin:0 0 4px;font-size:17px;font-weight:800;color:#0b0b0c;">Don&rsquo;t want to pay it all at once?</p>` +
+      `<p style="margin:0 0 14px;font-size:14px;color:#71717a;">Applying takes a few minutes and most decisions come back right away.</p>`
+
   return row(
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;background:#f4f4f5;border-radius:12px;">` +
       `<tr><td style="padding:18px;">` +
-      `<p style="margin:0 0 4px;font-size:17px;font-weight:800;color:#0b0b0c;">Don&rsquo;t want to pay it all at once?</p>` +
-      `<p style="margin:0 0 14px;font-size:14px;color:#71717a;">Applying takes a few minutes and most decisions come back right away.</p>` +
+      heading +
       `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;">${rows}</table>` +
+      (longest
+        ? `<p style="margin:10px 0 0;font-size:12px;line-height:1.5;color:#a1a1aa;">Terms come from the finance company, not from us &mdash; their agreement is the one that counts.</p>`
+        : '') +
       `</td></tr></table>`,
     '16px 24px 8px',
     '#ffffff',
@@ -693,7 +716,12 @@ function sanitizeFinancingOffers(value: unknown): EmailFinancingOffer[] {
     }
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') continue
     if (!parsed.hostname || !parsed.hostname.includes('.')) continue
-    offers.push({ name, applicationUrl: parsed.toString() })
+    // Mirror of sanitizePayoffDays in src/lib/financing.ts. A stray 0 must
+    // not print as "0 days", and nobody's window is a decade.
+    const rawDays = typeof row.payoffDays === 'number' ? row.payoffDays : Number.NaN
+    const days = Number.isFinite(rawDays) ? Math.round(rawDays) : Number.NaN
+    const payoffDays = Number.isFinite(days) && days >= 1 && days <= 730 ? days : null
+    offers.push({ name, applicationUrl: parsed.toString(), payoffDays })
     if (offers.length >= 6) break
   }
   return offers
@@ -702,7 +730,16 @@ function sanitizeFinancingOffers(value: unknown): EmailFinancingOffer[] {
 /** Mirror of financingText in src/lib/emailTemplates.ts. */
 function financingText(offers: EmailFinancingOffer[]): string {
   if (offers.length === 0) return ''
-  return ['', 'Need to split this up? We offer financing:', ...offers.map((o) => `- ${o.name}: ${o.applicationUrl}`)].join('\n')
+  const windows = offers.map((o) => o.payoffDays).filter((d): d is number => typeof d === 'number' && d > 0)
+  const longest = windows.length > 0 ? Math.max(...windows) : null
+  const heading = longest
+    ? `Pay back in ${longest} days, get it today! Clear the balance within ${longest} days and there's no interest.`
+    : 'Need to split this up? We offer financing:'
+  return [
+    '',
+    heading,
+    ...offers.map((o) => `- ${o.name}${o.payoffDays ? ` (${o.payoffDays} days to pay it off)` : ''}: ${o.applicationUrl}`),
+  ].join('\n')
 }
 
 /**
@@ -859,7 +896,11 @@ function renderEmail(template: TemplateType, c: EmailContext): { subject: string
     fullTotalCents: showFullSummary && c.showFullAddonTotal ? fullTotalCents(c.options) : null,
     tints: showFullSummary ? tintViews(c.windowTints) : [],
     moreTints: showFullSummary ? Math.max(0, c.windowTints.length - 2) : 0,
-    financing: sanitizeFinancingOffers(c.financingOffers).map((o) => ({ name: o.name, url: o.applicationUrl })),
+    financing: sanitizeFinancingOffers(c.financingOffers).map((o) => ({
+      name: o.name,
+      url: o.applicationUrl,
+      payoffDays: o.payoffDays,
+    })),
     expiration,
     showFullSummary,
   }
