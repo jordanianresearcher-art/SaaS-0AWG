@@ -24,6 +24,8 @@ export interface PublicQuoteApi {
   thread(): Promise<QuoteMessage[]>
   /** The customer writes to the shop. Rate-limited server-side. */
   postMessage(body: string): Promise<QuoteMessage>
+  /** The customer tapped a financing application. Fire-and-forget; never throws. */
+  recordFinancingClick(offerName: string): Promise<void>
 }
 
 const DEMO_DB_KEY = '0gauge-demo-db'
@@ -48,6 +50,9 @@ export async function resolvePublicQuoteApi(token: string): Promise<PublicQuoteA
         notifyHighIntent: async () => {},
         thread: () => demo.getPublicQuoteThread(token),
         postMessage: (body) => demo.postPublicQuoteMessage(token, body),
+        // Demo mode records it locally — no network, but the demo has to show
+        // the same activity the pitch describes.
+        recordFinancingClick: (offer) => demo.recordFinancingClick(token, offer),
       }
     }
   }
@@ -103,6 +108,13 @@ export async function resolvePublicQuoteApi(token: string): Promise<PublicQuoteA
           console.error('notify-shop-response (message) failed', err)
         }
         return data as QuoteMessage
+      },
+      recordFinancingClick: async (offerName) => {
+        try {
+          await supabase.rpc('record_financing_click', { p_public_token: token, p_offer_name: offerName })
+        } catch (err) {
+          console.error('record_financing_click failed', err)
+        }
       },
     }
   }

@@ -153,7 +153,10 @@ never happens.
 - `0028` → `0028_quote_messages.sql` (the two-way thread on a quote, plus the
   two public-token RPCs the customer reaches it through). One table, two
   functions; no ALTER TYPE. **Applied? No.**
-- `0029`+ → reserved, unassigned. Stripe Connect deposits will take the next
+- `0029` → `0029_financing_click_tracking.sql` (record_financing_click, plus a
+  created_at index for the activity feed). One function, one index; no table
+  and no ALTER TYPE. **Applied? No.**
+- `0030`+ → reserved, unassigned. Stripe Connect deposits will take the next
   number when that work starts.
 - Stream C needs no migration.
 - Never write a migration number you haven't been assigned.

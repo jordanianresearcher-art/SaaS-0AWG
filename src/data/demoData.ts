@@ -54,7 +54,7 @@ export interface DemoDB {
   seedVersion: number
 }
 
-export const DEMO_SEED_VERSION = 18
+export const DEMO_SEED_VERSION = 19
 
 const SHOP_ID = 'demo-shop'
 
@@ -94,7 +94,14 @@ interface QuoteSeed {
     priceCents: number
     items: Array<{ brand: string; model: string; name: string; quantity: number }>
   }>
-  emails: Array<{ templateType: EmailMessage['templateType']; daysAgo: number; status: EmailMessage['status'] }>
+  emails: Array<{
+    templateType: EmailMessage['templateType']
+    daysAgo: number
+    status: EmailMessage['status']
+    /** Days ago the customer loaded the quote from THIS email's link. Omit for an email nobody opened. */
+    openedDaysAgo?: number
+    viewCount?: number
+  }>
   events: Array<{ type: QuoteEvent['eventType']; daysAgo: number; meta?: Record<string, string | number | boolean | null> }>
   responses: Array<{ type: QuoteResponse['responseType']; daysAgo: number; message: string | null; optionIndex?: number }>
 }
@@ -143,7 +150,7 @@ const SEEDS: QuoteSeed[] = [
         ],
       },
     ],
-    emails: [{ templateType: 'initial', daysAgo: 3, status: 'demo_sent' }],
+    emails: [{ templateType: 'initial', daysAgo: 3, status: 'demo_sent', openedDaysAgo: 2, viewCount: 3 }],
     events: [
       { type: 'created', daysAgo: 4 },
       { type: 'email_demo_sent', daysAgo: 3, meta: { templateType: 'initial' } },
@@ -174,13 +181,14 @@ const SEEDS: QuoteSeed[] = [
       },
     ],
     emails: [
-      { templateType: 'initial', daysAgo: 4, status: 'demo_sent' },
+      { templateType: 'initial', daysAgo: 4, status: 'demo_sent', openedDaysAgo: 3 },
     ],
     events: [
       { type: 'created', daysAgo: 6 },
       { type: 'email_demo_sent', daysAgo: 4, meta: { templateType: 'initial' } },
       { type: 'quote_viewed', daysAgo: 3 },
       { type: 'customer_responded', daysAgo: 3, meta: { responseType: 'need_financing' } },
+      { type: 'financing_clicked', daysAgo: 2, meta: { offer: 'Snap Finance' } },
     ],
     responses: [
       { type: 'need_financing', daysAgo: 3, message: 'Can I split this over a few months?', optionIndex: 0 },
@@ -214,8 +222,8 @@ const SEEDS: QuoteSeed[] = [
       },
     ],
     emails: [
-      { templateType: 'initial', daysAgo: 11, status: 'demo_sent' },
-      { templateType: 'check_in', daysAgo: 9, status: 'demo_sent' },
+      { templateType: 'initial', daysAgo: 11, status: 'demo_sent', openedDaysAgo: 10 },
+      { templateType: 'check_in', daysAgo: 9, status: 'demo_sent', openedDaysAgo: 8, viewCount: 2 },
     ],
     events: [
       { type: 'created', daysAgo: 12 },
@@ -314,8 +322,8 @@ const SEEDS: QuoteSeed[] = [
       },
     ],
     emails: [
-      { templateType: 'initial', daysAgo: 8, status: 'demo_sent' },
-      { templateType: 'check_in', daysAgo: 6, status: 'demo_sent' },
+      { templateType: 'initial', daysAgo: 8, status: 'demo_sent', openedDaysAgo: 7 },
+      { templateType: 'check_in', daysAgo: 6, status: 'demo_sent', openedDaysAgo: 5 },
     ],
     events: [
       { type: 'created', daysAgo: 9 },
@@ -420,6 +428,17 @@ const SEEDS: QuoteSeed[] = [
       { type: 'email_demo_sent', daysAgo: 4, meta: { templateType: 'initial' } },
       { type: 'quote_viewed', daysAgo: 4 },
       { type: 'customer_responded', daysAgo: 4, meta: { responseType: 'after_payday' } },
+      // She compared two providers. Two facts, not one — which is exactly the
+      // thing the shop could not see before migration 0029.
+      { type: 'financing_clicked', daysAgo: 3, meta: { offer: 'Snap Finance' } },
+      { type: 'financing_clicked', daysAgo: 3, meta: { offer: 'Acima' } },
+      // The activity-feed side of the conversation seeded below in
+      // quoteMessages. Both repositories log an event for every message, so a
+      // demo with a thread and no events would contradict itself on screen:
+      // the quote shows a conversation while Home says nobody has written.
+      { type: 'customer_message', daysAgo: 2, meta: { preview: 'Get paid on the 1st. Can you still do that price then?' } },
+      { type: 'shop_message', daysAgo: 2, meta: { preview: 'Yes — that price is good through the end of the month.' } },
+      { type: 'customer_message', daysAgo: 1, meta: { preview: 'Perfect. Morning works better for me if you have it.' } },
     ],
     responses: [{ type: 'after_payday', daysAgo: 4, message: 'Get paid on the 1st, hit me up after.' }],
   },
@@ -458,7 +477,7 @@ const SEEDS: QuoteSeed[] = [
       { templateType: 'initial', daysAgo: 15, status: 'demo_sent' },
       { templateType: 'check_in', daysAgo: 12, status: 'demo_sent' },
       { templateType: 'financing_option', daysAgo: 8, status: 'demo_sent' },
-      { templateType: 'final_check_in', daysAgo: 3, status: 'demo_sent' },
+      { templateType: 'final_check_in', daysAgo: 3, status: 'demo_sent', openedDaysAgo: 1 },
     ],
     events: [
       { type: 'created', daysAgo: 16 },
@@ -630,8 +649,12 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
         // shape consistent with sendEmail()'s real (crypto-random) one so
         // demo data and freshly-sent demo emails behave the same way.
         deliveryToken: `demo-delivery-${seed.key}-${i}`,
-        firstViewedAt: null,
-        viewCount: 0,
+        // Click-through, not an email open — the customer loaded their quote
+        // page from this email's own link. No tracking pixel exists anywhere
+        // in this product, and seeding one would make the demo claim a
+        // capability the real thing does not have.
+        firstViewedAt: e.openedDaysAgo === undefined ? null : daysAgo(now, e.openedDaysAgo, 14),
+        viewCount: e.openedDaysAgo === undefined ? 0 : (e.viewCount ?? 1),
       })
     })
   }

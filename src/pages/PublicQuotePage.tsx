@@ -345,7 +345,11 @@ export default function PublicQuotePage() {
                  callback. Showing them here turns the highest-intent response
                  into something the customer can act on immediately, while
                  they're still on the page. */}
-              {submitted === 'need_financing' ? <FinancingLinks offers={quote.financingOffers} color={color} /> : null}
+              {submitted === 'need_financing' ? <FinancingLinks
+                offers={quote.financingOffers}
+                color={color}
+                onApply={(offerName) => void api?.recordFinancingClick(offerName)}
+              /> : null}
             </div>
           ) : (
             <div className="space-y-3">
@@ -519,7 +523,16 @@ export default function PublicQuotePage() {
  * `rel="noopener noreferrer"` because these are outbound links to third-party
  * lenders: the opened page must not get a handle back on this one.
  */
-function FinancingLinks({ offers, color }: { offers: PublicQuote['financingOffers']; color: string }) {
+function FinancingLinks({
+  offers,
+  color,
+  onApply,
+}: {
+  offers: PublicQuote['financingOffers']
+  color: string
+  /** Records the tap. Must not block or delay the navigation it is attached to. */
+  onApply?: (offerName: string) => void
+}) {
   if (offers.length === 0) return null
   // The longest window any of this shop's providers actually gives, from what
   // the shop entered against that provider. Nothing is claimed when nobody
@@ -548,6 +561,10 @@ function FinancingLinks({ offers, color }: { offers: PublicQuote['financingOffer
             href={offer.applicationUrl}
             target="_blank"
             rel="noopener noreferrer"
+            // Fired on the way out, deliberately without awaiting. The link
+            // opens in a new tab either way; a customer heading for a credit
+            // application must never wait on our bookkeeping.
+            onClick={() => onApply?.(offer.name)}
             className="flex min-h-14 w-full flex-col items-center justify-center gap-0.5 rounded-xl border-2 bg-white text-base font-bold"
             style={{ borderColor: color, color }}
           >

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { DemoRepository, DEMO_UNRESOLVED_BARCODE } from './demoRepository'
 import type { NewQuoteInput } from './repository'
+import { buildActivityFeed } from '../lib/activityFeed'
 
 function memoryStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> & { map: Map<string, string> } {
   const map = new Map<string, string>()
@@ -816,5 +817,67 @@ describe('the conversation on a quote', () => {
       await repo.postPublicQuoteMessage(target.quote.publicToken, `message ${i}`)
     }
     await expect(repo.postPublicQuoteMessage(target.quote.publicToken, 'one too many')).rejects.toThrow(/too many/i)
+  })
+})
+
+describe('recording a financing tap', () => {
+  let repo: DemoRepository
+  beforeEach(() => {
+    repo = new DemoRepository(memoryStorage())
+  })
+
+  const token = async () => {
+    const bundles = await repo.listQuoteBundles()
+    return bundles.find((b) => b.quote.publicToken === 'demo-token-mustang-april')!
+  }
+
+  const clicks = async (quoteId: string) => {
+    const b = await repo.getQuoteBundle(quoteId)
+    return b!.events.filter((e) => e.eventType === 'financing_clicked')
+  }
+
+  it('records who they tapped', async () => {
+    const target = await token()
+    const before = (await clicks(target.quote.id)).length
+    await repo.recordFinancingClick(target.quote.publicToken, 'Progressive Leasing')
+    const after = await clicks(target.quote.id)
+    expect(after).toHaveLength(before + 1)
+    expect(after.some((e) => (e.metadata as { offer?: string }).offer === 'Progressive Leasing')).toBe(true)
+  })
+
+  it('does not double-count a customer who taps the same provider twice', async () => {
+    // Someone bouncing back to re-read the quote is one intent. A feed that
+    // says "clicked Snap Finance" nine times buries nine other customers.
+    const target = await token()
+    await repo.recordFinancingClick(target.quote.publicToken, 'Katapult')
+    const after = (await clicks(target.quote.id)).length
+    await repo.recordFinancingClick(target.quote.publicToken, 'Katapult')
+    await repo.recordFinancingClick(target.quote.publicToken, '  Katapult  ')
+    expect(await clicks(target.quote.id)).toHaveLength(after)
+  })
+
+  it('counts two different providers as two facts', async () => {
+    const target = await token()
+    const before = (await clicks(target.quote.id)).length
+    await repo.recordFinancingClick(target.quote.publicToken, 'Katapult')
+    await repo.recordFinancingClick(target.quote.publicToken, 'Affirm')
+    expect(await clicks(target.quote.id)).toHaveLength(before + 2)
+  })
+
+  it('stays silent on an unknown token rather than throwing at a customer', async () => {
+    await expect(repo.recordFinancingClick('not-a-real-token', 'Snap Finance')).resolves.toBeUndefined()
+  })
+
+  it('records the intent even with no provider name', async () => {
+    const target = await token()
+    await repo.recordFinancingClick(target.quote.publicToken, '   ')
+    expect((await clicks(target.quote.id)).some((e) => (e.metadata as { offer?: string }).offer === 'Financing')).toBe(true)
+  })
+
+  it('shows up in the activity feed, naming the provider', async () => {
+    const target = await token()
+    await repo.recordFinancingClick(target.quote.publicToken, 'Progressive Leasing')
+    const feed = buildActivityFeed(await repo.listQuoteBundles(), { limit: 100 })
+    expect(feed.some((i) => i.kind === 'financing_clicked' && i.detail === 'Progressive Leasing')).toBe(true)
   })
 })

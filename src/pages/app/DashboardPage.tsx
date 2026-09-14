@@ -12,7 +12,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { isSameDay, subDays } from 'date-fns'
-import { Plus, ArrowRight, Award, CalendarDays, BellRing, MessageSquare, Printer } from 'lucide-react'
+import { Plus, ArrowRight, Award, CalendarDays, BellRing, MessageSquare, Printer, Eye, CreditCard, Trophy } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { Card, Badge, Button, EmptyState, LinkButton, LoadingBlock, PageHeader, SectionHeader } from '../../components/ui'
 import { RecoveryScoreGauge } from '../../components/RecoveryScoreGauge'
@@ -29,6 +29,7 @@ import {
 import { formatCurrency, customerDisplayName, formatVehicle, formatDateTime, formatTime } from '../../lib/format'
 import { STATUS_CONFIG, RESPONSE_CONFIG } from '../../lib/status'
 import { followUpBucket } from '../../lib/followUp'
+import { buildActivityFeed, countActivity, type ActivityKind } from '../../lib/activityFeed'
 import { computeInventorySummary } from '../../lib/inventory'
 import type { Appointment, CatalogItem, QuoteBundle } from '../../types'
 
@@ -62,6 +63,115 @@ function Figure({
       <p className={`text-3xl font-black ${accent ? 'text-green-700' : 'text-ink'}`}>{value}</p>
       {note ? <p className="text-xs text-zinc-500">{note}</p> : null}
     </div>
+  )
+}
+
+/** The words a shop owner reads for each kind of activity. */
+const ACTIVITY_CONFIG: Record<
+  ActivityKind,
+  { icon: typeof CalendarDays; label: (detail: string | null) => string; tone: string }
+> = {
+  // "Opened" here means the customer loaded their quote page from an emailed
+  // link. It is click-through, not an email open — this app has no tracking
+  // pixel, and the difference is the sort of thing a prospect will ask about.
+  opened: { icon: Eye, label: () => 'opened their quote', tone: 'bg-zinc-100 text-zinc-600' },
+  financing_clicked: {
+    icon: CreditCard,
+    label: (detail) => (detail ? `started a financing application with ${detail}` : 'started a financing application'),
+    tone: 'bg-green-100 text-green-800',
+  },
+  responded: { icon: MessageSquare, label: () => 'answered their quote', tone: 'bg-brand-tint text-brand' },
+  message: {
+    icon: MessageSquare,
+    label: (detail) => (detail ? `wrote: “${detail}”` : 'sent you a message'),
+    tone: 'bg-brand-tint text-brand',
+  },
+  won: { icon: Trophy, label: () => 'job marked won', tone: 'bg-green-100 text-green-800' },
+  booked: { icon: CalendarDays, label: () => 'booked an appointment', tone: 'bg-amber-100 text-amber-800' },
+}
+
+const ACTIVITY_FILTERS: { key: ActivityKind | 'all'; label: string }[] = [
+  { key: 'all', label: 'Everything' },
+  { key: 'opened', label: 'Opened' },
+  { key: 'financing_clicked', label: 'Financing' },
+  { key: 'message', label: 'Messages' },
+]
+
+/**
+ * What has actually been happening, newest first.
+ *
+ * The shop asked for this after reporting that customers were opening quotes
+ * and starting on finance with nothing to show for it. Half of that was true —
+ * financing clicks were never recorded at all, which migration 0029 fixes —
+ * and half was this screen: every fact was already in the app, one quote at a
+ * time, which is the same as not having it.
+ *
+ * Every row names a person and links to their quote, because the only useful
+ * response to "someone started a finance application" is knowing who to call.
+ */
+function RecentActivity({ bundles, days }: { bundles: QuoteBundle[]; days: number }) {
+  const [filter, setFilter] = useState<ActivityKind | 'all'>('all')
+  const counts = useMemo(() => countActivity(bundles, { sinceDays: days }), [bundles, days])
+  const items = useMemo(
+    () => buildActivityFeed(bundles, { sinceDays: days, limit: 25, kinds: filter === 'all' ? undefined : [filter] }),
+    [bundles, days, filter],
+  )
+
+  return (
+    <Card>
+      <SectionHeader title="What's been happening" />
+      <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="Filter activity">
+        {ACTIVITY_FILTERS.map((f) => {
+          const n = f.key === 'all' ? null : counts[f.key]
+          return (
+            <button
+              key={f.key}
+              type="button"
+              aria-pressed={filter === f.key}
+              onClick={() => setFilter(f.key)}
+              className={`min-h-10 rounded-xl border-2 px-3 text-sm font-bold transition-colors ${
+                filter === f.key ? 'border-brand bg-brand-tint text-brand' : 'border-zinc-200 text-zinc-600'
+              }`}
+            >
+              {f.label}
+              {n !== null ? <span className="ml-1.5 font-black">{n}</span> : null}
+            </button>
+          )
+        })}
+      </div>
+
+      {items.length === 0 ? (
+        <p className="mt-4 text-base text-zinc-500">
+          Nothing here yet for the last {days} days. Customer opens, replies and financing taps land here as they happen.
+        </p>
+      ) : (
+        <ul className="mt-3 divide-y divide-zinc-100">
+          {items.map((item) => {
+            const config = ACTIVITY_CONFIG[item.kind]
+            const Icon = config.icon
+            return (
+              <li key={item.id}>
+                <Link to={`/app/quotes/${item.quoteId}`} className="flex items-start gap-3 py-3 hover:bg-zinc-50">
+                  <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${config.tone}`}>
+                    <Icon className="h-4.5 w-4.5" aria-hidden="true" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-base leading-snug text-charcoal">
+                      <strong className="font-bold text-ink">{item.customerName}</strong> {config.label(item.detail)}
+                    </span>
+                    <span className="block text-sm text-zinc-500">
+                      {formatDateTime(item.at)}
+                      {item.vehicle ? ` · ${item.vehicle}` : ''}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-base font-black text-ink">{formatCurrency(item.quoteValueCents)}</span>
+                </Link>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </Card>
   )
 }
 
@@ -296,10 +406,6 @@ export default function DashboardPage() {
   if (loading && bundles.length === 0) return <LoadingBlock label="Loading your shop…" />
   if (loadError) return <EmptyState title="Could not load" message={loadError} />
 
-  const recentActivity = bundles
-    .flatMap((b) => b.events.map((e) => ({ bundle: b, event: e })))
-    .sort((a, b) => b.event.createdAt.localeCompare(a.event.createdAt))
-    .slice(0, 8)
   const funnel = statusFunnel(bundles).filter((f) => f.count > 0)
   const windowNote = `Last ${days} days`
 
@@ -396,6 +502,10 @@ export default function DashboardPage() {
           ) : null}
         </Card>
       </div>
+
+      {/* Directly under the money, because the answer to "who do I call?"
+          is what the numbers above make you ask. */}
+      <RecentActivity bundles={bundles} days={days} />
 
       <Card tone="raised" className="relative overflow-hidden p-6 text-center sm:p-8">
         <Confetti trigger={confettiTrigger} />
@@ -507,24 +617,6 @@ export default function DashboardPage() {
           )}
         </Card>
 
-        <Card>
-          <SectionHeader title="Recent activity" />
-          {recentActivity.length === 0 ? (
-            <p className="mt-4 text-base text-zinc-600">Activity like sent emails and quote views will appear here.</p>
-          ) : (
-            <ul className="mt-3 space-y-2.5">
-              {recentActivity.map(({ bundle, event }) => (
-                <li key={event.id} className="flex items-baseline justify-between gap-3 text-base">
-                  <span className="text-zinc-700">
-                    <span className="font-semibold text-ink">{customerDisplayName(bundle.customer)}</span>{' '}
-                    — {eventLabel(event.eventType, bundle)}
-                  </span>
-                  <span className="shrink-0 text-sm text-zinc-500">{formatDateTime(event.createdAt)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
       </div>
 
       {bundles.length === 0 ? (
@@ -540,45 +632,4 @@ export default function DashboardPage() {
       ) : null}
     </div>
   )
-}
-
-function eventLabel(eventType: string, bundle: QuoteBundle): string {
-  switch (eventType) {
-    case 'created':
-      return 'quote created'
-    case 'edited':
-      return 'quote edited'
-    case 'email_sent':
-      return 'quote email sent'
-    case 'email_demo_sent':
-      return 'demo email sent'
-    case 'email_failed':
-      return 'email failed'
-    case 'quote_viewed':
-      return 'opened their quote'
-    case 'customer_responded':
-      return 'responded to their quote'
-    case 'appointment_booked':
-      return 'appointment booked'
-    case 'deposit_paid':
-      return 'deposit paid'
-    case 'won_amount_edited':
-      return 'sale amount corrected'
-    case 'win_source_edited':
-      return 'win source updated'
-    case 'marked_won':
-      return `job won${bundle.quote.wonAmountCents ? ` (${formatCurrency(bundle.quote.wonAmountCents)})` : ''}`
-    case 'marked_lost':
-      return 'marked lost'
-    case 'follow_up_rescheduled':
-      return 'follow-up rescheduled'
-    case 'follow_up_disabled':
-      return 'follow-up turned off'
-    case 'email_opt_out':
-      return 'asked to stop emails'
-    case 'marked_contacted':
-      return 'marked contacted'
-    default:
-      return eventType.replaceAll('_', ' ')
-  }
 }

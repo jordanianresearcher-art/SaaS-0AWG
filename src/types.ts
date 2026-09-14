@@ -83,6 +83,13 @@ export type QuoteEventType =
   | 'customer_message'
   /** The shop answered in the quote thread. */
   | 'shop_message'
+  /**
+   * The customer tapped a financing application. Metadata carries `offer`,
+   * the provider's name. Deduped to one per offer per hour server-side, so a
+   * customer comparing two providers reads as two facts and someone bouncing
+   * back to re-read the quote reads as one.
+   */
+  | 'financing_clicked'
 
 /**
  * 'inventory' is a low-privilege, shared-device role: a phone/tablet/PC

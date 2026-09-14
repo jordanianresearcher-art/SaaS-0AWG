@@ -773,6 +773,14 @@ export interface DataRepository {
   getPublicQuoteThread(publicToken: string): Promise<QuoteMessage[]>
   /** The customer writes back. Rate-limited server-side; the token is in a forwardable email. */
   postPublicQuoteMessage(publicToken: string, body: string): Promise<QuoteMessage>
+  /**
+   * The customer tapped a financing application.
+   *
+   * Never throws and never blocks: this fires from an anchor the customer is
+   * already following, so there is no UI that could show them a failure and
+   * nothing they could do about one. Losing the record beats delaying the tap.
+   */
+  recordFinancingClick(publicToken: string, offerName: string): Promise<void>
 
   // ---------------------------------------------------------------------
   // Shared-device inventory access (migration 0017). Joining a shop by

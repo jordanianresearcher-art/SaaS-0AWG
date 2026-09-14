@@ -997,6 +997,26 @@ export class DemoRepository implements DataRepository {
     return counts
   }
 
+  async recordFinancingClick(publicToken: string, offerName: string): Promise<void> {
+    const quote = this.db.quotes.find((q) => q.publicToken === publicToken && q.status !== 'draft')
+    if (!quote) return
+    const offer = offerName.trim().slice(0, 120) || 'Financing'
+    // Mirrors record_financing_click: one per offer per quote per hour, so
+    // somebody comparing two providers is two facts and somebody bouncing
+    // back to re-read the quote is one.
+    const hourAgo = Date.now() - 60 * 60 * 1000
+    const already = this.db.events.some(
+      (e) =>
+        e.quoteId === quote.id &&
+        e.eventType === 'financing_clicked' &&
+        (e.metadata as { offer?: string } | null)?.offer === offer &&
+        new Date(e.createdAt).getTime() > hourAgo,
+    )
+    if (already) return
+    this.addEvent(quote.id, 'financing_clicked', { offer })
+    this.persist()
+  }
+
   async getPublicQuoteThread(publicToken: string): Promise<QuoteMessage[]> {
     const quote = this.db.quotes.find((q) => q.publicToken === publicToken && q.status !== 'draft')
     if (!quote) return []

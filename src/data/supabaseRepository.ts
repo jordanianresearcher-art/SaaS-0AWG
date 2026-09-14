@@ -1805,6 +1805,19 @@ export class SupabaseRepository implements DataRepository {
     return counts
   }
 
+  async recordFinancingClick(publicToken: string, offerName: string): Promise<void> {
+    // Swallowed on purpose — see the interface. The RPC is silent about an
+    // unknown token for the same reason.
+    try {
+      await this.supabase.rpc('record_financing_click', {
+        p_public_token: publicToken,
+        p_offer_name: offerName,
+      })
+    } catch (err) {
+      console.error('record_financing_click failed', err)
+    }
+  }
+
   async getPublicQuoteThread(publicToken: string): Promise<QuoteMessage[]> {
     const { data, error } = await this.supabase.rpc('get_public_quote_thread', { p_public_token: publicToken })
     if (error) throw error
