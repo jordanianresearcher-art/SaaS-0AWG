@@ -18,7 +18,9 @@ import type {
   QuoteMessage,
   QuoteOption,
   QuoteStatus,
+  PublicReviewRequest,
   ResponseType,
+  ReviewRequest,
   ScheduleException,
   Service,
   Shop,
@@ -53,6 +55,7 @@ import { checkSendEligibility } from '../lib/eligibility'
 import { nextFollowUpDateAfterSend } from '../lib/followUp'
 import { computeInvoiceTotals } from '../lib/invoicePricing'
 import { buildSkuBase, nextAvailableSku } from '../lib/sku'
+import { decideReviewGate, normalizeReviewPhone } from '../lib/reviewRequests'
 import { newId } from '../lib/ids'
 import { canonicalizeProductFields } from '../lib/productNaming'
 import { barcodeLookupForms } from '../lib/barcodeIdentity'
@@ -995,6 +998,129 @@ export class DemoRepository implements DataRepository {
       counts[m.quoteId] = (counts[m.quoteId] ?? 0) + 1
     }
     return counts
+  }
+
+  async listReviewRequests(): Promise<ReviewRequest[]> {
+    return [...this.db.reviewRequests]
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map((r) => ({ ...r }))
+  }
+
+  async createReviewRequest(input: {
+    phone: string
+    customerName?: string | null
+    customerId?: string | null
+    invoiceId?: string | null
+  }): Promise<ReviewRequest> {
+    const phone = normalizeReviewPhone(input.phone)
+    if (!phone) throw new Error('That number cannot be texted. Check the digits and try again.')
+    const now = new Date().toISOString()
+    const request: ReviewRequest = {
+      id: newId(),
+      shopId: this.db.shop.id,
+      publicToken: newId(),
+      phone,
+      customerName: input.customerName?.trim() || null,
+      customerId: input.customerId ?? null,
+      invoiceId: input.invoiceId ?? null,
+      createdAt: now,
+      handedToPhoneAt: null,
+      firstOpenedAt: null,
+      openCount: 0,
+      rating: null,
+      ratedAt: null,
+      lastRating: null,
+      ratingAttempts: 0,
+      feedback: null,
+      feedbackAt: null,
+      redirectBlocked: false,
+      redirectedAt: null,
+    }
+    this.db.reviewRequests.push(request)
+    this.persist()
+    return { ...request }
+  }
+
+  async markReviewRequestHandedToPhone(id: string): Promise<void> {
+    const request = this.db.reviewRequests.find((r) => r.id === id)
+    // Only the first hand-off is stamped, so re-texting someone keeps the
+    // moment the ask first left the counter.
+    if (!request || request.handedToPhoneAt) return
+    request.handedToPhoneAt = new Date().toISOString()
+    this.persist()
+  }
+
+  async deleteReviewRequest(id: string): Promise<void> {
+    this.db.reviewRequests = this.db.reviewRequests.filter((r) => r.id !== id)
+    this.persist()
+  }
+
+  async getPublicReviewRequest(publicToken: string): Promise<PublicReviewRequest | null> {
+    const request = this.db.reviewRequests.find((r) => r.publicToken === publicToken)
+    if (!request) return null
+    // Mirrors get_public_review_request: loading the page is the open.
+    request.firstOpenedAt = request.firstOpenedAt ?? new Date().toISOString()
+    request.openCount += 1
+    this.persist()
+    return {
+      shopName: this.db.shop.name,
+      shopLogoUrl: this.db.shop.logoUrl,
+      shopPrimaryColor: this.db.shop.primaryColor,
+      shopPhone: this.db.shop.phone,
+      customerName: request.customerName,
+      rating: request.rating,
+      lastRating: request.lastRating,
+      feedback: request.feedback,
+      redirectBlocked: request.redirectBlocked,
+      gateEnabled: this.db.shop.reviewGateEnabled,
+      // Withheld entirely once blocked — the gate holds in the payload, not
+      // only in the UI.
+      reviewLink: request.redirectBlocked ? null : this.db.shop.reviewLink,
+    }
+  }
+
+  async submitReviewRating(
+    publicToken: string,
+    rating: number,
+  ): Promise<{ redirectTo: string | null; showFeedback: boolean; redirectBlocked: boolean }> {
+    const request = this.db.reviewRequests.find((r) => r.publicToken === publicToken)
+    if (!request) throw new Error('Review request not found')
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) throw new Error('Rating must be 1 to 5')
+
+    const decision = decideReviewGate({
+      rating,
+      alreadyBlocked: request.redirectBlocked,
+      reviewLink: this.db.shop.reviewLink,
+      gateEnabled: this.db.shop.reviewGateEnabled,
+    })
+
+    const now = new Date().toISOString()
+    // The FIRST rating is kept. Someone who rates 2 and comes back to tap 5
+    // has told the shop something, and overwriting it erases the fact.
+    request.rating = request.rating ?? rating
+    request.ratedAt = request.ratedAt ?? now
+    request.lastRating = rating
+    request.ratingAttempts += 1
+    if (decision.locksRedirect) request.redirectBlocked = true
+    if (decision.redirectTo) request.redirectedAt = request.redirectedAt ?? now
+    this.persist()
+
+    return {
+      redirectTo: decision.redirectTo,
+      showFeedback: decision.showFeedback,
+      redirectBlocked: request.redirectBlocked,
+    }
+  }
+
+  async submitReviewFeedback(publicToken: string, feedback: string): Promise<void> {
+    const request = this.db.reviewRequests.find((r) => r.publicToken === publicToken)
+    if (!request) return
+    const body = feedback.trim()
+    // Blank never wipes what they already wrote.
+    if (!body) return
+    request.feedback = body.slice(0, 4000)
+    request.feedbackAt = new Date().toISOString()
+    this.persist()
   }
 
   async recordFinancingClick(publicToken: string, offerName: string): Promise<void> {

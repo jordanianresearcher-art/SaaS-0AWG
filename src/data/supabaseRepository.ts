@@ -6,6 +6,7 @@ import { classifyBarcode } from '../lib/barcodeIdentity'
 import { dedupeSuggestions, searchLocalCatalog } from '../lib/productSearch'
 import { parseFitmentList, type FitmentRange } from '../lib/fitment'
 import { isWinSource } from '../lib/winSource'
+import { normalizeReviewPhone } from '../lib/reviewRequests'
 import type {
   Appointment,
   Bay,
@@ -30,7 +31,9 @@ import type {
   QuoteOption,
   QuoteResponse,
   QuoteStatus,
+  PublicReviewRequest,
   ResponseType,
+  ReviewRequest,
   ScheduleException,
   Service,
   Shop,
@@ -152,6 +155,8 @@ function mapShop(r: Row): Shop {
     quoteExpirationDays: r.quote_expiration_days ?? 30,
     followUpScheduleDays: r.follow_up_schedule_days ?? [2, 3, 5],
     quoteDisclaimer: r.quote_disclaimer ?? '',
+    reviewLink: r.review_link ?? null,
+    reviewGateEnabled: r.review_gate_enabled ?? true,
     defaultLowStockThreshold: r.default_low_stock_threshold ?? 3,
     lowStockAlertEmail: r.low_stock_alert_email ?? null,
     hasStaffAccessCode: r.has_staff_access_code ?? false,
@@ -204,6 +209,30 @@ function mapQuote(r: Row): Quote {
     winSource: isWinSource(r.win_source) ? r.win_source : null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+  }
+}
+
+function mapReviewRequest(r: Row): ReviewRequest {
+  return {
+    id: r.id,
+    shopId: r.shop_id,
+    publicToken: r.public_token,
+    phone: r.phone ?? '',
+    customerName: r.customer_name ?? null,
+    customerId: r.customer_id ?? null,
+    invoiceId: r.invoice_id ?? null,
+    createdAt: r.created_at,
+    handedToPhoneAt: r.handed_to_phone_at ?? null,
+    firstOpenedAt: r.first_opened_at ?? null,
+    openCount: r.open_count ?? 0,
+    rating: r.rating ?? null,
+    ratedAt: r.rated_at ?? null,
+    lastRating: r.last_rating ?? null,
+    ratingAttempts: r.rating_attempts ?? 0,
+    feedback: r.feedback ?? null,
+    feedbackAt: r.feedback_at ?? null,
+    redirectBlocked: r.redirect_blocked === true,
+    redirectedAt: r.redirected_at ?? null,
   }
 }
 
@@ -629,6 +658,8 @@ export class SupabaseRepository implements DataRepository {
     if (patch.quoteExpirationDays !== undefined) row.quote_expiration_days = patch.quoteExpirationDays
     if (patch.followUpScheduleDays !== undefined) row.follow_up_schedule_days = patch.followUpScheduleDays
     if (patch.quoteDisclaimer !== undefined) row.quote_disclaimer = patch.quoteDisclaimer
+    if (patch.reviewLink !== undefined) row.review_link = patch.reviewLink
+    if (patch.reviewGateEnabled !== undefined) row.review_gate_enabled = patch.reviewGateEnabled
     if (patch.defaultLowStockThreshold !== undefined) row.default_low_stock_threshold = patch.defaultLowStockThreshold
     if (patch.lowStockAlertEmail !== undefined) row.low_stock_alert_email = patch.lowStockAlertEmail
     if (patch.bookingDepositCents !== undefined) row.booking_deposit_cents = patch.bookingDepositCents
@@ -1803,6 +1834,88 @@ export class SupabaseRepository implements DataRepository {
       counts[id] = (counts[id] ?? 0) + 1
     }
     return counts
+  }
+
+  async listReviewRequests(): Promise<ReviewRequest[]> {
+    const { data, error } = await this.supabase
+      .from('review_requests')
+      .select('*')
+      .eq('shop_id', this.shopId)
+      .order('created_at', { ascending: false })
+    if (error) throw error
+    return (data ?? []).map(mapReviewRequest)
+  }
+
+  async createReviewRequest(input: {
+    phone: string
+    customerName?: string | null
+    customerId?: string | null
+    invoiceId?: string | null
+  }): Promise<ReviewRequest> {
+    const phone = normalizeReviewPhone(input.phone)
+    if (!phone) throw new Error('That number cannot be texted. Check the digits and try again.')
+    const { data: user } = await this.supabase.auth.getUser()
+    const { data, error } = await this.supabase
+      .from('review_requests')
+      .insert({
+        shop_id: this.shopId,
+        phone,
+        customer_name: input.customerName?.trim() || null,
+        customer_id: input.customerId ?? null,
+        invoice_id: input.invoiceId ?? null,
+        created_by: user.user?.id ?? null,
+      })
+      .select('*')
+      .single()
+    if (error) throw error
+    return mapReviewRequest(data)
+  }
+
+  async markReviewRequestHandedToPhone(id: string): Promise<void> {
+    const { error } = await this.supabase
+      .from('review_requests')
+      // coalesce by only stamping a null one, so re-texting someone keeps the
+      // moment the ask first left the counter.
+      .update({ handed_to_phone_at: new Date().toISOString() })
+      .eq('id', id)
+      .is('handed_to_phone_at', null)
+    if (error) throw error
+  }
+
+  async deleteReviewRequest(id: string): Promise<void> {
+    const { error } = await this.supabase.from('review_requests').delete().eq('id', id)
+    if (error) throw error
+  }
+
+  async getPublicReviewRequest(publicToken: string): Promise<PublicReviewRequest | null> {
+    const { data, error } = await this.supabase.rpc('get_public_review_request', { p_public_token: publicToken })
+    if (error) throw error
+    return (data as PublicReviewRequest | null) ?? null
+  }
+
+  async submitReviewRating(
+    publicToken: string,
+    rating: number,
+  ): Promise<{ redirectTo: string | null; showFeedback: boolean; redirectBlocked: boolean }> {
+    const { data, error } = await this.supabase.rpc('submit_review_rating', {
+      p_public_token: publicToken,
+      p_rating: rating,
+    })
+    if (error) throw error
+    const row = (data ?? {}) as Row
+    return {
+      redirectTo: typeof row.redirectTo === 'string' ? row.redirectTo : null,
+      showFeedback: row.showFeedback !== false,
+      redirectBlocked: row.redirectBlocked === true,
+    }
+  }
+
+  async submitReviewFeedback(publicToken: string, feedback: string): Promise<void> {
+    const { error } = await this.supabase.rpc('submit_review_feedback', {
+      p_public_token: publicToken,
+      p_feedback: feedback,
+    })
+    if (error) throw error
   }
 
   async recordFinancingClick(publicToken: string, offerName: string): Promise<void> {

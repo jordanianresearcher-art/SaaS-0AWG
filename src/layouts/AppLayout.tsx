@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Barcode, Boxes, FileText, CalendarDays, BellRing, Settings, LogOut } from 'lucide-react'
+import { LayoutDashboard, Barcode, Boxes, FileText, CalendarDays, BellRing, Settings, LogOut , Star } from 'lucide-react'
 import { useAppData } from '../data/AppDataContext'
 import { Logo } from '../components/ui'
 import type { ReactNode } from 'react'
@@ -14,6 +14,7 @@ const FULL_NAV = [
   { to: '/app/calendar', label: 'Calendar', icon: CalendarDays, end: false },
   { to: '/app/quotes', label: 'Quotes', icon: FileText, end: false },
   { to: '/app/follow-ups', label: 'Follow-ups', icon: BellRing, end: false },
+  { to: '/app/reviews', label: 'Reviews', icon: Star, end: false },
   { to: '/app/settings', label: 'Settings', icon: Settings, end: false },
 ]
 

@@ -29,7 +29,9 @@ import type {
   QuoteOption,
   QuoteResponse,
   QuoteStatus,
+  PublicReviewRequest,
   ResponseType,
+  ReviewRequest,
   ScheduleException,
   Service,
   ServiceDurationOverride,
@@ -121,6 +123,8 @@ export interface ShopSettingsPatch {
   bookingDepositCents?: number | null
   autoFollowUpEnabled?: boolean
   contributesToGlobalCatalog?: boolean
+  reviewLink?: string | null
+  reviewGateEnabled?: boolean
 }
 
 export interface NewCatalogItemInput {
@@ -781,6 +785,44 @@ export interface DataRepository {
    * nothing they could do about one. Losing the record beats delaying the tap.
    */
   recordFinancingClick(publicToken: string, offerName: string): Promise<void>
+
+  /** Every review ask this shop has sent, newest first. */
+  listReviewRequests(): Promise<ReviewRequest[]>
+  /**
+   * Raise a new ask for a phone number staff typed at the counter.
+   *
+   * No required field but the number: a name is nice and is often not on the
+   * slip of paper.
+   */
+  createReviewRequest(input: {
+    phone: string
+    customerName?: string | null
+    customerId?: string | null
+    invoiceId?: string | null
+  }): Promise<ReviewRequest>
+  /**
+   * Record that staff tapped the text link and their own SMS app opened.
+   *
+   * Deliberately not called "sent". The message is handed to the staff
+   * member's phone and this app never learns whether they pressed send — the
+   * same honesty the rest of the tap-to-text in this product keeps.
+   */
+  markReviewRequestHandedToPhone(id: string): Promise<void>
+  deleteReviewRequest(id: string): Promise<void>
+
+  /** The landing page a texted review link opens. Reading it records the open. */
+  getPublicReviewRequest(publicToken: string): Promise<PublicReviewRequest | null>
+  /**
+   * A star tap, and where it sends them.
+   *
+   * The decision is made server-side because the browser belongs to the
+   * customer. Mirrors decideReviewGate() in src/lib/reviewRequests.ts.
+   */
+  submitReviewRating(
+    publicToken: string,
+    rating: number,
+  ): Promise<{ redirectTo: string | null; showFeedback: boolean; redirectBlocked: boolean }>
+  submitReviewFeedback(publicToken: string, feedback: string): Promise<void>
 
   // ---------------------------------------------------------------------
   // Shared-device inventory access (migration 0017). Joining a shop by

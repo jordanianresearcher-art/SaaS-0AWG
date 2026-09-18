@@ -14,6 +14,7 @@ import type {
   QuoteEvent,
   QuoteMessage,
   QuoteOption,
+  ReviewRequest,
   QuoteResponse,
   ScheduleException,
   Service,
@@ -50,11 +51,12 @@ export interface DemoDB {
   scheduleExceptions: ScheduleException[]
   appointments: Appointment[]
   quoteMessages: QuoteMessage[]
+  reviewRequests: ReviewRequest[]
   /** Bumped when the seed shape changes so stale localStorage is discarded. */
   seedVersion: number
 }
 
-export const DEMO_SEED_VERSION = 19
+export const DEMO_SEED_VERSION = 20
 
 const SHOP_ID = 'demo-shop'
 
@@ -515,6 +517,10 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
     followUpScheduleDays: [2, 3, 5],
     quoteDisclaimer:
       'Final pricing and compatibility may require vehicle inspection. Products and availability are subject to confirmation by the shop.',
+    // A fictional destination — demo mode never sends anyone to a real
+    // business's review page.
+    reviewLink: 'https://example.com/big-tex-audio/review',
+    reviewGateEnabled: true,
     defaultLowStockThreshold: 3,
     lowStockAlertEmail: 'shop@bigtexaudio.example.com',
     hasStaffAccessCode: true,
@@ -1308,6 +1314,46 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
         },
       ]
     })(),
+    // Four asks at four different stages, so the staff screen shows the whole
+    // funnel rather than an empty table: one texted and ignored, one opened
+    // and never rated, one five-star that went to the review link, and one
+    // that rated low, wrote why, and then came back and tapped five — which
+    // is exactly the case the permanent lock exists for.
+    reviewRequests: [
+      {
+        id: 'demo-review-1', shopId: SHOP_ID, publicToken: 'demo-review-token-1',
+        phone: '2145550188', customerName: 'Terrell', customerId: null, invoiceId: null,
+        createdAt: daysAgo(now, 1), handedToPhoneAt: daysAgo(now, 1),
+        firstOpenedAt: null, openCount: 0,
+        rating: null, ratedAt: null, lastRating: null, ratingAttempts: 0,
+        feedback: null, feedbackAt: null, redirectBlocked: false, redirectedAt: null,
+      },
+      {
+        id: 'demo-review-2', shopId: SHOP_ID, publicToken: 'demo-review-token-2',
+        phone: '2145550177', customerName: 'Nia', customerId: null, invoiceId: null,
+        createdAt: daysAgo(now, 2), handedToPhoneAt: daysAgo(now, 2),
+        firstOpenedAt: daysAgo(now, 2), openCount: 2,
+        rating: null, ratedAt: null, lastRating: null, ratingAttempts: 0,
+        feedback: null, feedbackAt: null, redirectBlocked: false, redirectedAt: null,
+      },
+      {
+        id: 'demo-review-3', shopId: SHOP_ID, publicToken: 'demo-review-token-3',
+        phone: '2145550166', customerName: 'Luis', customerId: null, invoiceId: null,
+        createdAt: daysAgo(now, 4), handedToPhoneAt: daysAgo(now, 4),
+        firstOpenedAt: daysAgo(now, 4), openCount: 1,
+        rating: 5, ratedAt: daysAgo(now, 4), lastRating: 5, ratingAttempts: 1,
+        feedback: null, feedbackAt: null, redirectBlocked: false, redirectedAt: daysAgo(now, 4),
+      },
+      {
+        id: 'demo-review-4', shopId: SHOP_ID, publicToken: 'demo-review-token-4',
+        phone: '2145550155', customerName: 'Dana', customerId: null, invoiceId: null,
+        createdAt: daysAgo(now, 6), handedToPhoneAt: daysAgo(now, 6),
+        firstOpenedAt: daysAgo(now, 6), openCount: 3,
+        rating: 2, ratedAt: daysAgo(now, 6), lastRating: 5, ratingAttempts: 3,
+        feedback: 'Install looks great but I waited two hours past my appointment time.',
+        feedbackAt: daysAgo(now, 6), redirectBlocked: true, redirectedAt: null,
+      },
+    ],
     seedVersion: DEMO_SEED_VERSION,
   }
 }

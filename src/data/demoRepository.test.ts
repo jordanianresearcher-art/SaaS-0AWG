@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DemoRepository, DEMO_UNRESOLVED_BARCODE } from './demoRepository'
 import type { NewQuoteInput } from './repository'
 import { buildActivityFeed } from '../lib/activityFeed'
@@ -879,5 +879,166 @@ describe('recording a financing tap', () => {
     await repo.recordFinancingClick(target.quote.publicToken, 'Progressive Leasing')
     const feed = buildActivityFeed(await repo.listQuoteBundles(), { limit: 100 })
     expect(feed.some((i) => i.kind === 'financing_clicked' && i.detail === 'Progressive Leasing')).toBe(true)
+  })
+})
+
+describe('review requests', () => {
+  let repo: DemoRepository
+  beforeEach(() => {
+    repo = new DemoRepository(memoryStorage())
+  })
+
+  const find = async (token: string) => (await repo.listReviewRequests()).find((r) => r.publicToken === token)!
+
+  it('seeds the whole funnel so the screen is never an empty table', async () => {
+    const all = await repo.listReviewRequests()
+    const stages = new Set(all.map((r) => (r.feedback ? 'feedback' : r.rating !== null ? 'rated' : r.firstOpenedAt ? 'opened' : 'sent')))
+    expect(stages).toEqual(new Set(['sent', 'opened', 'rated', 'feedback']))
+  })
+
+  it('takes a number typed off a slip of paper, in any shape', async () => {
+    const created = await repo.createReviewRequest({ phone: '(214) 555-0199', customerName: '  Marcus  ' })
+    expect(created.phone).toBe('2145550199')
+    expect(created.customerName).toBe('Marcus')
+    expect(created.publicToken).toBeTruthy()
+  })
+
+  it('refuses a number that cannot be texted rather than storing a dead link', async () => {
+    await expect(repo.createReviewRequest({ phone: 'call me' })).rejects.toThrow(/cannot be texted/i)
+  })
+
+  it('does not require a name', async () => {
+    const created = await repo.createReviewRequest({ phone: '2145550199' })
+    expect(created.customerName).toBeNull()
+  })
+
+  it('stamps the hand-off once, so re-texting keeps when the ask first went out', async () => {
+    // Fake time, because both calls otherwise land in the same millisecond
+    // and an overwriting implementation would produce an identical string —
+    // the test would pass on a bug.
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-09-18T15:00:00Z'))
+      const created = await repo.createReviewRequest({ phone: '2145550199' })
+      await repo.markReviewRequestHandedToPhone(created.id)
+      const first = (await find(created.publicToken)).handedToPhoneAt
+      expect(first).toBe('2026-09-18T15:00:00.000Z')
+
+      vi.setSystemTime(new Date('2026-09-18T17:30:00Z'))
+      await repo.markReviewRequestHandedToPhone(created.id)
+      expect((await find(created.publicToken)).handedToPhoneAt).toBe(first)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('records the open when the customer loads the page', async () => {
+    const created = await repo.createReviewRequest({ phone: '2145550199' })
+    expect((await find(created.publicToken)).firstOpenedAt).toBeNull()
+
+    await repo.getPublicReviewRequest(created.publicToken)
+    const opened = await find(created.publicToken)
+    expect(opened.firstOpenedAt).toBeTruthy()
+    expect(opened.openCount).toBe(1)
+
+    await repo.getPublicReviewRequest(created.publicToken)
+    const again = await find(created.publicToken)
+    expect(again.openCount).toBe(2)
+    expect(again.firstOpenedAt).toBe(opened.firstOpenedAt)
+  })
+
+  it('sends a five-star customer to the review link', async () => {
+    const created = await repo.createReviewRequest({ phone: '2145550199' })
+    const decision = await repo.submitReviewRating(created.publicToken, 5)
+    expect(decision.redirectTo).toBe('https://example.com/big-tex-audio/review')
+    expect(decision.showFeedback).toBe(false)
+    expect((await find(created.publicToken)).redirectedAt).toBeTruthy()
+  })
+
+  it('keeps four stars and under on the page and asks what went wrong', async () => {
+    for (const rating of [1, 2, 3, 4]) {
+      const created = await repo.createReviewRequest({ phone: '2145550199' })
+      const decision = await repo.submitReviewRating(created.publicToken, rating)
+      expect(decision.redirectTo).toBeNull()
+      expect(decision.showFeedback).toBe(true)
+      expect(decision.redirectBlocked).toBe(true)
+    }
+  })
+
+  it('cancels the redirect permanently, however many times they come back', async () => {
+    // The shop's explicit requirement, and the single most important rule in
+    // this feature.
+    const created = await repo.createReviewRequest({ phone: '2145550199' })
+    await repo.submitReviewRating(created.publicToken, 2)
+    for (let i = 0; i < 5; i += 1) {
+      const retry = await repo.submitReviewRating(created.publicToken, 5)
+      expect(retry.redirectTo).toBeNull()
+      expect(retry.showFeedback).toBe(true)
+    }
+    expect((await find(created.publicToken)).redirectedAt).toBeNull()
+  })
+
+  it('never hands a blocked request the link, even in the page payload', async () => {
+    // The gate has to hold in the data, not just the UI — anyone can read what
+    // the page was given.
+    const created = await repo.createReviewRequest({ phone: '2145550199' })
+    await repo.submitReviewRating(created.publicToken, 1)
+    const payload = await repo.getPublicReviewRequest(created.publicToken)
+    expect(payload!.reviewLink).toBeNull()
+    expect(payload!.redirectBlocked).toBe(true)
+  })
+
+  it('keeps the first rating and still shows the later taps', async () => {
+    const created = await repo.createReviewRequest({ phone: '2145550199' })
+    await repo.submitReviewRating(created.publicToken, 2)
+    await repo.submitReviewRating(created.publicToken, 5)
+    const row = await find(created.publicToken)
+    expect(row.rating).toBe(2)
+    expect(row.lastRating).toBe(5)
+    expect(row.ratingAttempts).toBe(2)
+  })
+
+  it('refuses a rating off the scale', async () => {
+    const created = await repo.createReviewRequest({ phone: '2145550199' })
+    for (const bad of [0, 6, -1, 2.5]) {
+      await expect(repo.submitReviewRating(created.publicToken, bad)).rejects.toThrow(/1 to 5/i)
+    }
+  })
+
+  it('stores feedback, and a blank submission never wipes it', async () => {
+    const created = await repo.createReviewRequest({ phone: '2145550199' })
+    await repo.submitReviewRating(created.publicToken, 2)
+    await repo.submitReviewFeedback(created.publicToken, '  Waited two hours.  ')
+    expect((await find(created.publicToken)).feedback).toBe('Waited two hours.')
+
+    await repo.submitReviewFeedback(created.publicToken, '   ')
+    expect((await find(created.publicToken)).feedback).toBe('Waited two hours.')
+  })
+
+  it('shows everyone the link when the gate is off, and blocks nobody', async () => {
+    await repo.updateShop({ reviewGateEnabled: false })
+    const created = await repo.createReviewRequest({ phone: '2145550199' })
+    const decision = await repo.submitReviewRating(created.publicToken, 1)
+    expect(decision.redirectTo).toBe('https://example.com/big-tex-audio/review')
+    expect(decision.showFeedback).toBe(true)
+    expect((await find(created.publicToken)).redirectBlocked).toBe(false)
+  })
+
+  it('does not lock out a happy customer when no link is set yet', async () => {
+    await repo.updateShop({ reviewLink: null })
+    const created = await repo.createReviewRequest({ phone: '2145550199' })
+    const decision = await repo.submitReviewRating(created.publicToken, 5)
+    expect(decision.redirectTo).toBeNull()
+    expect((await find(created.publicToken)).redirectBlocked).toBe(false)
+  })
+
+  it('returns nothing for an unknown token rather than throwing at a customer', async () => {
+    expect(await repo.getPublicReviewRequest('not-a-real-token')).toBeNull()
+  })
+
+  it('removes a request and its link stops resolving', async () => {
+    const created = await repo.createReviewRequest({ phone: '2145550199' })
+    await repo.deleteReviewRequest(created.id)
+    expect(await repo.getPublicReviewRequest(created.publicToken)).toBeNull()
   })
 })

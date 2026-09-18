@@ -266,6 +266,15 @@ export interface Shop {
   quoteExpirationDays: number
   followUpScheduleDays: number[]
   quoteDisclaimer: string
+  /** Where a happy customer is sent to leave a public review. Null means nobody is redirected. */
+  reviewLink: string | null
+  /**
+   * True routes only five-star ratings to reviewLink and everyone else to a
+   * private feedback form. That is review gating, which Google's review
+   * policies prohibit — see the header of migration 0030. False shows the
+   * link to every rating and still collects the written feedback.
+   */
+  reviewGateEnabled: boolean
   /** Falls back for any catalog item with no lowStockThreshold of its own — see src/lib/inventory.ts's effectiveThreshold. */
   defaultLowStockThreshold: number
   /** Recipient for the low-stock digest; null = alerts off. */
@@ -635,6 +644,53 @@ export interface InventoryDevice {
 }
 
 /** A quote joined with everything the app screens need. */
+/**
+ * One texted review ask.
+ *
+ * `handedToPhoneAt` is named for what it actually is: the moment staff tapped
+ * the link and their own SMS app opened. Nothing here knows whether they
+ * pressed send, so nothing here calls it "sent".
+ */
+export interface ReviewRequest {
+  id: string
+  shopId: string
+  publicToken: string
+  phone: string
+  customerName: string | null
+  customerId: string | null
+  invoiceId: string | null
+  createdAt: string
+  handedToPhoneAt: string | null
+  firstOpenedAt: string | null
+  openCount: number
+  /** The FIRST rating given, kept immutable — a customer who rates 2 then taps 5 has told the shop something. */
+  rating: number | null
+  ratedAt: string | null
+  lastRating: number | null
+  ratingAttempts: number
+  feedback: string | null
+  feedbackAt: string | null
+  /** Once true, never false again: the public link is off for this request for good. */
+  redirectBlocked: boolean
+  redirectedAt: string | null
+}
+
+/** What the anonymous landing page is handed. Carries no phone number and no ids. */
+export interface PublicReviewRequest {
+  shopName: string
+  shopLogoUrl: string | null
+  shopPrimaryColor: string
+  shopPhone: string
+  customerName: string | null
+  rating: number | null
+  lastRating: number | null
+  feedback: string | null
+  redirectBlocked: boolean
+  gateEnabled: boolean
+  /** Withheld entirely once redirectBlocked — the gate holds in the payload, not only in the UI. */
+  reviewLink: string | null
+}
+
 export interface QuoteBundle {
   quote: Quote
   customer: Customer

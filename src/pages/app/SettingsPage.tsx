@@ -40,6 +40,8 @@ const schema = z.object({
       .regex(/^\d+(\s*,\s*\d+)*$/, 'Use numbers separated by commas, like 2, 3, 5'),
     quoteDisclaimer: z.string().min(10, 'A short disclaimer is required'),
     autoFollowUpEnabled: z.boolean(),
+    reviewLink: z.string(),
+    reviewGateEnabled: z.boolean(),
   })
 
 type FormValues = z.infer<typeof schema>
@@ -74,6 +76,8 @@ export default function SettingsPage() {
         quoteExpirationDays: shop.quoteExpirationDays,
         followUpSchedule: shop.followUpScheduleDays.join(', '),
         autoFollowUpEnabled: shop.autoFollowUpEnabled,
+        reviewLink: shop.reviewLink ?? '',
+        reviewGateEnabled: shop.reviewGateEnabled,
         quoteDisclaimer: shop.quoteDisclaimer,
       })
     }
@@ -95,6 +99,8 @@ export default function SettingsPage() {
         quoteExpirationDays: values.quoteExpirationDays,
         followUpScheduleDays: values.followUpSchedule.split(',').map((n) => parseInt(n.trim(), 10)),
         autoFollowUpEnabled: values.autoFollowUpEnabled,
+        reviewLink: values.reviewLink.trim() || null,
+        reviewGateEnabled: values.reviewGateEnabled,
         quoteDisclaimer: values.quoteDisclaimer,
       })
       await refresh()
@@ -174,6 +180,26 @@ export default function SettingsPage() {
               <span className="mt-0.5 block text-sm text-zinc-600">
                 Follow-up emails go out on schedule and stop the moment a customer replies, books, or opts out. Texts
                 are never automatic.
+              </span>
+            </span>
+          </label>
+          <Field
+            label="Where customers leave a public review"
+            htmlFor="s-review-link"
+            hint="Paste your Google review link. Leave it empty and the review page still collects stars and feedback, it just sends nobody anywhere."
+          >
+            <Input id="s-review-link" inputMode="url" placeholder="https://g.page/r/…/review" {...register('reviewLink')} />
+          </Field>
+          {/* Spelled out rather than buried, because switching it on is a
+              decision about the shop's own listing and not a preference. */}
+          <label className="flex items-start gap-3 rounded-xl border border-zinc-200 p-4">
+            <input type="checkbox" className="mt-1 h-5 w-5 shrink-0 accent-brand" {...register('reviewGateEnabled')} />
+            <span>
+              <span className="block text-base font-semibold text-ink">Only send 5-star customers to that link</span>
+              <span className="mt-0.5 block text-sm text-zinc-600">
+                Four stars or fewer gets a private feedback form instead, and that customer never sees the public link
+                again. Google&apos;s review policy prohibits this, and listings caught doing it can have their reviews
+                removed. Turn it off to show the link to everyone and still collect the written feedback.
               </span>
             </span>
           </label>

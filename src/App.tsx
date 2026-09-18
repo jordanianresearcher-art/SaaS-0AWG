@@ -9,6 +9,7 @@ import AuthConfirmPage from './pages/AuthConfirmPage'
 import DemoEntryPage from './pages/DemoEntryPage'
 import JoinPage from './pages/JoinPage'
 import PublicQuotePage from './pages/PublicQuotePage'
+import ReviewPage from './pages/ReviewPage'
 import BookingPage from './pages/BookingPage'
 import BookingManagePage from './pages/BookingManagePage'
 import OnboardingPage from './pages/OnboardingPage'
@@ -21,6 +22,7 @@ import RapidIntakePage from './pages/app/RapidIntakePage'
 import InventoryCheckPage from './pages/app/InventoryCheckPage'
 import LabelPrintPage from './pages/app/LabelPrintPage'
 import QuotesPage from './pages/app/QuotesPage'
+import ReviewsPage from './pages/app/ReviewsPage'
 import NewQuotePage from './pages/app/NewQuotePage'
 import QuoteDetailPage from './pages/app/QuoteDetailPage'
 import FollowUpsPage from './pages/app/FollowUpsPage'
@@ -78,6 +80,7 @@ export default function App() {
       <Route path="/demo" element={<DemoEntryPage />} />
       <Route path="/join" element={<JoinPage />} />
       <Route path="/q/:publicToken" element={<PublicQuotePage />} />
+      <Route path="/r/:publicToken" element={<ReviewPage />} />
       <Route path="/book/:shopSlug" element={<BookingPage />} />
       <Route path="/booking/:publicToken" element={<BookingManagePage />} />
       <Route path="/onboarding" element={<OnboardingPage />} />
@@ -109,6 +112,14 @@ export default function App() {
           element={
             <RequireFullAccess>
               <QuotesPage />
+            </RequireFullAccess>
+          }
+        />
+        <Route
+          path="reviews"
+          element={
+            <RequireFullAccess>
+              <ReviewsPage />
             </RequireFullAccess>
           }
         />
