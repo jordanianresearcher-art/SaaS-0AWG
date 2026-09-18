@@ -14,10 +14,11 @@
 {
   "name": "supercaraudio",
   "compatibility_date": "2025-01-01",
-  // The shop's own Cloudflare account. Not a secret — it is in the address
-  // bar of every page of their dashboard. Replace the placeholder before the
-  // first deploy; the deploy script refuses to run until you do.
-  "account_id": "PASTE_SUPERCARAUDIO_ACCOUNT_ID_HERE",
+  // Super Car Audio's own Cloudflare account. Not a secret — it is in the
+  // address bar of every page of their dashboard, and it can do nothing
+  // without an API token. Deploying here needs your account to be a member of
+  // theirs; see docs/CUSTOM_DOMAINS.md.
+  "account_id": "ab33adc9ae6bd1ab08daba89c38b5c18",
   "assets": {
     "directory": "./dist",
     "not_found_handling": "single-page-application"
