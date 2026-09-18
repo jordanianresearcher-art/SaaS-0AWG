@@ -19,7 +19,7 @@
 // mismatched types.
 
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -56,6 +56,22 @@ function stubRemoteImports(source) {
   return { stripped, decls }
 }
 
+const TSC = resolve(process.cwd(), 'node_modules/.bin/tsc')
+
+// Checked once, up front, because the failure mode otherwise is silent and
+// actively misleading: every function prints a cross with no error under it,
+// the script says "9 Edge Function(s) failed type-checking", and the person
+// reading that goes looking for a bug in code that is fine. It has already
+// cost one person an evening. A missing compiler is a missing compiler, and
+// this says so.
+if (!existsSync(TSC)) {
+  console.error('Cannot find the TypeScript compiler at node_modules/.bin/tsc.')
+  console.error('Nothing is wrong with the Edge Functions — the checker cannot run.')
+  console.error('\n  npm install\n')
+  console.error('Then try again.')
+  process.exit(1)
+}
+
 const dir = mkdtempSync(join(tmpdir(), 'edge-typecheck-'))
 const entries = readdirSync(FUNCTIONS_DIR, { withFileTypes: true }).filter((e) => e.isDirectory())
 
@@ -74,7 +90,7 @@ for (const entry of entries) {
 
   try {
     execFileSync(
-      resolve(process.cwd(), 'node_modules/.bin/tsc'),
+      TSC,
       [
         '--noEmit',
         '--target', 'es2022',
@@ -89,13 +105,16 @@ for (const entry of entries) {
     )
     console.log(`✔ ${entry.name}`)
   } catch (err) {
-    const report = `${err.stdout ?? ''}${err.stderr ?? ''}`
+    const raw = `${err.stdout ?? ''}${err.stderr ?? ''}`
+    const report = raw
       .split('\n')
       // Line numbers refer to the stubbed copy, which is offset by the
       // prelude — say so rather than sending someone to the wrong line.
       .filter((line) => line.includes('error TS'))
       .join('\n')
-    console.error(`✖ ${entry.name}\n${report}`)
+    // Never print a bare cross. If the compiler failed without producing a
+    // TS error, whatever it did say is more useful than silence.
+    console.error(`✖ ${entry.name}\n${report || raw.trim() || err.message || 'tsc failed with no output.'}`)
     failed++
   }
 }
