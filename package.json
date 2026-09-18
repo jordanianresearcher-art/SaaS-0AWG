@@ -12,6 +12,8 @@
     "preview": "vite preview",
     "deploy:web": "npm run build && npx wrangler deploy",
     "deploy:supercaraudio": "npm run build && npx wrangler deploy -c wrangler.supercaraudio.jsonc",
+    "cf:platform": "node scripts/check-deploy-env.mjs && npm run build && npx wrangler deploy",
+    "cf:supercaraudio": "node scripts/check-deploy-env.mjs && npm run build && npx wrangler deploy -c wrangler.supercaraudio.jsonc",
     "deploy:functions": "supabase functions deploy",
     "deploy": "npm run deploy:functions && npm run deploy:web",
     "predeploy:web": "npm install && node scripts/check-deploy-env.mjs",
