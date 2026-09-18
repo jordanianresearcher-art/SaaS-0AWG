@@ -95,9 +95,19 @@ wrangler.supercaraudio.jsonc   Super Car Audio's account
 1. **Connect the repository.** In the client's Cloudflare account: Compute
    (Workers) → **Create** → **Import a repository** → authorize GitHub for
    this repo → pick it → choose the branch the platform deploys from.
-2. **Point the build at their config.** In the build settings:
-   - Build command: `npm run build`
-   - Deploy command: `npx wrangler deploy -c wrangler.<client>.jsonc`
+2. **Point the build at their config.** In the build settings, the **deploy
+   command** alone is enough — it builds and uploads:
+
+   ```
+   npm run deploy:<client>
+   ```
+
+   Leave the build command empty. One field, one value, and the whole recipe
+   lives in package.json where it is version-controlled rather than typed into
+   a dashboard. Splitting it across two dashboard fields is how a worker ends
+   up deploying without ever building: wrangler then fails with "the directory
+   specified by assets.directory does not exist", which names the symptom and
+   not the cause.
 3. **Set the build variables.** `VITE_SUPABASE_URL` and
    `VITE_SUPABASE_ANON_KEY`, the same values the platform build uses. Vite
    bakes these in at build time, so a build without them uploads a site that
