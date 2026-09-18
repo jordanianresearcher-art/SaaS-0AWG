@@ -56,16 +56,23 @@ function stubRemoteImports(source) {
   return { stripped, decls }
 }
 
-const TSC = resolve(process.cwd(), 'node_modules/.bin/tsc')
+/**
+ * The compiler's own JS entry point, run through this Node.
+ *
+ * NOT node_modules/.bin/tsc. On Windows that name is an extensionless shell
+ * script which the OS cannot execute, so execFileSync fails to spawn it —
+ * and the failure arrives with no output, so every function printed a cross
+ * with nothing underneath and the script announced that all nine had failed
+ * type-checking. Nine perfectly good functions, one unportable path. Running
+ * the .js through process.execPath behaves identically on Windows, macOS and
+ * Linux, and needs no shell at all.
+ */
+const TSC = resolve(process.cwd(), 'node_modules/typescript/bin/tsc')
 
-// Checked once, up front, because the failure mode otherwise is silent and
-// actively misleading: every function prints a cross with no error under it,
-// the script says "9 Edge Function(s) failed type-checking", and the person
-// reading that goes looking for a bug in code that is fine. It has already
-// cost one person an evening. A missing compiler is a missing compiler, and
-// this says so.
+// Checked up front, because the alternative failure mode is silent and
+// actively misleading — see above.
 if (!existsSync(TSC)) {
-  console.error('Cannot find the TypeScript compiler at node_modules/.bin/tsc.')
+  console.error('Cannot find the TypeScript compiler at node_modules/typescript/bin/tsc.')
   console.error('Nothing is wrong with the Edge Functions — the checker cannot run.')
   console.error('\n  npm install\n')
   console.error('Then try again.')
@@ -90,8 +97,9 @@ for (const entry of entries) {
 
   try {
     execFileSync(
-      TSC,
+      process.execPath,
       [
+        TSC,
         '--noEmit',
         '--target', 'es2022',
         '--lib', 'es2022,dom',
