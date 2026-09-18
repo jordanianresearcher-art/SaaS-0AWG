@@ -72,6 +72,42 @@ domain is added or changed.
 
 ---
 
+## When the client's domain is in their own Cloudflare account
+
+Cloudflare requires a Worker and the domain it serves to be in the **same
+account**. A shop that keeps its own Cloudflare account therefore needs the
+app uploaded there too.
+
+This is still not a second copy. One repository, one build, and a config file
+per destination that says nothing except where to put it:
+
+```
+wrangler.jsonc                 the platform
+wrangler.supercaraudio.jsonc   Super Car Audio's account
+```
+
+`npm run deploy:web` builds once and uploads that same `dist/` to every one,
+so a fix ships everywhere in a single command and they cannot drift. Adding a
+client is copying one file and changing `name` and `account_id`.
+
+Two setup steps per client, once:
+
+1. **Get access.** In the client's Cloudflare account: Manage Account →
+   Members → Invite your own address as **Administrator**, then accept the
+   invite. One `wrangler login` then covers both accounts.
+2. **Fill in the account id.** It is in the address bar of their dashboard,
+   and in the sidebar under Account ID. Not a secret. Paste it into their
+   config, replacing the placeholder — the deploy script skips any config
+   that still has one rather than failing with an authentication error that
+   points nowhere.
+
+Then add their custom domain to **their** Worker, in **their** account, using
+the steps above.
+
+At roughly ten clients this stops being the right shape and Cloudflare for
+SaaS is — one CNAME from the client and no account access at all. The config
+files are the thing to delete when that day comes.
+
 ## Renaming the repository
 
 Cosmetic, and safe. GitHub → Settings → rename. GitHub keeps redirects from

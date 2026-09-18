@@ -1,0 +1,25 @@
+// Super Car Audio's deployment of the same app.
+//
+// NOT a second copy of the software. There is one repository, one build, and
+// this config only says where to upload it. Every tenant config here is
+// deployed from the same dist/ by scripts/deploy-tenants.mjs, so a change
+// ships everywhere in one command and the copies cannot drift.
+//
+// A separate config exists at all because Cloudflare requires a Worker and
+// the domain it serves to live in the SAME account, and this shop's domain is
+// in their own Cloudflare account rather than the platform's.
+//
+// To add another client later: copy this file, change `name` and
+// `account_id`, and that is the whole job.
+{
+  "name": "supercaraudio",
+  "compatibility_date": "2025-01-01",
+  // The shop's own Cloudflare account. Not a secret — it is in the address
+  // bar of every page of their dashboard. Replace the placeholder before the
+  // first deploy; the deploy script refuses to run until you do.
+  "account_id": "PASTE_SUPERCARAUDIO_ACCOUNT_ID_HERE",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}
