@@ -56,6 +56,20 @@ describe('the gate', () => {
     expect(gated({ rating: 5, reviewLink: `  ${LINK}  ` }).redirectTo).toBe(LINK)
   })
 
+  it('hands back the link byte-for-byte, appending nothing', () => {
+    // The customer should arrive as if they had scanned a QR code: no source
+    // tag, no tracking parameter, no fragment of ours. A link that already
+    // carries a query string arrives with that one and no other.
+    for (const link of [
+      'https://g.page/r/abc/review',
+      'https://search.google.com/local/writereview?placeid=ChIJxyz',
+      'https://example.com/review?utm_source=card&x=1#form',
+      'https://example.com/review/',
+    ]) {
+      expect(gated({ rating: 5, reviewLink: link }).redirectTo).toBe(link)
+    }
+  })
+
   it('shows everyone the link when the gate is switched off, and still takes feedback', () => {
     // The version that does not put the shop's listing at risk.
     for (const rating of [1, 3, 5]) {

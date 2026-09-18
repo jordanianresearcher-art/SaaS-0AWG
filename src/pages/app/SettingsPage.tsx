@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { CreditCard, Download, KeyRound, LayoutGrid, Package, Pencil, Plus, QrCode, RotateCcw, Smartphone, Stethoscope, Trash2 } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { env } from '../../lib/env'
+import { normalizeHost } from '../../lib/tenantDomain'
 import { useToast } from '../../components/Toast'
 import { Button, Card, EmptyState, Field, Input, LoadingBlock, Modal, PageHeader, Select, Textarea } from '../../components/ui'
 import CatalogOrganizer from '../../components/CatalogOrganizer'
@@ -43,6 +44,13 @@ const schema = z.object({
     autoFollowUpEnabled: z.boolean(),
     reviewLink: z.string(),
     reviewGateEnabled: z.boolean(),
+    customDomain: z
+      .string()
+      .trim()
+      .refine(
+        (v) => v === '' || (normalizeHost(v) === v.toLowerCase().trim() && normalizeHost(v).includes('.')),
+        'Just the domain — no https://, no www., no slash. Example: supercaraudio.com',
+      ),
   })
 
 type FormValues = z.infer<typeof schema>
@@ -79,6 +87,7 @@ export default function SettingsPage() {
         autoFollowUpEnabled: shop.autoFollowUpEnabled,
         reviewLink: shop.reviewLink ?? '',
         reviewGateEnabled: shop.reviewGateEnabled,
+        customDomain: shop.customDomain ?? '',
         quoteDisclaimer: shop.quoteDisclaimer,
       })
     }
@@ -102,6 +111,7 @@ export default function SettingsPage() {
         autoFollowUpEnabled: values.autoFollowUpEnabled,
         reviewLink: values.reviewLink.trim() || null,
         reviewGateEnabled: values.reviewGateEnabled,
+        customDomain: normalizeHost(values.customDomain) || null,
         quoteDisclaimer: values.quoteDisclaimer,
       })
       await refresh()
@@ -204,6 +214,16 @@ export default function SettingsPage() {
               </span>
             </span>
           </label>
+          {/* One build serves every domain. Pointing DNS here is the other
+              half — the field alone changes nothing until it does. */}
+          <Field
+            label="Your own web address"
+            htmlFor="s-domain"
+            error={errors.customDomain?.message}
+            hint="Leave empty to stay on the platform address. Setting it puts your shop's name on the login page instead of ours — after you point the domain here in Cloudflare."
+          >
+            <Input id="s-domain" inputMode="url" placeholder="supercaraudio.com" {...register('customDomain')} />
+          </Field>
           <ReviewShortcutRow />
           <Field label="Quote disclaimer" htmlFor="s-disclaimer" error={errors.quoteDisclaimer?.message}>
             <Textarea id="s-disclaimer" rows={3} {...register('quoteDisclaimer')} />

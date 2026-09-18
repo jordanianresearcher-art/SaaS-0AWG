@@ -281,6 +281,12 @@ export interface Shop {
    * copy at once.
    */
   reviewIntakeToken: string
+  /**
+   * The bare hostname this shop is served on (e.g. "supercaraudio.com"), or
+   * null to live on the platform domain. One build serves every domain — see
+   * src/lib/tenantDomain.ts.
+   */
+  customDomain: string | null
   /** Falls back for any catalog item with no lowStockThreshold of its own — see src/lib/inventory.ts's effectiveThreshold. */
   defaultLowStockThreshold: number
   /** Recipient for the low-stock digest; null = alerts off. */

@@ -11,6 +11,7 @@ import JoinPage from './pages/JoinPage'
 import PublicQuotePage from './pages/PublicQuotePage'
 import ReviewPage from './pages/ReviewPage'
 import ReviewIntakePage from './pages/ReviewIntakePage'
+import { TenantProvider, useTenant } from './components/TenantContext'
 import BookingPage from './pages/BookingPage'
 import BookingManagePage from './pages/BookingManagePage'
 import OnboardingPage from './pages/OnboardingPage'
@@ -71,12 +72,29 @@ function RequirePlatformAdmin({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+/**
+ * Renders the platform's own pages only on the platform's own domain.
+ *
+ * A shop's staff arriving at supercaraudio.com should land on their login,
+ * not on a pitch for the software their boss already bought.
+ */
+function PlatformOnly({ children, fallback }: { children: React.ReactNode; fallback: string }) {
+  const { tenant, loading } = useTenant()
+  if (loading) return <div className="min-h-screen bg-zinc-50" />
+  if (tenant) return <Navigate to={fallback} replace />
+  return <>{children}</>
+}
+
 export default function App() {
   return (
+    <TenantProvider>
     <Routes>
-      <Route path="/" element={<LandingPage />} />
+      {/* On a shop's own domain the marketing page and the signup flow are
+          both about selling the software, so the front door is the login
+          instead. One build, many doors — see src/lib/tenantDomain.ts. */}
+      <Route path="/" element={<PlatformOnly fallback="/login"><LandingPage /></PlatformOnly>} />
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/signup" element={<SignupPage />} />
+      <Route path="/signup" element={<PlatformOnly fallback="/login"><SignupPage /></PlatformOnly>} />
       <Route path="/auth/confirm" element={<AuthConfirmPage />} />
       <Route path="/demo" element={<DemoEntryPage />} />
       <Route path="/join" element={<JoinPage />} />
@@ -181,5 +199,6 @@ export default function App() {
       />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </TenantProvider>
   )
 }

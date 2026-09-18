@@ -9,6 +9,34 @@ import type { PublicReviewRequest } from '../types'
 type Phase = 'loading' | 'missing' | 'rating' | 'feedback' | 'thanks' | 'leaving'
 
 /**
+ * Leave for the review site as if the customer had scanned a QR code.
+ *
+ * Three things make that true, and all three are the point:
+ *
+ * 1. The URL is used exactly as the shop stored it. Nothing is appended — no
+ *    tracking parameter, no source tag, no fragment. A review link with a
+ *    query string of its own arrives with that query string and no other.
+ * 2. No referrer. A normal in-page navigation would tell the review site
+ *    which page sent the visitor, which is precisely the fingerprint a
+ *    scanned code does not leave. The meta tag is set immediately before
+ *    navigating so it applies to this one hop.
+ * 3. `replace`, not `assign`. The review page does not go into history, so
+ *    Back from the review site returns to wherever they were, not to a rating
+ *    screen they have already used.
+ */
+function leaveTo(url: string): void {
+  try {
+    const meta = document.createElement('meta')
+    meta.name = 'referrer'
+    meta.content = 'no-referrer'
+    document.head.appendChild(meta)
+  } catch {
+    // A missing head is not a reason to strand the customer.
+  }
+  window.location.replace(url)
+}
+
+/**
  * What a customer sees a few minutes after paying.
  *
  * One question, five targets, nothing above the fold but the stars. A person
@@ -66,10 +94,11 @@ export default function ReviewPage() {
       try {
         const decision = await api.rate(rating)
         if (decision.redirectTo) {
-          // Full navigation, not a new tab: this is the end of the journey and
-          // a popup would be blocked on most phones anyway.
-          setPhase('leaving')
-          window.location.href = decision.redirectTo
+          // Straight out, with nothing said and nothing shown. A happy
+          // customer who has already tapped does not need a page telling them
+          // they tapped; every extra beat here is a chance to close the tab
+          // before the review site loads.
+          leaveTo(decision.redirectTo)
           return
         }
         setPhase(decision.showFeedback ? 'feedback' : 'thanks')
@@ -106,12 +135,6 @@ export default function ReviewPage() {
             <p className="text-xl font-black text-ink">{request.shopName}</p>
           )}
         </div>
-
-        {phase === 'leaving' ? (
-          <Card>
-            <p className="text-center text-lg font-bold text-ink">Thanks! Taking you there now…</p>
-          </Card>
-        ) : null}
 
         {phase === 'rating' ? (
           <Card>

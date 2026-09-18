@@ -7,6 +7,7 @@ import { Logo, Button, Input, Field } from '../components/ui'
 import { getSupabase } from '../data/supabaseClient'
 import { supabaseConfigured, env } from '../lib/env'
 import { useAppData } from '../data/AppDataContext'
+import { useTenant } from '../components/TenantContext'
 
 const schema = z.object({
   email: z.string().email('Enter a valid email address'),
@@ -16,6 +17,7 @@ type FormValues = z.infer<typeof schema>
 
 export default function LoginPage() {
   const { session, mode } = useAppData()
+  const { tenant, loading: tenantLoading } = useTenant()
   const [sent, setSent] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const {
@@ -25,6 +27,9 @@ export default function LoginPage() {
   } = useForm<FormValues>({ resolver: zodResolver(schema) })
 
   if (session || mode === 'demo') return <Navigate to="/app" replace />
+  // Held back one beat so the platform's logo never flashes on a shop's own
+  // domain before the lookup settles.
+  if (tenantLoading) return <div className="min-h-screen bg-zinc-50" />
 
   const onSubmit = async (values: FormValues) => {
     setError(null)
@@ -52,11 +57,22 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-zinc-50 px-4 py-10">
-      <Link to="/" aria-label="0Gauge Recovery home">
-        <Logo className="text-3xl" />
-      </Link>
+      {/* On a shop's own domain the shop's name goes here, not the
+          platform's. Their staff are signing in to their employer, and a
+          product logo they have never heard of reads as the wrong website. */}
+      {tenant ? (
+        tenant.shopLogoUrl ? (
+          <img src={tenant.shopLogoUrl} alt={tenant.shopName} className="max-h-16 max-w-64" />
+        ) : (
+          <p className="text-3xl font-black text-ink">{tenant.shopName}</p>
+        )
+      ) : (
+        <Link to="/" aria-label="0Gauge Recovery home">
+          <Logo className="text-3xl" />
+        </Link>
+      )}
       <div className="mt-8 w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <h1 className="text-2xl font-bold text-ink">Shop login</h1>
+        <h1 className="text-2xl font-bold text-ink">{tenant ? `${tenant.shopName} login` : 'Shop login'}</h1>
         <p className="mt-1 text-base text-zinc-600">
           Enter your email and we&apos;ll send you a sign-in link. No password to remember.
         </p>
@@ -104,13 +120,18 @@ export default function LoginPage() {
           </form>
         )}
       </div>
-      <p className="mt-6 text-base text-zinc-600">
-        New here?{' '}
-        <Link to="/signup" className="font-semibold text-brand underline">
-          Create your shop account
-        </Link>
-      </p>
-      {env.demoModeEnabled ? (
+      {/* Hidden on a shop's domain: "create your shop account" is an offer to
+          buy the software, and it does not belong on the door their own staff
+          walk through. */}
+      {tenant ? null : (
+        <p className="mt-6 text-base text-zinc-600">
+          New here?{' '}
+          <Link to="/signup" className="font-semibold text-brand underline">
+            Create your shop account
+          </Link>
+        </p>
+      )}
+      {env.demoModeEnabled && !tenant ? (
         <p className="mt-2 text-base text-zinc-600">
           Just looking around?{' '}
           <Link to="/demo" className="font-semibold text-brand underline">

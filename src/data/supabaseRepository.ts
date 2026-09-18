@@ -158,6 +158,7 @@ function mapShop(r: Row): Shop {
     reviewLink: r.review_link ?? null,
     reviewGateEnabled: r.review_gate_enabled ?? true,
     reviewIntakeToken: r.review_intake_token ?? '',
+    customDomain: r.custom_domain ?? null,
     defaultLowStockThreshold: r.default_low_stock_threshold ?? 3,
     lowStockAlertEmail: r.low_stock_alert_email ?? null,
     hasStaffAccessCode: r.has_staff_access_code ?? false,
@@ -661,6 +662,7 @@ export class SupabaseRepository implements DataRepository {
     if (patch.quoteDisclaimer !== undefined) row.quote_disclaimer = patch.quoteDisclaimer
     if (patch.reviewLink !== undefined) row.review_link = patch.reviewLink
     if (patch.reviewGateEnabled !== undefined) row.review_gate_enabled = patch.reviewGateEnabled
+    if (patch.customDomain !== undefined) row.custom_domain = patch.customDomain
     if (patch.defaultLowStockThreshold !== undefined) row.default_low_stock_threshold = patch.defaultLowStockThreshold
     if (patch.lowStockAlertEmail !== undefined) row.low_stock_alert_email = patch.lowStockAlertEmail
     if (patch.bookingDepositCents !== undefined) row.booking_deposit_cents = patch.bookingDepositCents

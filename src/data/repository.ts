@@ -125,6 +125,7 @@ export interface ShopSettingsPatch {
   contributesToGlobalCatalog?: boolean
   reviewLink?: string | null
   reviewGateEnabled?: boolean
+  customDomain?: string | null
 }
 
 export interface NewCatalogItemInput {
