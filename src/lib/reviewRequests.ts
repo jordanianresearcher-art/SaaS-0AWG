@@ -169,6 +169,56 @@ export function formatPhoneDisplay(raw: string | null | undefined): string {
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`
 }
 
+export interface FeedbackCopy {
+  heading: string
+  body: string
+  placeholder: string
+  submitLabel: string
+}
+
+/**
+ * What the feedback screen says, by how many stars they gave.
+ *
+ * An apology is only honest below four. A customer who gave four stars was
+ * mostly happy, and opening with "sorry we missed the mark" tells them they
+ * had a worse time than they did — it reads as a script, and a script is what
+ * stops people writing the one sentence the shop actually needs. Four gets
+ * asked what the gap was. Five, which only lands here when the shop has no
+ * review link or the redirect is off, gets thanked and asked for nothing.
+ */
+export function reviewFeedbackCopy(rating: number, shopName: string): FeedbackCopy {
+  if (rating >= MAX_STARS) {
+    return {
+      heading: 'Thanks for the five stars.',
+      body: `Anything you want ${shopName} to know? This goes straight to the owner.`,
+      placeholder: 'Anything at all — or just close this, that is fine too',
+      submitLabel: 'Send it to the owner',
+    }
+  }
+  if (rating === 4) {
+    return {
+      heading: 'How can we make it better?',
+      body: `You were close to happy, and ${shopName} would rather know the gap than guess at it. This goes straight to the owner.`,
+      placeholder: 'What would have made it a five?',
+      submitLabel: 'Send it to the owner',
+    }
+  }
+  if (rating === 3) {
+    return {
+      heading: 'Sorry we missed the mark.',
+      body: `Tell ${shopName} what happened. This goes straight to the owner — it is not posted anywhere.`,
+      placeholder: 'What would have made it better?',
+      submitLabel: 'Send it to the owner',
+    }
+  }
+  return {
+    heading: 'Sorry — we let you down.',
+    body: `Tell ${shopName} what went wrong. This goes straight to the owner — it is not posted anywhere, and they would rather hear it from you.`,
+    placeholder: 'What went wrong?',
+    submitLabel: 'Send it to the owner',
+  }
+}
+
 export interface ReviewSmsContext {
   firstName: string | null
   shopName: string

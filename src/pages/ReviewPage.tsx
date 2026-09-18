@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { Star, Check } from 'lucide-react'
 import { Button, LoadingBlock } from '../components/ui'
 import { resolveReviewApi, type ReviewApi } from '../data/publicReview'
+import { reviewFeedbackCopy } from '../lib/reviewRequests'
 import type { PublicReviewRequest } from '../types'
 
 type Phase = 'loading' | 'missing' | 'rating' | 'feedback' | 'thanks' | 'leaving'
@@ -54,6 +55,7 @@ export default function ReviewPage() {
   }, [publicToken])
 
   const color = request?.shopPrimaryColor || '#1d4ed8'
+  const copy = reviewFeedbackCopy(chosen ?? request?.lastRating ?? request?.rating ?? 1, request?.shopName ?? 'the shop')
 
   const rate = useCallback(
     async (rating: number) => {
@@ -149,12 +151,12 @@ export default function ReviewPage() {
 
         {phase === 'feedback' ? (
           <Card>
-            <h1 className="text-2xl font-black text-ink">Sorry we missed the mark.</h1>
-            <p className="mt-2 text-base text-zinc-600">
-              Tell {request.shopName} what happened. This goes straight to the owner — it is not posted anywhere.
-            </p>
+            {/* The words change with the rating. An apology is only honest
+                below four — see reviewFeedbackCopy. */}
+            <h1 className="text-2xl font-black text-ink">{copy.heading}</h1>
+            <p className="mt-2 text-base text-zinc-600">{copy.body}</p>
             <label htmlFor="review-feedback" className="sr-only">
-              What happened
+              {copy.heading}
             </label>
             <textarea
               id="review-feedback"
@@ -163,7 +165,7 @@ export default function ReviewPage() {
               autoFocus
               value={feedback}
               onChange={(e) => setFeedback(e.target.value)}
-              placeholder="What would have made it a five?"
+              placeholder={copy.placeholder}
               className="mt-4 w-full rounded-xl border-2 border-zinc-200 px-3.5 py-3 text-base text-ink outline-none focus:border-zinc-400"
             />
             <Button
@@ -183,7 +185,7 @@ export default function ReviewPage() {
                 }
               }}
             >
-              {busy ? 'Sending…' : 'Send it to the owner'}
+              {busy ? 'Sending…' : copy.submitLabel}
             </Button>
             <p className="mt-3 text-center text-sm text-zinc-500">
               Or call them directly:{' '}

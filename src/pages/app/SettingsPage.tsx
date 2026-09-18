@@ -4,6 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { CreditCard, Download, KeyRound, LayoutGrid, Package, Pencil, Plus, QrCode, RotateCcw, Smartphone, Stethoscope, Trash2 } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
+import { env } from '../../lib/env'
 import { useToast } from '../../components/Toast'
 import { Button, Card, EmptyState, Field, Input, LoadingBlock, Modal, PageHeader, Select, Textarea } from '../../components/ui'
 import CatalogOrganizer from '../../components/CatalogOrganizer'
@@ -203,6 +204,7 @@ export default function SettingsPage() {
               </span>
             </span>
           </label>
+          <ReviewShortcutRow />
           <Field label="Quote disclaimer" htmlFor="s-disclaimer" error={errors.quoteDisclaimer?.message}>
             <Textarea id="s-disclaimer" rows={3} {...register('quoteDisclaimer')} />
           </Field>
@@ -891,6 +893,74 @@ function FinancingOfferForm({
 type ImportTotals = Pick<ShopifyImportResult, 'created' | 'updated' | 'unchanged' | 'skipped' | 'failed'>
 
 const EMPTY_TOTALS: ImportTotals = { created: 0, updated: 0, unchanged: 0, skipped: 0, failed: 0 }
+
+/**
+ * The no-login shortcut URL, and the button that kills every saved copy of it.
+ *
+ * Sits next to the review settings because that is where someone goes looking
+ * after a phone walks off. Rotating is instant and irreversible for anyone
+ * holding the old link, which is the point.
+ */
+function ReviewShortcutRow() {
+  const { shop, refresh } = useAppData()
+  const repo = useRepo()
+  const toast = useToast()
+  const [rotating, setRotating] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  if (!shop) return null
+  const url = `${env.appUrl}/ask/${shop.reviewIntakeToken}`
+
+  return (
+    <div className="rounded-xl border border-zinc-200 p-4">
+      <p className="text-base font-semibold text-ink">Counter shortcut</p>
+      <p className="mt-0.5 text-sm text-zinc-600">
+        Open this on the shop phone and add it to the home screen. It asks for a number and nothing else — no login.
+        Anyone with the link can raise a review request for your shop, so change it if a phone goes missing.
+      </p>
+      <code className="mt-2 block truncate rounded-lg bg-zinc-100 px-3 py-2 text-sm text-zinc-700">{url}</code>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(url)
+              toast('success', 'Link copied.')
+            } catch {
+              toast('error', 'Could not copy. Long-press the link instead.')
+            }
+          }}
+        >
+          Copy link
+        </Button>
+        <Button
+          type="button"
+          variant={confirming ? 'danger' : 'ghost'}
+          disabled={rotating}
+          onClick={async () => {
+            if (!confirming) {
+              setConfirming(true)
+              return
+            }
+            setRotating(true)
+            try {
+              await repo.rotateReviewIntakeToken()
+              await refresh()
+              toast('success', 'New link made. Every old shortcut has stopped working.')
+            } catch {
+              toast('error', 'Could not change the link.')
+            } finally {
+              setRotating(false)
+              setConfirming(false)
+            }
+          }}
+        >
+          {rotating ? 'Changing…' : confirming ? 'Yes — break every saved shortcut' : 'Change the link'}
+        </Button>
+      </div>
+    </div>
+  )
+}
 
 function ShopifyImportSection({ onImported }: { onImported: () => void }) {
   const repo = useRepo()

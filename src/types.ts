@@ -275,6 +275,12 @@ export interface Shop {
    * link to every rating and still collects the written feedback.
    */
   reviewGateEnabled: boolean
+  /**
+   * Credential in the no-login intake URL (/ask/<token>), for the shortcut
+   * staff keep on a phone home screen. Rotating it invalidates every saved
+   * copy at once.
+   */
+  reviewIntakeToken: string
   /** Falls back for any catalog item with no lowStockThreshold of its own — see src/lib/inventory.ts's effectiveThreshold. */
   defaultLowStockThreshold: number
   /** Recipient for the low-stock digest; null = alerts off. */

@@ -4,6 +4,7 @@ import {
   decideReviewGate,
   formatPhoneDisplay,
   normalizeReviewPhone,
+  reviewFeedbackCopy,
   reviewStage,
   summarizeReviewRequests,
 } from './reviewRequests'
@@ -197,5 +198,53 @@ describe('the text itself', () => {
       reviewUrl: 'https://app.0gauge.com/r/0f8c1d2e-3b4a-5c6d-7e8f-9a0b1c2d3e4f',
     })
     expect(body.length).toBeLessThan(160)
+  })
+})
+
+describe('what the feedback screen says', () => {
+  const copy = (rating: number) => reviewFeedbackCopy(rating, 'Super Car Audio')
+
+  it('apologises at one through three, and only there', () => {
+    for (const rating of [1, 2, 3]) expect(copy(rating).heading.toLowerCase()).toContain('sorry')
+  })
+
+  it('never apologises to a four-star customer', () => {
+    // They were mostly happy. Telling them they had a worse time than they did
+    // reads as a script, and a script is what stops people writing the one
+    // sentence the shop needs.
+    const four = copy(4)
+    const all = `${four.heading} ${four.body} ${four.placeholder}`.toLowerCase()
+    expect(all).not.toContain('sorry')
+    expect(all).not.toContain('missed the mark')
+    expect(all).not.toContain('let you down')
+  })
+
+  it('asks a four-star customer how to make it better', () => {
+    expect(copy(4).heading.toLowerCase()).toContain('better')
+    expect(copy(4).placeholder.toLowerCase()).toContain('five')
+  })
+
+  it('never apologises to a five-star customer either', () => {
+    const five = copy(5)
+    expect(`${five.heading} ${five.body}`.toLowerCase()).not.toContain('sorry')
+    expect(five.heading.toLowerCase()).toContain('thanks')
+  })
+
+  it('names the shop rather than saying "us"', () => {
+    for (const rating of [1, 3, 4, 5]) expect(copy(rating).body).toContain('Super Car Audio')
+  })
+
+  it('always returns every field filled, at any rating', () => {
+    for (const rating of [1, 2, 3, 4, 5]) {
+      const c = copy(rating)
+      for (const value of [c.heading, c.body, c.placeholder, c.submitLabel]) {
+        expect(value.length).toBeGreaterThan(0)
+        expect(value).not.toMatch(/undefined|null|\[object/)
+      }
+    }
+  })
+
+  it('promises the feedback is private wherever it apologises', () => {
+    for (const rating of [1, 2, 3]) expect(copy(rating).body.toLowerCase()).toContain('not posted anywhere')
   })
 })

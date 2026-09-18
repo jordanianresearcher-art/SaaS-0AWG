@@ -159,7 +159,9 @@ never happens.
 - `0030` → `0030_review_requests.sql` (the texted review ask: two columns on
   shops, the review_requests table, and three public-token RPCs). **Applied?
   No.**
-- `0031`+ → reserved, unassigned. Stripe Connect deposits will take the next
+- `0031` → `0031_public_review_intake.sql` (shops.review_intake_token plus the
+  three no-login intake RPCs). **Applied? No.**
+- `0032`+ → reserved, unassigned. Stripe Connect deposits will take the next
   number when that work starts.
 - Stream C needs no migration.
 - Never write a migration number you haven't been assigned.

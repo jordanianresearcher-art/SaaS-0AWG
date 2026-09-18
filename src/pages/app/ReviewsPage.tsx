@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { MessageSquare, Star, Trash2, Eye, Send } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { MessageSquare, Star, Trash2, Eye, Send, Copy, ExternalLink } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { useToast } from '../../components/Toast'
 import { Badge, Button, Card, EmptyState, Field, Input, LoadingBlock, Modal, PageHeader } from '../../components/ui'
@@ -68,6 +69,7 @@ export default function ReviewsPage() {
   )
 
   const reviewUrl = (request: ReviewRequest) => `${env.appUrl}/r/${request.publicToken}`
+  const intakeUrl = `${env.appUrl}/ask/${shop?.reviewIntakeToken ?? ''}`
 
   const textLink = (request: ReviewRequest) =>
     buildSmsLink(
@@ -116,6 +118,42 @@ export default function ReviewsPage() {
         subtitle="Type the number off the slip, tap once, and your own phone sends them the link."
       />
 
+      {/* The two things the owner has to set up, put where they will look for
+          them rather than buried in Settings. */}
+      <Card className="space-y-3">
+        <div>
+          <p className="text-base font-bold text-ink">Put this on your phone&apos;s home screen</p>
+          <p className="mt-1 text-sm text-zinc-600">
+            Opens straight to the number box — no login. Anyone with this link can raise a review request for your
+            shop, so treat it like a key; you can change it in Settings if a phone goes missing.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <code className="min-w-0 flex-1 truncate rounded-xl bg-zinc-100 px-3 py-2.5 text-sm text-zinc-700">
+            {intakeUrl}
+          </code>
+          <Button
+            variant="secondary"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(intakeUrl)
+                toast('success', 'Link copied. Open it on your phone and add it to your home screen.')
+              } catch {
+                toast('error', 'Could not copy. Long-press the link to copy it instead.')
+              }
+            }}
+          >
+            <Copy className="h-5 w-5" aria-hidden="true" /> Copy
+          </Button>
+          <a
+            href={intakeUrl}
+            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-zinc-300 bg-white px-4 text-base font-semibold text-ink hover:bg-zinc-50"
+          >
+            <ExternalLink className="h-5 w-5" aria-hidden="true" /> Open
+          </a>
+        </div>
+      </Card>
+
       {noLink ? (
         <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-4">
           <p className="text-base font-bold text-ink">No review link set yet</p>
@@ -123,6 +161,9 @@ export default function ReviewsPage() {
             Add the link customers should leave a public review on, in Settings. Until then the page still collects
             star ratings and written feedback — it just doesn&apos;t send anyone anywhere.
           </p>
+          <Link to="/app/settings" className="mt-2 inline-block text-base font-bold text-ink underline">
+            Add it in Settings
+          </Link>
         </div>
       ) : null}
 

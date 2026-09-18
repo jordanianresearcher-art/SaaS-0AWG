@@ -157,6 +157,7 @@ function mapShop(r: Row): Shop {
     quoteDisclaimer: r.quote_disclaimer ?? '',
     reviewLink: r.review_link ?? null,
     reviewGateEnabled: r.review_gate_enabled ?? true,
+    reviewIntakeToken: r.review_intake_token ?? '',
     defaultLowStockThreshold: r.default_low_stock_threshold ?? 3,
     lowStockAlertEmail: r.low_stock_alert_email ?? null,
     hasStaffAccessCode: r.has_staff_access_code ?? false,
@@ -1916,6 +1917,12 @@ export class SupabaseRepository implements DataRepository {
       p_feedback: feedback,
     })
     if (error) throw error
+  }
+
+  async rotateReviewIntakeToken(): Promise<string> {
+    const { data, error } = await this.supabase.rpc('rotate_review_intake_token', { p_shop_id: this.shopId })
+    if (error) throw error
+    return String(data ?? '')
   }
 
   async recordFinancingClick(publicToken: string, offerName: string): Promise<void> {

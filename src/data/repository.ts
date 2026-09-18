@@ -823,6 +823,8 @@ export interface DataRepository {
     rating: number,
   ): Promise<{ redirectTo: string | null; showFeedback: boolean; redirectBlocked: boolean }>
   submitReviewFeedback(publicToken: string, feedback: string): Promise<void>
+  /** Invalidates every saved copy of the home-screen shortcut and returns the new one. Owners and managers only. */
+  rotateReviewIntakeToken(): Promise<string>
 
   // ---------------------------------------------------------------------
   // Shared-device inventory access (migration 0017). Joining a shop by

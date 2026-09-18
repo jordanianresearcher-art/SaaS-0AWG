@@ -521,6 +521,7 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
     // business's review page.
     reviewLink: 'https://example.com/big-tex-audio/review',
     reviewGateEnabled: true,
+    reviewIntakeToken: 'demo-intake-token',
     defaultLowStockThreshold: 3,
     lowStockAlertEmail: 'shop@bigtexaudio.example.com',
     hasStaffAccessCode: true,

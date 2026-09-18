@@ -1123,6 +1123,12 @@ export class DemoRepository implements DataRepository {
     this.persist()
   }
 
+  async rotateReviewIntakeToken(): Promise<string> {
+    this.db.shop.reviewIntakeToken = newId()
+    this.persist()
+    return this.db.shop.reviewIntakeToken
+  }
+
   async recordFinancingClick(publicToken: string, offerName: string): Promise<void> {
     const quote = this.db.quotes.find((q) => q.publicToken === publicToken && q.status !== 'draft')
     if (!quote) return

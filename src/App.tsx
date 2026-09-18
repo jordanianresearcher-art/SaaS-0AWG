@@ -10,6 +10,7 @@ import DemoEntryPage from './pages/DemoEntryPage'
 import JoinPage from './pages/JoinPage'
 import PublicQuotePage from './pages/PublicQuotePage'
 import ReviewPage from './pages/ReviewPage'
+import ReviewIntakePage from './pages/ReviewIntakePage'
 import BookingPage from './pages/BookingPage'
 import BookingManagePage from './pages/BookingManagePage'
 import OnboardingPage from './pages/OnboardingPage'
@@ -81,6 +82,7 @@ export default function App() {
       <Route path="/join" element={<JoinPage />} />
       <Route path="/q/:publicToken" element={<PublicQuotePage />} />
       <Route path="/r/:publicToken" element={<ReviewPage />} />
+      <Route path="/ask/:intakeToken" element={<ReviewIntakePage />} />
       <Route path="/book/:shopSlug" element={<BookingPage />} />
       <Route path="/booking/:publicToken" element={<BookingManagePage />} />
       <Route path="/onboarding" element={<OnboardingPage />} />
