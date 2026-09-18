@@ -78,52 +78,48 @@ Cloudflare requires a Worker and the domain it serves to be in the **same
 account**. A shop that keeps its own Cloudflare account therefore needs the
 app deployed there too.
 
-This is still not a second copy. One repository, one branch, one commit. Each
-account watches that repository and builds it for itself, so a push updates
-every shop at once — exactly how the platform already deploys, which is the
-point: there is no second procedure to remember or forget.
-
-Each destination gets a wrangler config that says nothing but where it goes:
-
-```
-wrangler.jsonc                 the platform
-wrangler.supercaraudio.jsonc   Super Car Audio's account
-```
+This is still not a second copy, and there is not a second configuration
+either. `wrangler.jsonc` deliberately carries **no account id**, so it deploys
+to whichever Cloudflare account is running the build. One repository, one
+branch, one config, one command — each account watches the repo and builds it
+for itself, and a push updates every shop at once.
 
 ### Setting up a client's account, once
 
 1. **Connect the repository.** In the client's Cloudflare account: Compute
    (Workers) → **Create** → **Import a repository** → authorize GitHub for
    this repo → pick it → choose the branch the platform deploys from.
-2. **Point the build at their config.** In the build settings, the **deploy
-   command** alone is enough — it builds and uploads:
+2. **Set the deploy command** to exactly:
 
    ```
-   npm run deploy:<client>
+   npm run cf:deploy
    ```
 
-   Leave the build command empty. One field, one value, and the whole recipe
-   lives in package.json where it is version-controlled rather than typed into
-   a dashboard. Splitting it across two dashboard fields is how a worker ends
-   up deploying without ever building: wrangler then fails with "the directory
-   specified by assets.directory does not exist", which names the symptom and
-   not the cause.
+   Leave the build command empty. That one script checks the environment,
+   builds, and uploads, in that order.
+
+   Cloudflare's separate build and deploy fields are a trap worth naming: set
+   only the deploy field to `npx wrangler deploy` and the build never runs, so
+   wrangler fails with "the directory specified by assets.directory does not
+   exist" — which names the symptom and not the cause, and cost this project
+   three build attempts to spot. Keeping the whole recipe in package.json also
+   puts it under version control rather than in a dashboard nobody can review.
 3. **Set the build variables.** `VITE_SUPABASE_URL` and
    `VITE_SUPABASE_ANON_KEY`, the same values the platform build uses. Vite
-   bakes these in at build time, so a build without them uploads a site that
-   greets everyone with "Login isn't set up on this install yet" — the build
-   and the upload both succeed, which is what makes it worth checking.
+   bakes these in at build time, so without them the build and the upload both
+   succeed and the site greets every visitor with "Login isn't set up on this
+   install yet". `cf:deploy` checks for them first and stops rather than let
+   that ship.
 
    Both are public, RLS-protected values. A `service_role` key must never
    appear in a `VITE_` variable.
-4. **Add their domain.** Their Cloudflare → Compute (Workers) → the new worker
-   → Settings → Domains & Routes → Add → Custom domain.
+4. **Add their domain.** Their Cloudflare → Compute (Workers) → the worker →
+   Settings → Domains & Routes → Add → Custom domain.
 
 After that, a push deploys to every account and nobody runs anything by hand.
 
 At roughly ten clients this stops being the right shape and Cloudflare for
-SaaS is — one CNAME from the client, no account access at all. The per-client
-configs are the thing to delete when that day comes.
+SaaS is — one CNAME from the client, no account access at all.
 
 ## Renaming the repository
 
