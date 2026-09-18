@@ -27,7 +27,9 @@ const ENV_FILES = ['.env', '.env.local', '.env.production', '.env.production.loc
 function parseEnvFile(path) {
   const out = {}
   if (!existsSync(path)) return out
-  for (const raw of readFileSync(path, 'utf8').split('\n')) {
+  // Split on either ending: a CRLF checkout would otherwise leave \r on
+  // every value and turn a correct URL into one that does not match.
+  for (const raw of readFileSync(path, 'utf8').split(/\r?\n/)) {
     const line = raw.trim()
     if (!line || line.startsWith('#')) continue
     const eq = line.indexOf('=')

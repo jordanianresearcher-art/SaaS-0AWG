@@ -57,8 +57,11 @@ import skyHighFixture from './__fixtures__/retailerBigCommerceSkyHigh.html?raw'
 function loadMirror(
   tag: string,
   exports: string[],
-  src: string = functionSource,
+  rawSource: string = functionSource,
 ): Record<string, (...args: never[]) => unknown> {
+  // Normalized: the MIRROR-END marker is matched with a trailing newline, and
+  // a Windows checkout with CRLF would find neither region.
+  const src = rawSource.replace(/\r\n/g, '\n')
   // The trailing space matters: indexOf('MIRROR-BEGIN aiJson') also matches
   // 'MIRROR-BEGIN aiJsonSomethingElse', so a renamed marker would silently
   // keep resolving to the old region and this test would pass on nothing.

@@ -42,7 +42,14 @@ declare const Deno: {
 function stubRemoteImports(source) {
   const names = []
   const stripped = source.replace(
-    /import\s+(?:type\s+)?(\{[^}]*\}|[\w*\s,]+?)\s+from\s+['"]https:\/\/[^'"]+['"];?\n/g,
+    // \r? matters: a Windows checkout ends these lines with CRLF, and a
+    // regex anchored on a bare \n matched nothing — so no import was
+    // stripped, tsc tried to resolve a https:// URL as a module, and all
+    // nine functions "failed type-checking" on a machine where the code was
+    // fine. The source is normalized on read as well; this is belt and
+    // braces, because the cost of being wrong here is a blocked deploy and a
+    // misleading error.
+    /import\s+(?:type\s+)?(\{[^}]*\}|[\w*\s,]+?)\s+from\s+['"]https:\/\/[^'"]+['"];?\r?\n/g,
     (_match, clause) => {
       const inner = clause.replace(/[{}]/g, '')
       for (const part of inner.split(',')) {
@@ -87,7 +94,9 @@ for (const entry of entries) {
   const file = join(FUNCTIONS_DIR, entry.name, 'index.ts')
   let source
   try {
-    source = readFileSync(file, 'utf8')
+    // Normalized so nothing downstream has to care which platform checked
+    // this out.
+    source = readFileSync(file, 'utf8').replace(/\r\n/g, '\n')
   } catch {
     continue
   }
