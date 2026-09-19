@@ -168,7 +168,11 @@ never happens.
   links, a link that closes when a star is tapped, and the three public RPCs
   switched from uuid to text so links already in customers' phones keep
   working). **Applied? No.**
-- `0034`+ → reserved, unassigned. Stripe Connect deposits will take the next
+- `0034` → `0034_intake_shop_domain.sql` (the no-login counter shortcut learns
+  the shop's own web address, so a review link it texts says the shop's domain
+  even when the shortcut saved on the phone is the old platform one).
+  **Applied? No.**
+- `0035`+ → reserved, unassigned. Stripe Connect deposits will take the next
   number when that work starts.
 - Stream C needs no migration.
 - Never write a migration number you haven't been assigned.

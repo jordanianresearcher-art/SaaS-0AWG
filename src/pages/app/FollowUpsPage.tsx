@@ -10,7 +10,7 @@ import { WonAmountModal } from '../../components/WonAmountModal'
 import { BUCKET_CONFIG, BUCKET_ORDER, followUpBucket, suggestNextTemplate, type FollowUpBucket } from '../../lib/followUp'
 import { describeAutoFollowUp } from '../../lib/autoFollowUp'
 import { buildQuoteSmsBody, buildSmsLink, type QuoteSmsTemplate } from '../../lib/sms'
-import { env } from '../../lib/env'
+import { publicQuoteUrl } from '../../components/EmailPreviewModal'
 import { STATUS_CONFIG, TEMPLATE_CONFIG } from '../../lib/status'
 import { customerDisplayName, formatCurrency, formatDateTime, formatVehicle, quoteValueCents } from '../../lib/format'
 import type { QuoteBundle, TemplateType } from '../../types'
@@ -107,7 +107,7 @@ export default function FollowUpsPage() {
                       firstName: b.customer.firstName,
                       shopName: shop?.name ?? 'the shop',
                       vehicle: formatVehicle(b.customer),
-                      quoteUrl: `${env.appUrl}/q/${b.quote.publicToken}`,
+                      quoteUrl: publicQuoteUrl(b.quote.publicToken, shop?.customDomain),
                     }),
                   )
                   return (

@@ -79,3 +79,24 @@ export interface TenantBranding {
   shopLogoUrl: string | null
   shopPrimaryColor: string
 }
+
+/**
+ * The address to put on a link a customer will see.
+ *
+ * Staff open this app from whatever bookmark they happen to have. The shop's
+ * own domain is the one the customer should read, and it does not depend on
+ * which door the staff member came through — a review link handed over the
+ * counter has to say the shop's name whether the tablet behind the counter is
+ * on the shop domain or on the platform one.
+ *
+ * So: the shop's stored domain wins, and the current origin is only the
+ * fallback for a shop that has not set one. `fallback` is passed in rather
+ * than read from `env` here so this stays pure and testable.
+ */
+export function publicBaseUrl(customDomain: string | null | undefined, fallback: string): string {
+  const host = normalizeHost(customDomain)
+  // A stored value that is somehow the platform is not a shop address, and
+  // sending a customer there would show them the wrong shop's front door.
+  if (!host || isPlatformHost(host)) return fallback.replace(/\/+$/, '')
+  return `https://${host}`
+}

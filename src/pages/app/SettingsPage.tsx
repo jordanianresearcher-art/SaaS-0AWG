@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { CreditCard, Download, KeyRound, LayoutGrid, Package, Pencil, Plus, QrCode, RotateCcw, Smartphone, Stethoscope, Trash2 } from 'lucide-react'
 import { useAppData, useRepo } from '../../data/AppDataContext'
 import { env } from '../../lib/env'
-import { normalizeHost } from '../../lib/tenantDomain'
+import { normalizeHost, publicBaseUrl } from '../../lib/tenantDomain'
 import { useToast } from '../../components/Toast'
 import { Button, Card, EmptyState, Field, Input, LoadingBlock, Modal, PageHeader, Select, Textarea } from '../../components/ui'
 import CatalogOrganizer from '../../components/CatalogOrganizer'
@@ -928,7 +928,7 @@ function ReviewShortcutRow() {
   const [rotating, setRotating] = useState(false)
   const [confirming, setConfirming] = useState(false)
   if (!shop) return null
-  const url = `${env.appUrl}/ask/${shop.reviewIntakeToken}`
+  const url = `${publicBaseUrl(shop.customDomain, env.appUrl)}/ask/${shop.reviewIntakeToken}`
 
   return (
     <div className="rounded-xl border border-zinc-200 p-4">

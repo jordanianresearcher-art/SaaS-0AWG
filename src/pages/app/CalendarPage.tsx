@@ -26,6 +26,7 @@ import {
 import { BODY_STYLE_INFO, BODY_STYLE_ORDER } from '../../lib/windowTint'
 import { buildBookingConfirmationSmsBody, buildBookingReminderSmsBody, buildSmsLink } from '../../lib/sms'
 import { env } from '../../lib/env'
+import { publicBaseUrl } from '../../lib/tenantDomain'
 import type { Appointment, Bay, BusinessHoursDay, ScheduleException, Service, TintBodyStyle } from '../../types'
 
 /**
@@ -73,6 +74,9 @@ export default function CalendarPage() {
   const repo = useRepo()
   const { shop } = useAppData()
   const toast = useToast()
+  // Booking links go out by text to a customer, so they wear the shop's own
+  // address rather than whichever one the staff member is signed in on.
+  const bookingBase = publicBaseUrl(shop?.customDomain, env.appUrl)
   const [date, setDate] = useState(() => new Date())
   const [bays, setBays] = useState<Bay[] | null>(null)
   const [appointments, setAppointments] = useState<Appointment[] | null>(null)
@@ -196,7 +200,7 @@ export default function CalendarPage() {
             shopName: shop?.name ?? 'the shop',
             serviceName: detail.services.map((s) => s.name).join(', ') || null,
             whenLabel,
-            manageUrl: `${env.appUrl}/booking/${detail.publicToken}`,
+            manageUrl: `${bookingBase}/booking/${detail.publicToken}`,
           }
           const smsLink = buildSmsLink(
             detail.customerPhone,
@@ -984,6 +988,8 @@ function BookedConfirmation({
   shopName: string
   onDone: () => void
 }) {
+  const { shop } = useAppData()
+  const bookingBase = publicBaseUrl(shop?.customDomain, env.appUrl)
   const start = new Date(appointment.startsAt)
   const whenLabel = `${start.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })} at ${formatTime(appointment.startsAt)}`
   const smsLink = appointment.customerPhone
@@ -994,7 +1000,7 @@ function BookedConfirmation({
           shopName,
           serviceName: appointment.services.map((s) => s.name).join(', ') || null,
           whenLabel,
-          manageUrl: `${env.appUrl}/booking/${appointment.publicToken}`,
+          manageUrl: `${bookingBase}/booking/${appointment.publicToken}`,
         }),
       )
     : null

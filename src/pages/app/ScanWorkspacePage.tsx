@@ -561,7 +561,7 @@ export default function ScanWorkspacePage() {
   async function handleCopyQuoteLink() {
     if (!quote) return
     try {
-      await navigator.clipboard.writeText(publicQuoteUrl(quote.quote.publicToken))
+      await navigator.clipboard.writeText(publicQuoteUrl(quote.quote.publicToken, shop?.customDomain))
       toast('success', 'Quote link copied.')
     } catch {
       toast('error', 'Could not copy the link.')

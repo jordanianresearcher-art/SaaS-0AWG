@@ -6,12 +6,22 @@ import { renderEmail } from '../lib/emailTemplates'
 import { checkSendEligibility } from '../lib/eligibility'
 import { TEMPLATE_CONFIG } from '../lib/status'
 import { env } from '../lib/env'
+import { publicBaseUrl } from '../lib/tenantDomain'
 import { Button, Modal, Select } from './ui'
 import { useToast } from './Toast'
 
-export function publicQuoteUrl(publicToken: string): string {
-  const base = typeof window !== 'undefined' ? window.location.origin : env.appUrl
-  return `${base}/q/${publicToken}`
+/**
+ * The quote link a customer will open.
+ *
+ * `customDomain` is the shop's own address. Pass it wherever one is known:
+ * staff copy this link into a text message, and it should read as the shop
+ * the customer just spoke to rather than as the software behind them. Left
+ * out, it falls back to wherever the app is running, which is what a shop
+ * without its own domain wants anyway.
+ */
+export function publicQuoteUrl(publicToken: string, customDomain?: string | null): string {
+  const running = typeof window !== 'undefined' ? window.location.origin : env.appUrl
+  return `${publicBaseUrl(customDomain, running)}/q/${publicToken}`
 }
 
 /**
@@ -47,8 +57,8 @@ export function EmailPreviewModal({
       customer: bundle.customer,
       quote: bundle.quote,
       options: bundle.options,
-      publicUrl: publicQuoteUrl(bundle.quote.publicToken),
-      optOutUrl: `${publicQuoteUrl(bundle.quote.publicToken)}?stop=1`,
+      publicUrl: publicQuoteUrl(bundle.quote.publicToken, shop?.customDomain),
+      optOutUrl: `${publicQuoteUrl(bundle.quote.publicToken, shop?.customDomain)}?stop=1`,
     })
   }, [shop, template, bundle])
 

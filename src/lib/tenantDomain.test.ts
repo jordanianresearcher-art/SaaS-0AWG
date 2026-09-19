@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isPlatformHost, normalizeHost } from './tenantDomain'
+import { isPlatformHost, normalizeHost, publicBaseUrl } from './tenantDomain'
 
 describe('normalizeHost', () => {
   it('reduces every spelling of one front door to the same string', () => {
@@ -71,5 +71,46 @@ describe('isPlatformHost', () => {
   it('does not mistake a domain that merely contains a platform suffix', () => {
     // Endswith, not includes: "pages.dev" inside the name is not the suffix.
     expect(isPlatformHost('pages.dev.supercaraudio.com')).toBe(false)
+  })
+})
+
+describe('publicBaseUrl', () => {
+  const platform = 'https://saas-0awg.pages.dev'
+
+  it('uses the shop\'s own domain wherever the staff member is standing', () => {
+    // The point of the whole thing: a customer reads supercaraudio.com even
+    // though the counter tablet is signed in on the platform address.
+    expect(publicBaseUrl('supercaraudio.com', platform)).toBe('https://supercaraudio.com')
+    expect(publicBaseUrl('app.supercaraudio.com', platform)).toBe('https://app.supercaraudio.com')
+  })
+
+  it('tidies whatever shape the domain was stored in', () => {
+    for (const raw of ['SuperCarAudio.com', 'https://supercaraudio.com/', 'www.supercaraudio.com', ' supercaraudio.com ']) {
+      expect(publicBaseUrl(raw, platform)).toBe('https://supercaraudio.com')
+    }
+  })
+
+  it('falls back to where the app is running for a shop with no domain', () => {
+    expect(publicBaseUrl(null, platform)).toBe(platform)
+    expect(publicBaseUrl('', platform)).toBe(platform)
+    expect(publicBaseUrl(undefined, platform)).toBe(platform)
+  })
+
+  it('never sends a customer to a preview build wearing a shop name', () => {
+    // A stored value that resolves to the platform is not a shop address.
+    expect(publicBaseUrl('localhost', platform)).toBe(platform)
+    expect(publicBaseUrl('deadbeef.pages.dev', platform)).toBe(platform)
+    expect(publicBaseUrl('127.0.0.1', platform)).toBe(platform)
+  })
+
+  it('does not double the slash when the fallback has a trailing one', () => {
+    // These get concatenated with `/r/<code>`, so a stray slash ships a 404.
+    expect(publicBaseUrl(null, 'https://saas-0awg.pages.dev/')).toBe('https://saas-0awg.pages.dev')
+    expect(publicBaseUrl(null, 'https://saas-0awg.pages.dev//')).toBe('https://saas-0awg.pages.dev')
+  })
+
+  it('always returns https for a shop domain', () => {
+    // The stored host carries no scheme, and a review link must not be http.
+    expect(publicBaseUrl('http://supercaraudio.com', platform)).toBe('https://supercaraudio.com')
   })
 })

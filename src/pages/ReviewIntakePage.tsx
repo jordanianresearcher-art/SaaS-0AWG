@@ -6,6 +6,7 @@ import { resolveIntakeApi, type IntakeApi, type IntakeShop } from '../data/publi
 import { buildReviewRequestSmsBody, formatPhoneDisplay } from '../lib/reviewRequests'
 import { buildSmsLink } from '../lib/sms'
 import { env } from '../lib/env'
+import { publicBaseUrl } from '../lib/tenantDomain'
 import { errorMessage } from '../lib/errors'
 import { usePageTitle } from '../lib/usePageTitle'
 
@@ -68,7 +69,10 @@ export default function ReviewIntakePage() {
         buildReviewRequestSmsBody({
           firstName: name.trim() || null,
           shopName: created.shopName || shop?.shopName || 'us',
-          reviewUrl: `${env.appUrl}/r/${created.shortCode}`,
+          // The shop's own domain, not whichever address this shortcut was
+          // opened on — a shortcut saved before the shop had a domain would
+          // otherwise keep texting the platform address to customers.
+          reviewUrl: `${publicBaseUrl(shop?.customDomain, env.appUrl)}/r/${created.shortCode}`,
         }),
       )
       setDone(formatPhoneDisplay(created.phone))

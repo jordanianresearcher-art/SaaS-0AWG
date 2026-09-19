@@ -13,6 +13,7 @@ import {
   type ReviewStage,
 } from '../../lib/reviewRequests'
 import { env } from '../../lib/env'
+import { publicBaseUrl } from '../../lib/tenantDomain'
 import { formatDateTime } from '../../lib/format'
 import { errorMessage } from '../../lib/errors'
 import type { ReviewRequest } from '../../types'
@@ -68,8 +69,11 @@ export default function ReviewsPage() {
     [requests, filter],
   )
 
-  const reviewUrl = (request: ReviewRequest) => `${env.appUrl}/r/${request.shortCode}`
-  const intakeUrl = `${env.appUrl}/ask/${shop?.reviewIntakeToken ?? ''}`
+  // Every link on this page is read by a customer, so it wears the shop's own
+  // domain rather than whichever address the staff member happens to be on.
+  const base = publicBaseUrl(shop?.customDomain, env.appUrl)
+  const reviewUrl = (request: ReviewRequest) => `${base}/r/${request.shortCode}`
+  const intakeUrl = `${base}/ask/${shop?.reviewIntakeToken ?? ''}`
 
   const textLink = (request: ReviewRequest) =>
     buildSmsLink(

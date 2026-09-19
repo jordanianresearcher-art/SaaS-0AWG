@@ -13,6 +13,14 @@ export interface IntakeShop {
   shopName: string
   shopLogoUrl: string | null
   shopPrimaryColor: string
+  /**
+   * The shop's own web address, when it has one.
+   *
+   * Carried so the review link this page texts says the shop's domain even
+   * when the shortcut saved on the phone's home screen is the older platform
+   * address. Public either way — it is on every quote the shop sends.
+   */
+  customDomain: string | null
 }
 
 export interface IntakeApi {
@@ -38,6 +46,7 @@ export async function resolveIntakeApi(token: string): Promise<IntakeApi | null>
           shopName: shop.name,
           shopLogoUrl: shop.logoUrl,
           shopPrimaryColor: shop.primaryColor,
+          customDomain: shop.customDomain,
         }),
         create: async (phone, customerName) => {
           const created = await demo.createReviewRequest({ phone, customerName })
@@ -53,7 +62,16 @@ export async function resolveIntakeApi(token: string): Promise<IntakeApi | null>
       shop: async () => {
         const { data, error } = await supabase.rpc('get_review_intake_shop', { p_intake_token: token })
         if (error) throw error
-        return (data as IntakeShop | null) ?? null
+        if (!data) return null
+        const row = data as Record<string, unknown>
+        return {
+          shopName: String(row.shopName ?? ''),
+          shopLogoUrl: (row.shopLogoUrl as string | null) ?? null,
+          shopPrimaryColor: String(row.shopPrimaryColor ?? '#1d4ed8'),
+          // Absent until migration 0034 is applied, which is a shop with no
+          // domain as far as this page is concerned — the old behaviour.
+          customDomain: (row.customDomain as string | null) ?? null,
+        }
       },
       create: async (phone, customerName) => {
         const { data, error } = await supabase.rpc('create_review_intake_request', {

@@ -47,7 +47,7 @@ import { WonAmountModal } from '../../components/WonAmountModal'
 export default function QuoteDetailPage() {
   const { quoteId } = useParams<{ quoteId: string }>()
   const repo = useRepo()
-  const { refresh } = useAppData()
+  const { refresh, shop } = useAppData()
   const toast = useToast()
   const navigate = useNavigate()
   const location = useLocation()
@@ -125,7 +125,7 @@ export default function QuoteDetailPage() {
   const statusConfig = STATUS_CONFIG[quote.status]
   const lastResponse = responses[0] ?? null
   const suggested = suggestNextTemplate(emails, lastResponse?.responseType ?? null)
-  const publicUrl = publicQuoteUrl(quote.publicToken)
+  const publicUrl = publicQuoteUrl(quote.publicToken, shop?.customDomain)
   const terminal = isTerminal(quote.status)
   const needsFinancingFollowUp = lastResponse?.responseType === 'need_financing' && !terminal
 
