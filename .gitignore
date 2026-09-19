@@ -8,3 +8,6 @@ dist
 .DS_Store
 coverage
 *.tsbuildinfo
+
+# wrangler dev's local state and caches
+.wrangler

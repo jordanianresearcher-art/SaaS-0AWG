@@ -1,8 +1,17 @@
 {
   "name": "saas-0awg",
   "compatibility_date": "2025-01-01",
+  // The Worker exists to rewrite the <title> and the Open Graph tags on the
+  // HTML before a messaging app reads them — see worker/index.ts.
+  "main": "worker/index.ts",
   "assets": {
     "directory": "./dist",
-    "not_found_handling": "single-page-application"
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    // By default a request that matches a file in ./dist is served straight
+    // from the asset store and never reaches the Worker. None of these paths
+    // can ever match a file, so they already fall through — but a customer
+    // link previewing correctly should not depend on that, so say it.
+    "run_worker_first": ["/r/*", "/q/*", "/book/*", "/booking/*", "/ask/*"]
   }
 }
