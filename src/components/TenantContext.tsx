@@ -17,7 +17,12 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false
     void resolveTenant().then((tenant) => {
-      if (!cancelled) setState({ tenant, loading: false })
+      if (cancelled) return
+      setState({ tenant, loading: false })
+      // The browser tab is the one piece of platform branding that survives
+      // everything else: a shop's staff pinning their own software should not
+      // be looking at somebody else's product name in the tab strip all day.
+      if (tenant?.shopName) document.title = tenant.shopName
     })
     return () => {
       cancelled = true

@@ -1048,7 +1048,12 @@ Deno.serve(async (req) => {
     return fail(503, 'Email sending is not configured yet. Ask your administrator to set up Resend.')
   }
 
-  const appUrl = (Deno.env.get('APP_URL') ?? '').replace(/\/$/, '')
+  // A shop served on its own domain gets its own address in its own emails.
+  // APP_URL is one value for the whole platform; custom_domain is per shop,
+  // and a link the customer recognizes is half of why the mail gets opened at
+  // all. Falls back to the platform for any shop that has not set one.
+  const platformUrl = (Deno.env.get('APP_URL') ?? '').replace(/\/$/, '')
+  const appUrl = shop?.custom_domain ? `https://${shop.custom_domain}` : platformUrl
 
   interface OptionRow {
     id: string
