@@ -204,7 +204,7 @@ describe('the text itself', () => {
     const body = buildReviewRequestSmsBody({ firstName: null, shopName: 'Super Car Audio', reviewUrl: 'https://x.co/r/t' })
     expect(body).not.toMatch(/^,/)
     expect(body).not.toMatch(/undefined|null/)
-    expect(body.startsWith('thanks for coming')).toBe(true)
+    expect(body.startsWith('Thanks for coming')).toBe(true)
   })
 
   it('stays short enough to read on a lock screen', () => {
@@ -214,6 +214,41 @@ describe('the text itself', () => {
       reviewUrl: 'https://app.0gauge.com/r/0f8c1d2e-3b4a-5c6d-7e8f-9a0b1c2d3e4f',
     })
     expect(body.length).toBeLessThan(160)
+  })
+
+  it('leaves the link alone on the last line', () => {
+    const url = 'https://app.supercaraudio.com/r/k7m4xqrt'
+    const lines = buildReviewRequestSmsBody({ firstName: 'Marcus', shopName: 'Super Car Audio', reviewUrl: url }).split('\n')
+    // Messaging apps only turn a URL into a tappable preview card when it sits
+    // on its own. The same link at the end of a sentence stays flat text, which
+    // is what the shop was looking at when they asked for this.
+    expect(lines[lines.length - 1]).toBe(url)
+    expect(lines[lines.length - 2]).toBe('')
+  })
+
+  it('breaks the greeting and the question onto separate lines', () => {
+    const lines = buildReviewRequestSmsBody({
+      firstName: 'Marcus',
+      shopName: 'Super Car Audio',
+      reviewUrl: 'https://x.co/r/t',
+    }).split('\n')
+    const spoken = lines.filter((line) => line !== '')
+    // Greeting, question, link — three things to read, never one run-on line.
+    expect(spoken).toHaveLength(3)
+    expect(spoken[0]).toContain('Super Car Audio')
+    expect(spoken[1]).toContain('How did we do?')
+  })
+
+  it('points down at the link rather than trailing off', () => {
+    const body = buildReviewRequestSmsBody({
+      firstName: 'Marcus',
+      shopName: 'Super Car Audio',
+      reviewUrl: 'https://x.co/r/t',
+    })
+    expect(body).toContain('\u2b50')
+    // A finger pointing down is a direction, so it is only right above the link.
+    expect(body.indexOf('\ud83d\udc47')).toBeGreaterThan(-1)
+    expect(body.indexOf('\ud83d\udc47')).toBeLessThan(body.indexOf('https://x.co/r/t'))
   })
 })
 

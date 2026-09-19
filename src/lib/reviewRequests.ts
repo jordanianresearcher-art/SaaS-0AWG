@@ -272,10 +272,25 @@ export interface ReviewSmsContext {
 /**
  * The text the staff member's phone will send.
  *
- * Short on purpose: it is read on a lock screen, from a number the customer
- * recognizes, minutes after they paid. Anything longer reads as marketing.
+ * Shaped for a lock screen, not for a paragraph. The shop watched a customer
+ * receive the old one — a single run-on line ending in a link — and asked for
+ * something a person can parse at a glance.
+ *
+ * The blank line before the URL is the load-bearing part: every messaging app
+ * renders a link on its own line as a tappable target with a preview card,
+ * and a link buried mid-sentence reads as spam. The arrow points at it.
+ *
+ * Emojis push the message into UCS-2 encoding, which shortens an SMS segment
+ * from 160 characters to 70. That costs nothing here: the staff member's own
+ * phone sends it on their own plan, and this app has never paid per segment.
  */
 export function buildReviewRequestSmsBody(ctx: ReviewSmsContext): string {
-  const hello = ctx.firstName?.trim() ? `${ctx.firstName.trim()}, ` : ''
-  return `${hello}thanks for coming to ${ctx.shopName}! How did we do? ${ctx.reviewUrl}`
+  const hello = ctx.firstName?.trim() ? `${ctx.firstName.trim()}, thanks` : 'Thanks'
+  return [
+    `${hello} for coming to ${ctx.shopName}! \u2b50`,
+    '',
+    'How did we do? Tap below \ud83d\udc47',
+    '',
+    ctx.reviewUrl,
+  ].join('\n')
 }
