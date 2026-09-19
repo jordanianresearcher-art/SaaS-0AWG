@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Star, Check } from 'lucide-react'
+import { Star, Check, Phone } from 'lucide-react'
 import { Button, LoadingBlock } from '../components/ui'
 import { resolveReviewApi, type ReviewApi } from '../data/publicReview'
 import { reviewFeedbackCopy } from '../lib/reviewRequests'
 import type { PublicReviewRequest } from '../types'
 
-type Phase = 'loading' | 'missing' | 'rating' | 'feedback' | 'thanks' | 'leaving'
+type Phase = 'loading' | 'missing' | 'rating' | 'feedback' | 'thanks' | 'leaving' | 'closed'
 
 /**
  * Leave for the review site as if the customer had scanned a QR code.
@@ -75,7 +75,9 @@ export default function ReviewPage() {
       }
       setApi(resolved)
       setRequest(data)
-      setPhase('rating')
+      // One question, one answer. A rated link is finished — it still opens,
+      // and it still says thank you, but it never asks again.
+      setPhase(data.closed ? 'closed' : 'rating')
     })()
     return () => {
       cancelled = true
@@ -210,28 +212,39 @@ export default function ReviewPage() {
             >
               {busy ? 'Sending…' : copy.submitLabel}
             </Button>
-            <p className="mt-3 text-center text-sm text-zinc-500">
-              Or call them directly:{' '}
-              <a href={`tel:${request.shopPhone}`} className="font-semibold" style={{ color }}>
-                {request.shopPhone}
-              </a>
-            </p>
+            {/* Deliberately quieter than the submit button. Someone who is
+                unhappy enough to want a person should find this without it
+                competing with the thing that gets the shop a written record. */}
+            <a
+              href={`tel:${request.shopPhone}`}
+              className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-zinc-300 bg-white text-base font-semibold text-zinc-700"
+            >
+              <Phone className="h-4 w-4" aria-hidden="true" /> Rather talk to someone? Call the shop
+            </a>
           </Card>
         ) : null}
 
-        {phase === 'thanks' ? (
+        {phase === 'thanks' || phase === 'closed' ? (
           <Card>
             <div className="flex flex-col items-center text-center">
               <span
-                className="flex h-14 w-14 items-center justify-center rounded-full"
+                className="flex h-16 w-16 items-center justify-center rounded-full"
                 style={{ backgroundColor: `${color}1a`, color }}
               >
-                <Check className="h-7 w-7" aria-hidden="true" />
+                <Check className="h-9 w-9" aria-hidden="true" />
               </span>
-              <h1 className="mt-4 text-2xl font-black text-ink">Thank you.</h1>
-              <p className="mt-2 text-base text-zinc-600">
-                {request.shopName} has it, and someone will read it.
+              {/* The last thing they see, so it is the warmest thing on the
+                  page — and the same whether they left five stars or told the
+                  owner what went wrong. */}
+              <h1 className="mt-5 text-3xl leading-tight font-black text-ink">
+                Thank you for visiting {request.shopName}!
+              </h1>
+              <p className="mt-3 text-lg text-zinc-600">
+                {phase === 'closed'
+                  ? 'You have already answered this one — nothing else needed.'
+                  : 'That went straight to the owner, and someone will read it.'}
               </p>
+              <p className="mt-4 text-base text-zinc-500">We appreciate you.</p>
             </div>
           </Card>
         ) : null}

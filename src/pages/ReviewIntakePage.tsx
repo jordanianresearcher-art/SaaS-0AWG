@@ -66,7 +66,7 @@ export default function ReviewIntakePage() {
         buildReviewRequestSmsBody({
           firstName: name.trim() || null,
           shopName: created.shopName || shop?.shopName || 'us',
-          reviewUrl: `${env.appUrl}/r/${created.publicToken}`,
+          reviewUrl: `${env.appUrl}/r/${created.shortCode}`,
         }),
       )
       setDone(formatPhoneDisplay(created.phone))

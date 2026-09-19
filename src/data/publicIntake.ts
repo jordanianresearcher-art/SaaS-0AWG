@@ -18,7 +18,7 @@ export interface IntakeShop {
 export interface IntakeApi {
   shop(): Promise<IntakeShop | null>
   /** Returns the new request's public token, so the page can build the sms: link without a second round trip. */
-  create(phone: string, customerName: string): Promise<{ publicToken: string; phone: string; shopName: string }>
+  create(phone: string, customerName: string): Promise<{ shortCode: string; phone: string; shopName: string }>
 }
 
 const DEMO_DB_KEY = '0gauge-demo-db'
@@ -42,7 +42,7 @@ export async function resolveIntakeApi(token: string): Promise<IntakeApi | null>
         create: async (phone, customerName) => {
           const created = await demo.createReviewRequest({ phone, customerName })
           await demo.markReviewRequestHandedToPhone(created.id)
-          return { publicToken: created.publicToken, phone: created.phone, shopName: shop.name }
+          return { shortCode: created.shortCode, phone: created.phone, shopName: shop.name }
         },
       }
     }
@@ -64,7 +64,7 @@ export async function resolveIntakeApi(token: string): Promise<IntakeApi | null>
         if (error) throw error
         const row = (data ?? {}) as Record<string, unknown>
         return {
-          publicToken: String(row.publicToken ?? ''),
+          shortCode: String(row.shortCode ?? ''),
           phone: String(row.phone ?? ''),
           shopName: String(row.shopName ?? ''),
         }

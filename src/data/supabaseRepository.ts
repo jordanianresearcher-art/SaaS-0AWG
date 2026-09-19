@@ -219,6 +219,7 @@ function mapReviewRequest(r: Row): ReviewRequest {
     id: r.id,
     shopId: r.shop_id,
     publicToken: r.public_token,
+    shortCode: r.short_code ?? '',
     phone: r.phone ?? '',
     customerName: r.customer_name ?? null,
     customerId: r.customer_id ?? null,
@@ -235,6 +236,7 @@ function mapReviewRequest(r: Row): ReviewRequest {
     feedbackAt: r.feedback_at ?? null,
     redirectBlocked: r.redirect_blocked === true,
     redirectedAt: r.redirected_at ?? null,
+    closedAt: r.closed_at ?? null,
   }
 }
 
@@ -1891,7 +1893,7 @@ export class SupabaseRepository implements DataRepository {
   }
 
   async getPublicReviewRequest(publicToken: string): Promise<PublicReviewRequest | null> {
-    const { data, error } = await this.supabase.rpc('get_public_review_request', { p_public_token: publicToken })
+    const { data, error } = await this.supabase.rpc('get_public_review_request', { p_code: publicToken })
     if (error) throw error
     return (data as PublicReviewRequest | null) ?? null
   }
@@ -1901,7 +1903,7 @@ export class SupabaseRepository implements DataRepository {
     rating: number,
   ): Promise<{ redirectTo: string | null; showFeedback: boolean; redirectBlocked: boolean }> {
     const { data, error } = await this.supabase.rpc('submit_review_rating', {
-      p_public_token: publicToken,
+      p_code: publicToken,
       p_rating: rating,
     })
     if (error) throw error
@@ -1915,7 +1917,7 @@ export class SupabaseRepository implements DataRepository {
 
   async submitReviewFeedback(publicToken: string, feedback: string): Promise<void> {
     const { error } = await this.supabase.rpc('submit_review_feedback', {
-      p_public_token: publicToken,
+      p_code: publicToken,
       p_feedback: feedback,
     })
     if (error) throw error

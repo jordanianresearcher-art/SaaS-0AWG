@@ -164,7 +164,11 @@ never happens.
 - `0032` → `0032_shop_custom_domains.sql` (shops.custom_domain plus the
   anonymous branding lookup that lets one build serve many front doors — see
   `docs/CUSTOM_DOMAINS.md`). **Applied? No.**
-- `0033`+ → reserved, unassigned. Stripe Connect deposits will take the next
+- `0033` → `0033_review_short_codes.sql` (readable eight-character review
+  links, a link that closes when a star is tapped, and the three public RPCs
+  switched from uuid to text so links already in customers' phones keep
+  working). **Applied? No.**
+- `0034`+ → reserved, unassigned. Stripe Connect deposits will take the next
   number when that work starts.
 - Stream C needs no migration.
 - Never write a migration number you haven't been assigned.

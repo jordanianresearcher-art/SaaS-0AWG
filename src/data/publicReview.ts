@@ -39,13 +39,13 @@ export async function resolveReviewApi(token: string): Promise<ReviewApi | null>
     const supabase = getSupabase()
     return {
       get: async () => {
-        const { data, error } = await supabase.rpc('get_public_review_request', { p_public_token: token })
+        const { data, error } = await supabase.rpc('get_public_review_request', { p_code: token })
         if (error) throw error
         return (data as PublicReviewRequest | null) ?? null
       },
       rate: async (rating) => {
         const { data, error } = await supabase.rpc('submit_review_rating', {
-          p_public_token: token,
+          p_code: token,
           p_rating: rating,
         })
         if (error) throw error
@@ -57,7 +57,7 @@ export async function resolveReviewApi(token: string): Promise<ReviewApi | null>
         }
       },
       submitFeedback: async (body) => {
-        const { error } = await supabase.rpc('submit_review_feedback', { p_public_token: token, p_feedback: body })
+        const { error } = await supabase.rpc('submit_review_feedback', { p_code: token, p_feedback: body })
         if (error) throw error
       },
     }

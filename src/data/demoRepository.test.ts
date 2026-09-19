@@ -967,15 +967,49 @@ describe('review requests', () => {
 
   it('cancels the redirect permanently, however many times they come back', async () => {
     // The shop's explicit requirement, and the single most important rule in
-    // this feature.
+    // this feature. Two guards now stand behind it: the link closes on the
+    // first tap, and the block is sticky even if closing were bypassed.
     const created = await repo.createReviewRequest({ phone: '2145550199' })
-    await repo.submitReviewRating(created.publicToken, 2)
+    await repo.submitReviewRating(created.shortCode, 2)
     for (let i = 0; i < 5; i += 1) {
-      const retry = await repo.submitReviewRating(created.publicToken, 5)
+      const retry = await repo.submitReviewRating(created.shortCode, 5)
       expect(retry.redirectTo).toBeNull()
-      expect(retry.showFeedback).toBe(true)
+      expect(retry.redirectBlocked).toBe(true)
     }
     expect((await find(created.publicToken)).redirectedAt).toBeNull()
+  })
+
+  it('closes a link the moment a star is tapped', async () => {
+    const created = await repo.createReviewRequest({ phone: '2145550199' })
+    expect((await find(created.publicToken)).closedAt).toBeNull()
+
+    await repo.submitReviewRating(created.shortCode, 5)
+    expect((await find(created.publicToken)).closedAt).toBeTruthy()
+
+    // A closed link still opens and still says thank you — it just never asks
+    // again, and it stops counting opens.
+    const payload = await repo.getPublicReviewRequest(created.shortCode)
+    expect(payload!.closed).toBe(true)
+    const opens = (await find(created.publicToken)).openCount
+    await repo.getPublicReviewRequest(created.shortCode)
+    expect((await find(created.publicToken)).openCount).toBe(opens)
+  })
+
+  it('resolves by the short code and by a uuid already sitting in someone’s phone', async () => {
+    // Links texted before 0033 carry the uuid, and those customers have done
+    // nothing wrong.
+    const created = await repo.createReviewRequest({ phone: '2145550199' })
+    expect(created.shortCode).toMatch(/^[a-hjkmnp-z2-9]{8}$/)
+    expect(await repo.getPublicReviewRequest(created.shortCode)).not.toBeNull()
+    expect(await repo.getPublicReviewRequest(created.publicToken)).not.toBeNull()
+  })
+
+  it('gives every request its own code', async () => {
+    const codes = new Set<string>()
+    for (let i = 0; i < 40; i += 1) {
+      codes.add((await repo.createReviewRequest({ phone: '2145550199' })).shortCode)
+    }
+    expect(codes.size).toBe(40)
   })
 
   it('never hands a blocked request the link, even in the page payload', async () => {
@@ -988,14 +1022,15 @@ describe('review requests', () => {
     expect(payload!.redirectBlocked).toBe(true)
   })
 
-  it('keeps the first rating and still shows the later taps', async () => {
+  it('keeps the rating they actually gave, and ignores taps after the link closed', async () => {
     const created = await repo.createReviewRequest({ phone: '2145550199' })
-    await repo.submitReviewRating(created.publicToken, 2)
-    await repo.submitReviewRating(created.publicToken, 5)
+    await repo.submitReviewRating(created.shortCode, 2)
+    await repo.submitReviewRating(created.shortCode, 5)
     const row = await find(created.publicToken)
     expect(row.rating).toBe(2)
-    expect(row.lastRating).toBe(5)
-    expect(row.ratingAttempts).toBe(2)
+    // The second tap changes nothing: the link was already finished.
+    expect(row.lastRating).toBe(2)
+    expect(row.ratingAttempts).toBe(1)
   })
 
   it('refuses a rating off the scale', async () => {

@@ -56,7 +56,7 @@ export interface DemoDB {
   seedVersion: number
 }
 
-export const DEMO_SEED_VERSION = 20
+export const DEMO_SEED_VERSION = 21
 
 const SHOP_ID = 'demo-shop'
 
@@ -1323,37 +1323,37 @@ export function buildDemoData(now: Date = new Date()): DemoDB {
     // is exactly the case the permanent lock exists for.
     reviewRequests: [
       {
-        id: 'demo-review-1', shopId: SHOP_ID, publicToken: 'demo-review-token-1',
+        id: 'demo-review-1', shopId: SHOP_ID, publicToken: 'demo-review-token-1', shortCode: 'k7m4xqrt',
         phone: '2145550188', customerName: 'Terrell', customerId: null, invoiceId: null,
         createdAt: daysAgo(now, 1), handedToPhoneAt: daysAgo(now, 1),
         firstOpenedAt: null, openCount: 0,
         rating: null, ratedAt: null, lastRating: null, ratingAttempts: 0,
-        feedback: null, feedbackAt: null, redirectBlocked: false, redirectedAt: null,
+        feedback: null, feedbackAt: null, redirectBlocked: false, redirectedAt: null, closedAt: null,
       },
       {
-        id: 'demo-review-2', shopId: SHOP_ID, publicToken: 'demo-review-token-2',
+        id: 'demo-review-2', shopId: SHOP_ID, publicToken: 'demo-review-token-2', shortCode: 'p3wvb8zn',
         phone: '2145550177', customerName: 'Nia', customerId: null, invoiceId: null,
         createdAt: daysAgo(now, 2), handedToPhoneAt: daysAgo(now, 2),
         firstOpenedAt: daysAgo(now, 2), openCount: 2,
         rating: null, ratedAt: null, lastRating: null, ratingAttempts: 0,
-        feedback: null, feedbackAt: null, redirectBlocked: false, redirectedAt: null,
+        feedback: null, feedbackAt: null, redirectBlocked: false, redirectedAt: null, closedAt: null,
       },
       {
-        id: 'demo-review-3', shopId: SHOP_ID, publicToken: 'demo-review-token-3',
+        id: 'demo-review-3', shopId: SHOP_ID, publicToken: 'demo-review-token-3', shortCode: 'h6dfj2sy',
         phone: '2145550166', customerName: 'Luis', customerId: null, invoiceId: null,
         createdAt: daysAgo(now, 4), handedToPhoneAt: daysAgo(now, 4),
         firstOpenedAt: daysAgo(now, 4), openCount: 1,
         rating: 5, ratedAt: daysAgo(now, 4), lastRating: 5, ratingAttempts: 1,
-        feedback: null, feedbackAt: null, redirectBlocked: false, redirectedAt: daysAgo(now, 4),
+        feedback: null, feedbackAt: null, redirectBlocked: false, redirectedAt: daysAgo(now, 4), closedAt: daysAgo(now, 4),
       },
       {
-        id: 'demo-review-4', shopId: SHOP_ID, publicToken: 'demo-review-token-4',
+        id: 'demo-review-4', shopId: SHOP_ID, publicToken: 'demo-review-token-4', shortCode: 'r9tkc5xa',
         phone: '2145550155', customerName: 'Dana', customerId: null, invoiceId: null,
         createdAt: daysAgo(now, 6), handedToPhoneAt: daysAgo(now, 6),
         firstOpenedAt: daysAgo(now, 6), openCount: 3,
         rating: 2, ratedAt: daysAgo(now, 6), lastRating: 5, ratingAttempts: 3,
         feedback: 'Install looks great but I waited two hours past my appointment time.',
-        feedbackAt: daysAgo(now, 6), redirectBlocked: true, redirectedAt: null,
+        feedbackAt: daysAgo(now, 6), redirectBlocked: true, redirectedAt: null, closedAt: daysAgo(now, 6),
       },
     ],
     seedVersion: DEMO_SEED_VERSION,

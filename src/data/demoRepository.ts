@@ -55,7 +55,7 @@ import { checkSendEligibility } from '../lib/eligibility'
 import { nextFollowUpDateAfterSend } from '../lib/followUp'
 import { computeInvoiceTotals } from '../lib/invoicePricing'
 import { buildSkuBase, nextAvailableSku } from '../lib/sku'
-import { decideReviewGate, normalizeReviewPhone } from '../lib/reviewRequests'
+import { decideReviewGate, nextReviewCode, normalizeReviewPhone } from '../lib/reviewRequests'
 import { newId } from '../lib/ids'
 import { canonicalizeProductFields } from '../lib/productNaming'
 import { barcodeLookupForms } from '../lib/barcodeIdentity'
@@ -1019,6 +1019,7 @@ export class DemoRepository implements DataRepository {
       id: newId(),
       shopId: this.db.shop.id,
       publicToken: newId(),
+      shortCode: nextReviewCode((code) => this.db.reviewRequests.some((r) => r.shortCode === code)),
       phone,
       customerName: input.customerName?.trim() || null,
       customerId: input.customerId ?? null,
@@ -1035,6 +1036,7 @@ export class DemoRepository implements DataRepository {
       feedbackAt: null,
       redirectBlocked: false,
       redirectedAt: null,
+      closedAt: null,
     }
     this.db.reviewRequests.push(request)
     this.persist()
@@ -1055,13 +1057,22 @@ export class DemoRepository implements DataRepository {
     this.persist()
   }
 
+  /** Mirrors find_review_request: the short code, or the uuid already sitting in someone's phone. */
+  private findReviewRequest(code: string) {
+    const needle = code.trim().toLowerCase()
+    return this.db.reviewRequests.find((r) => r.shortCode === needle || r.publicToken === needle)
+  }
+
   async getPublicReviewRequest(publicToken: string): Promise<PublicReviewRequest | null> {
-    const request = this.db.reviewRequests.find((r) => r.publicToken === publicToken)
+    const request = this.findReviewRequest(publicToken)
     if (!request) return null
-    // Mirrors get_public_review_request: loading the page is the open.
-    request.firstOpenedAt = request.firstOpenedAt ?? new Date().toISOString()
-    request.openCount += 1
-    this.persist()
+    // Mirrors get_public_review_request: loading the page is the open, and a
+    // closed link stops counting — the story it was telling is over.
+    if (!request.closedAt) {
+      request.firstOpenedAt = request.firstOpenedAt ?? new Date().toISOString()
+      request.openCount += 1
+      this.persist()
+    }
     return {
       shopName: this.db.shop.name,
       shopLogoUrl: this.db.shop.logoUrl,
@@ -1072,6 +1083,7 @@ export class DemoRepository implements DataRepository {
       lastRating: request.lastRating,
       feedback: request.feedback,
       redirectBlocked: request.redirectBlocked,
+      closed: request.closedAt !== null,
       gateEnabled: this.db.shop.reviewGateEnabled,
       // Withheld entirely once blocked — the gate holds in the payload, not
       // only in the UI.
@@ -1083,9 +1095,14 @@ export class DemoRepository implements DataRepository {
     publicToken: string,
     rating: number,
   ): Promise<{ redirectTo: string | null; showFeedback: boolean; redirectBlocked: boolean }> {
-    const request = this.db.reviewRequests.find((r) => r.publicToken === publicToken)
+    const request = this.findReviewRequest(publicToken)
     if (!request) throw new Error('Review request not found')
     if (!Number.isInteger(rating) || rating < 1 || rating > 5) throw new Error('Rating must be 1 to 5')
+    // One question, one answer. A tapped link is done, and re-tapping cannot
+    // reopen the public review path for someone who already rated low.
+    if (request.closedAt) {
+      return { redirectTo: null, showFeedback: false, redirectBlocked: request.redirectBlocked }
+    }
 
     const decision = decideReviewGate({
       rating,
@@ -1101,6 +1118,7 @@ export class DemoRepository implements DataRepository {
     request.ratedAt = request.ratedAt ?? now
     request.lastRating = rating
     request.ratingAttempts += 1
+    request.closedAt = now
     if (decision.locksRedirect) request.redirectBlocked = true
     if (decision.redirectTo) request.redirectedAt = request.redirectedAt ?? now
     this.persist()
@@ -1113,11 +1131,15 @@ export class DemoRepository implements DataRepository {
   }
 
   async submitReviewFeedback(publicToken: string, feedback: string): Promise<void> {
-    const request = this.db.reviewRequests.find((r) => r.publicToken === publicToken)
+    const request = this.findReviewRequest(publicToken)
     if (!request) return
     const body = feedback.trim()
     // Blank never wipes what they already wrote.
     if (!body) return
+    // Accepted for an hour after the star tap — the session they are still
+    // in. Closing the instant they rate would throw away the sentence the
+    // shop most wants: they tapped two, then started typing.
+    if (request.closedAt && Date.now() - new Date(request.closedAt).getTime() > 60 * 60 * 1000) return
     request.feedback = body.slice(0, 4000)
     request.feedbackAt = new Date().toISOString()
     this.persist()

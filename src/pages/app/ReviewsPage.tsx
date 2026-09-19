@@ -68,7 +68,7 @@ export default function ReviewsPage() {
     [requests, filter],
   )
 
-  const reviewUrl = (request: ReviewRequest) => `${env.appUrl}/r/${request.publicToken}`
+  const reviewUrl = (request: ReviewRequest) => `${env.appUrl}/r/${request.shortCode}`
   const intakeUrl = `${env.appUrl}/ask/${shop?.reviewIntakeToken ?? ''}`
 
   const textLink = (request: ReviewRequest) =>

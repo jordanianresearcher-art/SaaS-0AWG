@@ -219,6 +219,50 @@ export function reviewFeedbackCopy(rating: number, shopName: string): FeedbackCo
   }
 }
 
+/**
+ * Alphabet for the texted link's code. No i, l, o, 0 or 1, because this gets
+ * read aloud across a counter and typed by hand when a text does not arrive.
+ * Mirrors gen_review_code in migration 0033.
+ */
+export const REVIEW_CODE_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789'
+
+/** Eight characters over 31 symbols — about 850 billion codes. */
+export const REVIEW_CODE_LENGTH = 8
+
+/**
+ * A code nobody is using yet.
+ *
+ * `isTaken` and `random` are injected so the collision path can actually be
+ * tested; a generator that only ever collides by chance is a guard nobody has
+ * ever seen run. After enough collisions it lengthens the code rather than
+ * looping forever — a retry loop against a stuck random source never
+ * terminates, and "astronomically unlikely" is not the same as impossible.
+ *
+ * The database's unique index is the real guarantee (migration 0033). This
+ * keeps demo mode honest and keeps the two from disagreeing.
+ */
+export function nextReviewCode(
+  isTaken: (code: string) => boolean,
+  random: () => number = Math.random,
+  length: number = REVIEW_CODE_LENGTH,
+): string {
+  const draw = (n: number): string => {
+    let code = ''
+    for (let i = 0; i < n; i += 1) {
+      code += REVIEW_CODE_ALPHABET[Math.floor(random() * REVIEW_CODE_ALPHABET.length)]
+    }
+    return code
+  }
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    const code = draw(length)
+    if (!isTaken(code)) return code
+  }
+  for (let extra = 1; ; extra += 1) {
+    const code = draw(length + extra * 4)
+    if (!isTaken(code)) return code
+  }
+}
+
 export interface ReviewSmsContext {
   firstName: string | null
   shopName: string

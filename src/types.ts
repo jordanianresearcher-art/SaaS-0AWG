@@ -667,6 +667,8 @@ export interface ReviewRequest {
   id: string
   shopId: string
   publicToken: string
+  /** What the texted link carries: eight readable characters, no i/l/o/0/1. */
+  shortCode: string
   phone: string
   customerName: string | null
   customerId: string | null
@@ -685,6 +687,8 @@ export interface ReviewRequest {
   /** Once true, never false again: the public link is off for this request for good. */
   redirectBlocked: boolean
   redirectedAt: string | null
+  /** When a star was tapped. A closed link says thank you and nothing else. */
+  closedAt: string | null
 }
 
 /** What the anonymous landing page is handed. Carries no phone number and no ids. */
@@ -698,6 +702,8 @@ export interface PublicReviewRequest {
   lastRating: number | null
   feedback: string | null
   redirectBlocked: boolean
+  /** Already rated. The page shows a thank-you rather than the stars again. */
+  closed: boolean
   gateEnabled: boolean
   /** Withheld entirely once redirectBlocked — the gate holds in the payload, not only in the UI. */
   reviewLink: string | null

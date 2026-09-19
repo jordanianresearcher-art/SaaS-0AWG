@@ -3,7 +3,9 @@ import {
   buildReviewRequestSmsBody,
   decideReviewGate,
   formatPhoneDisplay,
+  nextReviewCode,
   normalizeReviewPhone,
+  REVIEW_CODE_ALPHABET,
   reviewFeedbackCopy,
   reviewStage,
   summarizeReviewRequests,
@@ -260,5 +262,56 @@ describe('what the feedback screen says', () => {
 
   it('promises the feedback is private wherever it apologises', () => {
     for (const rating of [1, 2, 3]) expect(copy(rating).body.toLowerCase()).toContain('not posted anywhere')
+  })
+})
+
+describe('the texted link code', () => {
+  it('is eight readable characters, with nothing a person misreads', () => {
+    const code = nextReviewCode(() => false)
+    expect(code).toHaveLength(8)
+    expect(code).toMatch(/^[a-hjkmnp-z2-9]{8}$/)
+    // The whole point of the alphabet: these four are the ones that get
+    // mistaken for each other when a code is read aloud or typed by hand.
+    for (const ambiguous of ['i', 'l', 'o', '0', '1']) {
+      expect(REVIEW_CODE_ALPHABET).not.toContain(ambiguous)
+    }
+  })
+
+  it('never hands back a code already in use', () => {
+    // A fixed random source makes every draw identical, which is the
+    // collision case a chance-based test would essentially never reach.
+    const constant = () => 0.5
+    const first = nextReviewCode(() => false, constant)
+    const second = nextReviewCode((code) => code === first, constant)
+    expect(second).not.toBe(first)
+  })
+
+  it('terminates against a random source that only ever collides', () => {
+    // A plain retry loop would spin forever here. It lengthens instead.
+    const constant = () => 0.5
+    const taken = new Set([nextReviewCode(() => false, constant)])
+    for (let i = 0; i < 3; i += 1) {
+      const code = nextReviewCode((c) => taken.has(c), constant)
+      expect(taken.has(code)).toBe(false)
+      expect(code.length).toBeGreaterThan(8)
+      taken.add(code)
+    }
+  })
+
+  it('produces distinct codes from a real random source', () => {
+    const seen = new Set<string>()
+    for (let i = 0; i < 500; i += 1) seen.add(nextReviewCode((c) => seen.has(c)))
+    expect(seen.size).toBe(500)
+  })
+
+  it('is short enough to sit on one line of a text message', () => {
+    const body = buildReviewRequestSmsBody({
+      firstName: 'Sebawe',
+      shopName: 'Super Car Audio',
+      reviewUrl: `https://app.supercaraudio.com/r/${nextReviewCode(() => false)}`,
+    })
+    // The link that prompted this change was 36 characters of hex and wrapped
+    // across four lines, reading like a phishing attempt.
+    expect(body.length).toBeLessThan(120)
   })
 })
