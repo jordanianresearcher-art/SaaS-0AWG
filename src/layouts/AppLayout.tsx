@@ -1,3 +1,5 @@
+import { useTenant } from '../components/TenantContext'
+import { usePageTitle } from '../lib/usePageTitle'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { LayoutDashboard, Barcode, Boxes, FileText, CalendarDays, BellRing, Settings, LogOut , Star } from 'lucide-react'
 import { useAppData } from '../data/AppDataContext'
@@ -69,6 +71,11 @@ function DemoBanner(): ReactNode {
 }
 
 export function AppLayout() {
+  // Staff pinning their own software should not look at somebody else's
+  // product name in the tab strip all day.
+  const { tenant } = useTenant()
+  usePageTitle(tenant?.shopName ?? null)
+
   const { shop, mode, role, signOut } = useAppData()
   const navigate = useNavigate()
 

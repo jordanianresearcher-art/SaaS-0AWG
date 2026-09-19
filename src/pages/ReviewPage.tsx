@@ -4,6 +4,7 @@ import { Star, Check, Phone } from 'lucide-react'
 import { Button, LoadingBlock } from '../components/ui'
 import { resolveReviewApi, type ReviewApi } from '../data/publicReview'
 import { reviewFeedbackCopy } from '../lib/reviewRequests'
+import { usePageTitle } from '../lib/usePageTitle'
 import type { PublicReviewRequest } from '../types'
 
 type Phase = 'loading' | 'missing' | 'rating' | 'feedback' | 'thanks' | 'leaving' | 'closed'
@@ -85,6 +86,8 @@ export default function ReviewPage() {
   }, [publicToken])
 
   const color = request?.shopPrimaryColor || '#1d4ed8'
+  // What a customer sees in the tab, and in a screenshot they send someone.
+  usePageTitle(request ? `Leave ${request.shopName} a review` : 'Leave a review')
   const copy = reviewFeedbackCopy(chosen ?? request?.lastRating ?? request?.rating ?? 1, request?.shopName ?? 'the shop')
 
   const rate = useCallback(

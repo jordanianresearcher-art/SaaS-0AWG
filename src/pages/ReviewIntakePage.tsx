@@ -7,6 +7,7 @@ import { buildReviewRequestSmsBody, formatPhoneDisplay } from '../lib/reviewRequ
 import { buildSmsLink } from '../lib/sms'
 import { env } from '../lib/env'
 import { errorMessage } from '../lib/errors'
+import { usePageTitle } from '../lib/usePageTitle'
 
 /**
  * The home-screen shortcut: type a number, tap once, done.
@@ -54,6 +55,7 @@ export default function ReviewIntakePage() {
   }, [intakeToken])
 
   const color = shop?.shopPrimaryColor || '#1d4ed8'
+  usePageTitle(shop ? `Ask for a review · ${shop.shopName}` : 'Ask for a review')
 
   const submit = useCallback(async () => {
     if (!api || busy || phone.trim() === '') return

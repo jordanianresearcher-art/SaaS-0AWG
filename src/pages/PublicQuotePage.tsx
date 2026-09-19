@@ -10,6 +10,7 @@ import { summarizeWindowTint } from '../lib/windowTint'
 import { addonOptions, computeAddonBreakdown, fullTotalCents, mainOption } from '../lib/quotePricing'
 import { Button, LoadingBlock } from '../components/ui'
 import { QuoteChat } from '../components/QuoteChat'
+import { usePageTitle } from '../lib/usePageTitle'
 
 /** A row of small product thumbnails/names — no per-item price (see docs/QUOTE_TRACKING.md's email section: the shop wants the customer to see pictures of what they're getting without a line-by-line price breakdown, just the option total). */
 function ItemPreviewList({ items }: { items: PublicQuote['options'][number]['items'] }) {
@@ -56,6 +57,7 @@ export default function PublicQuotePage() {
   const [submitted, setSubmitted] = useState<ResponseType | null>(null)
   const [optedOut, setOptedOut] = useState(false)
   const [thread, setThread] = useState<QuoteMessage[]>([])
+  usePageTitle(quote ? `Your quote from ${quote.shopName}` : 'Your quote')
   const wantsStop = searchParams.get('stop') === '1'
   // Only present on a real emailed link (embedded server-side in
   // send-quote-email) — the bare link staff use for "Open quote"/"Copy
